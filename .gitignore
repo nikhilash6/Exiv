@@ -34,3 +34,4 @@ MANIFEST
 .venv
 env/
 venv/
+note.md
