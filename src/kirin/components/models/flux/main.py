@@ -10,8 +10,6 @@ def main(
     prompt: str = DEFAULT_T2I_PROMPT,
     num_steps: int | None = None,
     guidance: float = 2.5,
-    offload: bool = False,
-    output_file_path: str = "output",
     add_sampling_metadata: bool = True,
 ):
     prompt = prompt.split("|")

@@ -29,7 +29,7 @@ class TextEncoder:
         )
 
 
-class SDClipL(TextEncoder):
+class SD_ClipL(TextEncoder):
     def __init__(self, max_length: int = 77, torch_dtype = torch.bfloat16):
         '''
         vit - vision transformer
