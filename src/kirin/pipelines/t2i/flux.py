@@ -1,5 +1,5 @@
 from ..base import Pipeline
-from ...components.text_encoders.text_encoders import Flux_Schnell_T5, SD_ClipL
+from ...components.text_encoders import Flux_Schnell_T5, SD_ClipL
 from ...components.vae.noise_generator import LatentNoiseGenerator
 from ...client.input_bindings import InputField, OutputField, FieldType, ActionButton
 

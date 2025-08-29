@@ -1,9 +1,9 @@
 import torch
 
-from ..base import ComponentMixin
+from ...utils.model_utils import ModelMixin
 
 
-class LatentNoiseGenerator(ComponentMixin):
+class LatentNoiseGenerator(ModelMixin):
     def __init__(self, device, dtype):
         super().__init__(device, dtype)
     
