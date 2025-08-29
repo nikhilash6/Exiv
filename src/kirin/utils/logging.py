@@ -1,0 +1,37 @@
+import logging
+import colorlog
+from ..constants import LOGGING_ENABLED
+
+class AppLogger(logging.Logger):
+    def __init__(self, name="app_logger", log_file=None, log_level=logging.DEBUG):
+        super().__init__(name, log_level)
+        self.log_file = log_file
+
+        self._configure_logging()
+
+    def _configure_logging(self):
+        log_formatter = colorlog.ColoredFormatter(
+            "%(log_color)s%(levelname)s:%(name)s:%(message)s",
+            log_colors={
+                "DEBUG": "cyan",
+                "INFO": "green",
+                "WARNING": "yellow",
+                "ERROR": "red",
+                "CRITICAL": "red,bg_white",
+            },
+            reset=True,
+            secondary_log_colors={},
+            style="%",
+        )
+        if self.log_file:
+            file_handler = logging.FileHandler(self.log_file)
+            file_handler.setFormatter(log_formatter)
+            self.addHandler(file_handler)
+
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(log_formatter)
+        self.addHandler(console_handler)
+
+app_logger = AppLogger()
+if not LOGGING_ENABLED:
+    app_logger.setLevel(logging.CRITICAL)

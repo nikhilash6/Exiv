@@ -1,2 +1,4 @@
 torch
 sentencepiece
+packaging
+transformers
