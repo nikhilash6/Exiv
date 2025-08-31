@@ -4,45 +4,10 @@ import torch
 import torch.nn as nn
 import psutil
 
-from .k_math import clamp
+from .memory import mem_manager
 from .file import ensure_model_available
 from .logging import app_logger
 from ..constants import LOW_VRAM_MODE
-
-LOADED_MODELS = []
-
-class MemoryManager:
-    available_memory = 0
-    total_memory = 0
-    
-    @classmethod
-    def update_mem_amount(cls, delta):
-        cls.available_memory = clamp(cls.available_memory + delta, 0)
-        return cls.available_memory, cls.total_memory
-    
-    @classmethod
-    def get_mem_amount(cls):
-        return cls.available_memory, cls.total_memory
-    
-    @classmethod
-    def reset_mem_amount(cls, device="cpu"):
-        device = torch.device(device)
-        
-        free_mem, total_mem = 4 * 1024**2, 4 * 1024**2
-        if device.type == "cuda" or device.type == "hip":
-            free_mem, total_mem = torch.cuda.mem_get_info(device)
-
-        elif device.type == "mps":
-            total_mem = psutil.virtual_memory().total
-            driver_alloc = torch.mps.current_allocated_memory()
-            # "free" = system RAM available - current allocated
-            free_mem = max(total_mem - driver_alloc, 0)
-
-        else:   # device.type == "cpu" 
-            total_mem = psutil.virtual_memory().total
-            free_mem = psutil.virtual_memory().available
-            
-        cls.available_memory, cls.total_memory = free_mem, total_mem
 
 
 # bypassing weight creation at model init
@@ -96,7 +61,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
                 continue
 
             current += self._module_size(m)
-            if current < MemoryManager.available_memory - 50_000_000:  # 50 MB buffer
+            if current < mem_manager.available_memory(self.device) - 50_000_000:  # 50 MB buffer
                 self.full_load.append(weakref.ref(m))
             else:
                 og_forward = m.forward
