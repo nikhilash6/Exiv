@@ -1,6 +1,6 @@
 import logging
 import colorlog
-from ..constants import LOGGING_ENABLED
+from ..constants import LOGGING_LEVEL
 
 class AppLogger(logging.Logger):
     def __init__(self, name="app_logger", log_file=None, log_level=logging.DEBUG):
@@ -32,6 +32,4 @@ class AppLogger(logging.Logger):
         console_handler.setFormatter(log_formatter)
         self.addHandler(console_handler)
 
-app_logger = AppLogger()
-if not LOGGING_ENABLED:
-    app_logger.setLevel(logging.CRITICAL)
+app_logger = AppLogger(LOGGING_LEVEL)
