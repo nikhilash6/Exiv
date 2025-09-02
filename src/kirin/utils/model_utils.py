@@ -1,18 +1,21 @@
+import os
 import weakref
 import functools
 import torch
 import torch.nn as nn
 import psutil
+import safetensors
 
 from .memory import mem_manager
 from .file import ensure_model_available
 from .logging import app_logger
-from ..constants import LOW_VRAM_MODE
+from ..constants import DISABLE_MMAP, LOW_VRAM_MODE
 
 
 # bypassing weight creation at model init
 class ModuleMeta(type):
     def __call__(cls, *args, **kwargs):
+        # zero init weight load
         with torch.device("meta"):
             instance = super().__call__(*args, **kwargs)
         if isinstance(instance, ModelMixin):    # mainly for safety
@@ -23,7 +26,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     '''
     Adds additional feature to the base model
     
-    - telemetry / stats
+    - (TODO) telemetry / stats
     - zero init loading
     - (TODO) multi gpu sharding
     - auto block swaping during low memory
@@ -37,7 +40,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         self.dtype = dtype
         self.model_path = None
         
-    def _patch_modules_forward(self):
+    def patch_forward_pass(self):
         current = 0
         self.full_load = []
 
@@ -90,7 +93,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     def __call__(self, *args, **kwargs):
         pass
     
-    def fast_load(
+    def load_model(
         self,
         model_path,                     # path or url
         device: torch.device,           # device to load this on
@@ -100,7 +103,31 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     ):
         assert model_path is not None, "model_path is required"
         model_path = ensure_model_available(model_path, download_path, force_download)
-                    
-        if LOW_VRAM_MODE: device = "cpu"
-        # zero init load state dict
-        self.load_state_dict(torch.load(model_path, map_location=device), assign=True)
+        self.load_state_dict(self.get_state_dict(model_path, device=device), assign=True)
+    
+    # code adapted from ComfyUI
+    def get_state_dict(model_path, device):
+        # loading to cpu, then loading it on demand on gpu
+        if LOW_VRAM_MODE: device = torch.device("cpu")
+        # torch.load(model_path, map_location=device)
+        file_extension = os.path.basename(model_path).split(".")[-1]
+        if file_extension in ["safetensors", "sft"]:
+            try:
+                # safetensor's zero copy loading (pt - pytorch)
+                with safetensors.safe_open(model_path, framework="pt", device=device) as f:
+                    sd = {}
+                    for k in f.keys():
+                        tensor = f.get_tensor(k)    # loading one key at a time; low mem pressure
+                        if DISABLE_MMAP:
+                            # moving to device (no zero copying)
+                            tensor = tensor.to(device=device, copy=True)
+                        sd[k] = tensor
+            except Exception as e:
+                app_logger.error(str(e))
+                raise e
+        else:
+            torch_args = {}
+            # using the same mmap flag here, will see how it pans out
+            if not DISABLE_MMAP: torch_args["mmap"] = True
+
+            ...

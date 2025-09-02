@@ -6,6 +6,7 @@ import requests
 
 from .logging import app_logger
 
+
 def create_sanitized_path(file_path):
     filename = os.path.join(file_path, "img_{idx}.jpg")
     if not os.path.exists(file_path):
