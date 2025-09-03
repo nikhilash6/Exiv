@@ -4,3 +4,4 @@ packaging
 transformers
 einops
 psutil
+bitsandbytes

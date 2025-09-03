@@ -93,6 +93,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     def __call__(self, *args, **kwargs):
         pass
     
+    # TODO: support GGUF loading
     def load_model(
         self,
         model_path,                     # path or url
