@@ -9,7 +9,7 @@ import safetensors
 from .memory import mem_manager
 from .file import ensure_model_available
 from .logging import app_logger
-from ..constants import DISABLE_MMAP, LOW_VRAM_MODE
+from ..constants import ALWAYS_SAFE_LOAD, DISABLE_MMAP, LOW_VRAM_MODE
 
 
 # bypassing weight creation at model init
@@ -109,7 +109,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     def get_state_dict(model_path, device):
         # loading to cpu, then loading it on demand on gpu
         if LOW_VRAM_MODE: device = torch.device("cpu")
-        # torch.load(model_path, map_location=device)
+
         file_extension = os.path.basename(model_path).split(".")[-1]
         if file_extension in ["safetensors", "sft"]:
             try:
@@ -125,9 +125,19 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
             except Exception as e:
                 app_logger.error(str(e))
                 raise e
-        else:
+        else:   # ckpt, pth, pt
             torch_args = {}
-            # using the same mmap flag here, will see how it pans out
+            # using simple flags rn, will fix later
             if not DISABLE_MMAP: torch_args["mmap"] = True
-
-            ...
+            if ALWAYS_SAFE_LOAD: torch_args["weights_only"] = True
+            
+            sd = torch.load(model_path, map_location=device, **torch_args)
+            if "state_dict" in sd:  
+                sd = sd["state_dict"]   # loading state_dict if available
+            elif len(sd) == 1:          # loading the first key (if it's a dict)
+                val = next(iter(sd.values()))
+                sd = val if isinstance(val, dict) else sd
+                
+        return sd
+            
+            
