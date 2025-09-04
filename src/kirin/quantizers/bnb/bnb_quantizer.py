@@ -2,8 +2,6 @@ import torch
 from torch import nn
 from inspect import signature
 from transformers import is_bitsandbytes_available
-if is_bitsandbytes_available():
-    import bitsandbytes as bnb
 
 from ...utils.model_utils import ModelMixin
 from ...utils.logging import app_logger
@@ -15,7 +13,7 @@ class BNBQuantizer(Quantizer):
         super().__init__(quantization_config, **kwargs)
         
         if not is_bitsandbytes_available():
-            raise ValueError("please install bitsandbytes package to use this feature")
+            raise ImportError("please install bitsandbytes package to use this feature")
     
     # replaces nn.Linear with bnb.nn.Linear4bit / 8bit
     def _recusive_linear_layer_replace(
@@ -27,8 +25,13 @@ class BNBQuantizer(Quantizer):
         for name, module in model.named_children():
             full_key = f"{parent_key}.{name}" if parent_key else name
 
+            # NOTE: this case is a little tricky and depends on what we want to
+            # allow. do we want module level skip or layer level
+            if self._is_excluded(full_key):
+                continue
+            
             # replaceable linear layer
-            if isinstance(module, nn.Linear) and not self._is_excluded(full_key):
+            if isinstance(module, nn.Linear):
                 model._modules[name] = self._make_quantized_linear(module)
                 quant_layers_replaced = True
 
@@ -44,16 +47,17 @@ class BNBQuantizer(Quantizer):
         return model, quant_layers_replaced
     
     def _is_excluded(self, full_key: str) -> bool:
-        exclude_list = self.quantization_config.llm_int8_skip_modules
-        for key in exclude_list:
+        for key in self.quantization_config.llm_int8_skip_modules:
             if full_key == key or full_key.startswith(key + "."):
                 return True
         return False
     
     def _make_quantized_linear(self, module: nn.Linear):
+        import bitsandbytes as bnb
+        
         in_features, out_features = module.in_features, module.out_features
         quantization_config = self.quantization_config  # being lazy
-        if quantization_config.quantization_method() == "llm_int8":
+        if quantization_config.quantization_dtype == "llm_int8":
             quantized = bnb.nn.Linear8bitLt(
                 in_features,
                 out_features,
@@ -98,4 +102,4 @@ class BNBQuantizer(Quantizer):
         model: "ModelMixin",
         **kwargs
     ):
-        pass    # TODO: implement this
+        return model    # noop at this point, will update later

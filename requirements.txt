@@ -4,4 +4,6 @@ packaging
 transformers
 einops
 psutil
+# quantizers
 bitsandbytes
+optimum-quanto
