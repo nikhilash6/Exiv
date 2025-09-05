@@ -28,9 +28,52 @@ class QuantizationConfig(ABC):
 
 @dataclass
 class TorchAOConfig(QuantizationConfig):
-    kwargs: Dict[str, Any]          # https://github.com/pytorch/ao/tree/main/torchao/quantization#other-available-quantization-techniques
+    kwargs: Dict[str, Any]          # https://github.com/pytorch/ao/blob/main/torchao/quantization/quant_api.py
     skip_modules: List[str] = []
-    quant_type: str = "float8wo"    # https://huggingface.co/docs/diffusers/en/quantization/torchao#supported-quantization-types
+    quant_type: str = "float8wo"
+    
+    # not sure if this should be present here..
+    def get_config_cls(self):
+        from transformers import is_torchao_available
+        if is_torchao_available():
+            # there are couple of other methods available
+            # but skipping them for now
+            from torchao.quantization import (
+                Float8DynamicActivationFloat8WeightConfig,
+                Float8DynamicActivationInt4WeightConfig,
+                Float8StaticActivationFloat8WeightConfig,
+                Int8DynamicActivationInt4WeightConfig,
+                Int4DynamicActivationInt4WeightConfig,
+                Int4WeightOnlyConfig,
+                Int8WeightOnlyConfig,
+                Int8DynamicActivationInt8WeightConfig,
+                Float8WeightOnlyConfig,
+            )
+            
+        # NOTE: all these methods have their own set of params
+        # plus can be applied at different granularity but those are
+        # not added yet (i guess by default its PerTensor)
+        # more info on granularity - https://github.com/pytorch/ao/blob/0f6bae5288d50251ea52f72a5e53c1ef7618a7ca/torchao/quantization/granularity.py
+        config_dict = {
+            # float dynamic
+            "fp8dq_e4m3": Float8DynamicActivationFloat8WeightConfig,
+            "fp8dq_int4": Float8DynamicActivationInt4WeightConfig,
+            # float static
+            "fp8s_e4m3": Float8StaticActivationFloat8WeightConfig,
+            # int dynamic
+            "int8dq_int4": Int8DynamicActivationInt4WeightConfig,
+            "int4dq_int4": Int4DynamicActivationInt4WeightConfig,
+            "int8dq_int8": Int8DynamicActivationInt8WeightConfig,
+            # int only
+            "int4": Int4WeightOnlyConfig,
+            "int8": Int8WeightOnlyConfig,
+            # float only
+            "e4m3": Float8WeightOnlyConfig,
+        }
+        
+        quant_config = self.kwargs.get("quant_config", None)
+        return config_dict[self.quant_type]() if not quant_config else \
+            config_dict[self.quant_type](**quant_config)
 
     @property
     def quantization_dtype(self):

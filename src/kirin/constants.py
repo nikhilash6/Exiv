@@ -9,7 +9,7 @@ ALWAYS_SAFE_LOAD = True
 
 # -------- System Info
 CUDA_AVAILABLE = torch.cuda.is_available()
-CUDA_COMPUTE_CAPABILITY = None if not CUDA_AVAILABLE else torch.cuda.get_device_capability()
+CUDA_COMPUTE_CAPABILITY = (None, None) if not CUDA_AVAILABLE else torch.cuda.get_device_capability()
 
 # -------- Default prompts
 DEFAULT_T2I_PROMPT = "a surreal scenery"
