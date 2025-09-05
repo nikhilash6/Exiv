@@ -1,10 +1,12 @@
+from ast import Dict
 import torch
 
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
-from typing import List
+from typing import Any, List
 from sympy import Union
 
+from ..utils.enum import QuantizationMethod
 
 
 class QuantizationConfig(ABC):
@@ -23,19 +25,33 @@ class QuantizationConfig(ABC):
     @abstractmethod
     def quantization_dtype(self):
         pass
+
+@dataclass
+class TorchAOConfig(QuantizationConfig):
+    kwargs: Dict[str, Any]          # https://github.com/pytorch/ao/tree/main/torchao/quantization#other-available-quantization-techniques
+    skip_modules: List[str] = []
+    quant_type: str = "float8wo"    # https://huggingface.co/docs/diffusers/en/quantization/torchao#supported-quantization-types
+
+    @property
+    def quantization_dtype(self):
+        return self.dtype
     
     @property
     def quantization_method(self):
-        return self.__class__.__name__.replace("Config", "")    # will fix this later
-    
+        return QuantizationMethod.TORCHAO.value
+
 @dataclass
 class QuantoConfig(QuantizationConfig):
-    dtype: str = "int8"
+    quant_type: str = "int8"        # basically dtype to quant in
     skip_modules: List[str] = []    # these won't be quantized
     
     @property
     def quantization_dtype(self):
-        return self.dtype
+        return self.quant_type
+    
+    @property
+    def quantization_method(self):
+        return QuantizationMethod.QUANTO.value
 
 @dataclass
 class BNBQuantizerConfig(QuantizationConfig):
@@ -52,6 +68,11 @@ class BNBQuantizerConfig(QuantizationConfig):
     bnb_4bit_quant_storage: Union[torch.dtype, str] = torch.uint8   # naturally computers store 1 byte = 8 bits at 
                                                                     # minimum, so setting it to torch.uint4 will pack
                                                                     # stored weights tightly in a single byte
+    
+    @property
+    def quantization_method(self):
+        return QuantizationMethod.BITSANDBYTES.value
+    
     @property
     def quantization_dtype(self):
         if self.load_in_8bit:

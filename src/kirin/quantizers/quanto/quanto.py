@@ -36,7 +36,7 @@ class QuantoQuantizer(Quantizer):
                         out_features=module.out_features,
                         bias=module.bias is not None,
                         dtype=module.weight.dtype,
-                        weights=_get_weight_type(quantization_config.dtype),
+                        weights=_get_weight_type(quantization_config.quant_type),
                     )
                     model._modules[name] = qlinear
                     model._modules[name].source_cls = type(module)
@@ -59,10 +59,10 @@ class QuantoQuantizer(Quantizer):
         - training needs fp32 but inference can run with quantized weights
         - replaces normal tensor with qtensor, so as to load already quantized weights
         def freeze(self):
-        qweight = self.qweight
-        if qweight is not None:
-            # Replace float weights by quantized weights
-            self.weight = torch.nn.Parameter(qweight)
+            qweight = self.qweight
+            if qweight is not None:
+                # Replace float weights by quantized weights
+                self.weight = torch.nn.Parameter(qweight)
         '''
         if pre_quantized:
             freeze(model)
@@ -74,7 +74,10 @@ class QuantoQuantizer(Quantizer):
         model: "ModelMixin", 
         **kwargs
     ):
-        model, quant_layers_replaced = self._recusive_linear_layer_replace(model)
+        model, quant_layers_replaced = self._recusive_linear_layer_replace(
+                                            model, 
+                                            kwargs.get("pre_quantized", False)
+                                        )
         if not quant_layers_replaced:
             app_logger.warning("BnB quantization not applied, no linear layers found")
             
