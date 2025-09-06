@@ -1,26 +1,28 @@
 import os
-import iglob
 import re
+import glob
 import urllib.parse
 import requests
 
 from .logging import app_logger
 
-
 def create_sanitized_path(file_path):
-    filename = os.path.join(file_path, "img_{idx}.jpg")
+    # make sure directory exists
     if not os.path.exists(file_path):
         os.makedirs(file_path)
-        idx = 0
+
+    # pattern to search existing images
+    pattern = os.path.join(file_path, "img_*.jpg")
+    fns = [fn for fn in glob.iglob(pattern) if re.search(r"img_[0-9]+\.jpg$", fn)]
+
+    if fns:
+        # extract highest index and increment
+        idx = max(int(fn.split("_")[-1].split(".")[0]) for fn in fns) + 1
     else:
-        # if same filename is already present then increase the idx
-        fns = [fn for fn in iglob(filename.format(idx="*")) if re.search(r"img_[0-9]+\.jpg$", fn)]
-        if len(fns) > 0:
-            idx = max(int(fn.split("_")[-1].split(".")[0]) for fn in fns) + 1
-        else:
-            idx = 0
-            
-    return idx
+        idx = 0
+
+    return os.path.join(file_path, f"img_{idx}.jpg")
+
 
 def ensure_model_available(model_path: str, download_path: str, force_download: bool = False) -> str:
     # downloads model if a url is provided else verifies the local path

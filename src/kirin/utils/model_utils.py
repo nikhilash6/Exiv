@@ -45,6 +45,8 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         self.full_load = []
 
         app_logger.debug("******** patching modules")
+        # loading layers, doing work then moving them back to cpu
+        # is this better done through register_forward_pre_hook and register_forward_hook ?
         def _modified_forward(obj, *args, **kwargs):
             og_forward, module = kwargs["og_forward"], kwargs["module"]
             del kwargs["og_forward"]

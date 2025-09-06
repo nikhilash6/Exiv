@@ -36,3 +36,7 @@ env/
 venv/
 note.md
 temp.py
+
+# Test files
+.pytest_cache
+.coverage

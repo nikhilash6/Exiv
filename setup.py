@@ -26,6 +26,12 @@ setup(
     packages=find_packages(where="src"),
     # package_data={"test_pkg": ["data.txt"]},
     install_requies=main_deps,
+    extras_require={
+        'test': [
+            'pytest',
+            'pytest-cov',
+        ],
+    },
     include_package_data=True,
     entry_points={
         "console_scripts": [
