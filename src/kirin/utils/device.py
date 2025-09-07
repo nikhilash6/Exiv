@@ -75,6 +75,15 @@ class MemoryManager:
         # cpu
         else:
             return psutil.virtual_memory().total
+    
+    @staticmethod
+    def clear_memory():
+        import gc
+        gc.collect()
+        if is_cuda_available:
+            torch.cuda.empty_cache()
+        if is_mps_available:
+            torch.mps.empty_cache()
 
         
 mem_manager = MemoryManager()

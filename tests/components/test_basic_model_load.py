@@ -1,5 +1,5 @@
 import importlib
-import os
+import gc
 import torch
 from torch import nn
 import unittest
@@ -8,10 +8,14 @@ from unittest import mock
 import kirin.constants as constants
 import tests.test_utils.common
 from tests.test_utils.common import SimpleModel
-from kirin.utils.device import DEFAULT_DEVICE, is_cuda_available, is_mps_available, is_xla_available, is_mps_available
+from kirin.utils.device import MemoryManager, DEFAULT_DEVICE, is_cuda_available, is_mps_available, is_xla_available, is_mps_available
 
 
 class ModelMetaTest(unittest.TestCase):
+    # clear mem / cache after each test
+    def tearDown(self):
+        MemoryManager.clear_memory()
+            
     # model should be init on 'meta'
     def test_model_init(self):
         model = SimpleModel()

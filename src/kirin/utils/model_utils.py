@@ -162,5 +162,3 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
                 sd = val if isinstance(val, dict) else sd
                 
         return sd
-            
-            
