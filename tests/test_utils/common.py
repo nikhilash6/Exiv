@@ -5,6 +5,7 @@ from kirin.utils.model_utils import ModelMixin
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
+# --------------- Dummy models
 class SimpleModel(ModelMixin):
     # TODO: create individual model type
     SIMPLE_MODEL_PTH_PATH = os.path.abspath(os.path.join(script_dir, "./assets/models/simple_model_checkpoint.pth"))

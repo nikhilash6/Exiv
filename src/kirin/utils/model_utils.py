@@ -120,16 +120,18 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         torch_dtype = "fp32",           # 'auto' or 'torch.dtype'
         force_download=False,           # re_download models
         download_path=None,             # defaults to folder util
+        force_low_vram=False,
     ):
         assert model_path is not None, "model_path is required"
         self.offload_device = device or self.offload_device
         model_path = ensure_model_available(model_path, download_path, force_download)
-        self.load_state_dict(self.get_state_dict(model_path, device=self.offload_device), assign=True)
+        self.load_state_dict(self.get_state_dict(model_path, device=self.offload_device, force_low_vram=force_low_vram), assign=True)
     
     # code adapted from ComfyUI
-    def get_state_dict(self, model_path, device):
+    def get_state_dict(self, model_path, device, force_low_vram=False):
+        print("low vram mode: ", LOW_VRAM_MODE)
         # loading to cpu, then loading it on demand on gpu
-        if LOW_VRAM_MODE: device = torch.device("cpu")
+        if LOW_VRAM_MODE or force_low_vram: device = torch.device("cpu")
 
         file_extension = os.path.basename(model_path).split(".")[-1]
         if file_extension in ["safetensors", "sft"]:
