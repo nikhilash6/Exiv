@@ -52,3 +52,9 @@ class ModelMetaTest(unittest.TestCase):
     - quantization happens + should happen in the meta (no mem usage)
     - this should speed up the perf , lower mem (check what diffusers is doing)
 '''
+
+'''
+- instead of passing "cpu", you should pass the default device
+    or take user input
+- add a method to completely offload the model (something like 'complete_offload')
+'''

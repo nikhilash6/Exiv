@@ -6,14 +6,14 @@ import torch.nn as nn
 import psutil
 import safetensors
 
-from .memory import mem_manager
+from .device import DEFAULT_DEVICE, mem_manager
 from .file import ensure_model_available
 from .logging import app_logger
 from ..constants import ALWAYS_SAFE_LOAD, DISABLE_MMAP, LOW_VRAM_MODE
 
 
 # bypassing weight creation at model init
-class ModuleMeta(type):
+class ModuleMeta(type(nn.Module)):
     def __call__(cls, *args, **kwargs):
         # zero init weight load
         with torch.device("meta"):
@@ -35,9 +35,9 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     - safetensor support
     - URL download support
     '''
-    def __init__(self, device, dtype):
-        self.device = device
-        self.dtype = dtype
+    def __init__(self, device=None):
+        super().__init__()
+        self.device = device or DEFAULT_DEVICE
         self.model_path = None
         
     def patch_forward_pass(self):
@@ -46,7 +46,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
 
         app_logger.debug("******** patching modules")
         # loading layers, doing work then moving them back to cpu
-        # is this better done through register_forward_pre_hook and register_forward_hook ?
+        # PONDER: is this better done through register_forward_pre_hook and register_forward_hook ?
         def _modified_forward(obj, *args, **kwargs):
             og_forward, module = kwargs["og_forward"], kwargs["module"]
             del kwargs["og_forward"]
@@ -54,7 +54,10 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
             
             try:
                 app_logger.debug("Moving ", module.__class__.__name__, f" to {self.device}")
-                module.to(self.device)
+                if any(p.device.type == "meta" for p in module.parameters(recurse=False)):
+                    module.to_empty(self.device)
+                else:
+                    module.to(device=self.device)
                 out = og_forward(obj, *args, **kwargs)
             finally:
                 app_logger.debug("Moving back ", module.__class__.__name__, " to cpu")
@@ -76,7 +79,11 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         for m_ref in self.full_load:
             m = m_ref()
             if m is not None:
-                m.to(self.device)
+                # if params are meta, allocate fresh memory on target device
+                if any(p.device.type == "meta" for p in m.parameters(recurse=False)):
+                    m.to_empty(device=self.device)
+                else:
+                    m.to(self.device)
         
     @staticmethod
     @functools.lru_cache(maxsize=None)
