@@ -1,9 +1,40 @@
 import os
+import torch
 from torch import nn
 
+from kirin.utils.device import MemoryManager, ProcDevice, is_mps_available
 from kirin.utils.model_utils import ModelMixin
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
+
+from functools import wraps
+
+def check_memory_usage(expected_mem, device=ProcDevice.CPU.value, atol=50, rtol=0.01):
+    def decorator(test_func):
+        @wraps(test_func)
+        def wrapper(self, *args, **kwargs):
+            initial_mem_mb = MemoryManager.available_memory(device)
+            test_func(self, *args, **kwargs)
+            final_mem_mb = MemoryManager.available_memory(device)
+            mem_diff = initial_mem_mb - final_mem_mb
+            
+            # not using rtol atm
+            is_close = torch.isclose(torch.tensor(float(mem_diff)), 
+                                     torch.tensor(float(expected_mem)), 
+                                     atol=atol)
+            
+            # TODO: psutil is unreliable on mac (for cpu), find a work around
+            is_mac_cpu = is_mps_available and device == ProcDevice.CPU.value
+            
+            if not is_close and not is_mac_cpu:
+                raise AssertionError(
+                    f"Memory usage difference {mem_diff:.2f} MB is not close to expected {expected_mem} MB. "
+                    f"On the device {device}. "
+                    f"Absolute difference: {abs(mem_diff - expected_mem):.2f} MB. "
+                    f"Absolute tolerance (atol): {atol} MB, Relative tolerance (rtol): {rtol}."
+                )
+        return wrapper
+    return decorator
 
 # --------------- Dummy models
 class SimpleModel(ModelMixin):

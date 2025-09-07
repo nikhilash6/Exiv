@@ -6,7 +6,7 @@ import torch.nn as nn
 import psutil
 import safetensors
 
-from .device import DEFAULT_DEVICE, ProcDevice, mem_manager
+from .device import DEFAULT_DEVICE, MemoryManager, ProcDevice
 from .file import ensure_model_available
 from .logging import app_logger
 from ..constants import ALWAYS_SAFE_LOAD, DISABLE_MMAP, LOW_VRAM_MODE
@@ -86,7 +86,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
                 continue
 
             current += self._module_size(m)
-            if current < mem_manager.available_memory(self.offload_device) - 50_000_000:  # 50 MB buffer
+            if current < MemoryManager.available_memory(self.offload_device) - 50_000_000:  # 50 MB buffer
                 self.full_load.append(weakref.ref(m))
             else:
                 og_forward = m.forward
@@ -129,7 +129,6 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     
     # code adapted from ComfyUI
     def get_state_dict(self, model_path, device, force_low_vram=False):
-        print("low vram mode: ", LOW_VRAM_MODE)
         # loading to cpu, then loading it on demand on gpu
         if LOW_VRAM_MODE or force_low_vram: device = torch.device("cpu")
 

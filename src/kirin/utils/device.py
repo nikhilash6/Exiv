@@ -34,8 +34,10 @@ elif is_xla_available:
     DEFAULT_DEVICE = ProcDevice.XLA.value
 
 # ------------------ Memory availability
+BYTES_IN_MB = 1024 * 1024
 class MemoryManager:
-    def available_memory(self, device=ProcDevice.CPU.value):
+    @staticmethod
+    def available_memory(device=ProcDevice.CPU.value):
         device = torch.device(device)
 
         # cuda (nvidia/rocm)
@@ -45,36 +47,37 @@ class MemoryManager:
             mem_reserved = stats['reserved_bytes.all.current']
             mem_free_from_driver, _ = torch.cuda.mem_get_info(device)
             mem_free_torch = mem_reserved - mem_active
-            return mem_free_from_driver + mem_free_torch
+            return (mem_free_from_driver + mem_free_torch) / BYTES_IN_MB
         # mps
         elif device.type == ProcDevice.MPS.value:
             total_mem = psutil.virtual_memory().total
             driver_alloc = torch.mps.current_allocated_memory()
-            return max(total_mem - driver_alloc, 0)
+            return max(total_mem - driver_alloc, 0) / BYTES_IN_MB
         # xla (most probably not needed)
         elif device.type == ProcDevice.XLA.value:
             mem_info = xm.get_memory_info(device)
-            return int(mem_info['kb_free']) * 1024
+            return int(mem_info['kb_free']) * 1024 / BYTES_IN_MB
         # cpu
         else:
-            return psutil.virtual_memory().available
+            return psutil.virtual_memory().available / BYTES_IN_MB
 
-    def total_memory(self, device="cpu"):
+    @staticmethod
+    def total_memory(device=ProcDevice.CPU.value):
         device = torch.device(device)
 
         # cuda
         if device.type == ProcDevice.CUDA.value:
-            return torch.cuda.get_device_properties(device).total_memory
+            return torch.cuda.get_device_properties(device).total_memory / BYTES_IN_MB
         # mps
         elif device.type == ProcDevice.MPS.value:
-            return psutil.virtual_memory().total
+            return psutil.virtual_memory().total / BYTES_IN_MB
         # xla
         elif device.type == ProcDevice.XLA.value:
             mem_info = xm.get_memory_info(device)
-            return int(mem_info['kb_total']) * 1024
+            return int(mem_info['kb_total']) * 1024 / BYTES_IN_MB
         # cpu
         else:
-            return psutil.virtual_memory().total
+            return psutil.virtual_memory().total / BYTES_IN_MB
     
     @staticmethod
     def clear_memory():
@@ -84,6 +87,3 @@ class MemoryManager:
             torch.cuda.empty_cache()
         if is_mps_available:
             torch.mps.empty_cache()
-
-        
-mem_manager = MemoryManager()
