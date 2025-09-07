@@ -136,7 +136,9 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         if file_extension in ["safetensors", "sft"]:
             try:
                 # safetensor's zero copy loading (pt - pytorch)
-                with safetensors.safe_open(model_path, framework="pt", device=device) as f:
+                kwargs = {"framework": "pt"}
+                if device.type != "cpu": kwargs["device"] = device  # safetensors doesn't take cpu arg
+                with safetensors.safe_open(model_path, **kwargs) as f:
                     sd = {}
                     for k in f.keys():
                         tensor = f.get_tensor(k)    # loading one key at a time; low mem pressure

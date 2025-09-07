@@ -1,10 +1,9 @@
-import unittest
+import pytest, unittest
 
 from tests.test_utils.common import SimpleModel, check_memory_usage
 from kirin.utils.device import MemoryManager, DEFAULT_DEVICE, is_cuda_available, is_mps_available, is_xla_available, is_mps_available
 
-
-class ModelMetaTest(unittest.TestCase):
+class ModelLoadTest(unittest.TestCase):
     # clear mem / cache before n after each test
     # since we will also be measuring mem usage
     def setUp(self):
@@ -24,24 +23,28 @@ class ModelMetaTest(unittest.TestCase):
     @check_memory_usage(expected_mem=12, device=DEFAULT_DEVICE)
     def test_model_device(self):
         model = SimpleModel()
-        model.load_model(SimpleModel.SIMPLE_MODEL_CKPT_PATH)
+        model.load_model(SimpleModel.CKPT_PATH)
         self.assertEqual(next(model.parameters()).device.type, DEFAULT_DEVICE)
     
     # low vram load should go to the cpu
     @check_memory_usage(expected_mem=12)
     def test_model_device_low_vram(self):
         model = SimpleModel()
-        model.load_model(SimpleModel.SIMPLE_MODEL_CKPT_PATH, force_low_vram=True)
+        model.load_model(SimpleModel.CKPT_PATH, force_low_vram=True)
         self.assertEqual(next(model.parameters()).device.type, "cpu")
+    
+    # test different kinds of format loading
+    def test_model_formats(self):
+        for model_path in SimpleModel.ALL_MODEL_PATHS:
+            model = SimpleModel()
+            model.load_model(model_path, force_low_vram=True)
+            self.assertEqual(next(model.parameters()).device.type, "cpu")
+            MemoryManager.clear_memory()
 
     
 
 '''
-- memory usage monitor is working correctly
-- model loading
-    - model loads normally
-    - model loads with zero memory
 - quantization
     - quantization happens + should happen in the meta (no mem usage)
-    - this should speed up the perf , lower mem (check what diffusers is doing)
+    - this should speed up the perf , lower mem
 '''

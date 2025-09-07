@@ -12,9 +12,9 @@ from functools import wraps
 def check_memory_usage(expected_mem, device=ProcDevice.CPU.value, atol=50, rtol=0.01):
     def decorator(test_func):
         @wraps(test_func)
-        def wrapper(self, *args, **kwargs):
+        def wrapper(*args, **kwargs):
             initial_mem_mb = MemoryManager.available_memory(device)
-            test_func(self, *args, **kwargs)
+            test_func(*args, **kwargs)
             final_mem_mb = MemoryManager.available_memory(device)
             mem_diff = initial_mem_mb - final_mem_mb
             
@@ -39,11 +39,13 @@ def check_memory_usage(expected_mem, device=ProcDevice.CPU.value, atol=50, rtol=
 # --------------- Dummy models
 class SimpleModel(ModelMixin):
     # TODO: create individual model type
-    SIMPLE_MODEL_PTH_PATH = os.path.abspath(os.path.join(script_dir, "./assets/models/simple_model_checkpoint.pth"))
-    SIMPLE_MODEL_SAFETENSORS_PATH = os.path.abspath(os.path.join(script_dir, "./assets/models/simple_model_checkpoint.pth"))
-    SIMPLE_MODEL_CKPT_PATH = os.path.abspath(os.path.join(script_dir, "./assets/models/simple_model_checkpoint.pth"))
-    SIMPLE_MODEL_PT_PATH = os.path.abspath(os.path.join(script_dir, "./assets/models/simple_model_checkpoint.pth"))
-
+    PTH_PATH = os.path.abspath(os.path.join(script_dir, "./assets/models/simple_model.pth"))
+    SAFETENSORS_PATH = os.path.abspath(os.path.join(script_dir, "./assets/models/simple_model.safetensors"))
+    SFT_PATH = os.path.abspath(os.path.join(script_dir, "./assets/models/simple_model.sft"))
+    CKPT_PATH = os.path.abspath(os.path.join(script_dir, "./assets/models/simple_model.ckpt"))
+    PT_PATH = os.path.abspath(os.path.join(script_dir, "./assets/models/simple_model.pt"))
+    ALL_MODEL_PATHS = [PTH_PATH, SAFETENSORS_PATH, CKPT_PATH, PT_PATH, SFT_PATH]
+    
     def __init__(self):
         super().__init__()
         self.input_layer = nn.Linear(1024, 2048)
