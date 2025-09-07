@@ -116,17 +116,18 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     def load_model(
         self,
         model_path,                     # path or url
-        device: torch.device,           # device to load this on
-        torch_dtype,                    # 'auto' or 'torch.dtype'
+        device = None,                  # device to load this on
+        torch_dtype = "fp32",           # 'auto' or 'torch.dtype'
         force_download=False,           # re_download models
         download_path=None,             # defaults to folder util
     ):
         assert model_path is not None, "model_path is required"
+        self.offload_device = device or self.offload_device
         model_path = ensure_model_available(model_path, download_path, force_download)
-        self.load_state_dict(self.get_state_dict(model_path, device=device), assign=True)
+        self.load_state_dict(self.get_state_dict(model_path, device=self.offload_device), assign=True)
     
     # code adapted from ComfyUI
-    def get_state_dict(model_path, device):
+    def get_state_dict(self, model_path, device):
         # loading to cpu, then loading it on demand on gpu
         if LOW_VRAM_MODE: device = torch.device("cpu")
 

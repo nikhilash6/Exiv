@@ -1,14 +1,16 @@
-import torch
+import os
 from torch import nn
 
 from kirin.utils.model_utils import ModelMixin
 
+script_dir = os.path.dirname(os.path.abspath(__file__))
+
 class SimpleModel(ModelMixin):
     # TODO: create individual model type
-    SIMPLE_MODEL_PTH_PATH = "test_assets/models/simple_model_checkpoint.pth"
-    SIMPLE_MODEL_SAFETENSORS_PATH = "test_assets/models/simple_model_checkpoint.pth"
-    SIMPLE_MODEL_CKPT_PATH = "test_assets/models/simple_model_checkpoint.pth"
-    SIMPLE_MODEL_PT_PATH = "test_assets/models/simple_model_checkpoint.pth"
+    SIMPLE_MODEL_PTH_PATH = os.path.abspath(os.path.join(script_dir, "./assets/models/simple_model_checkpoint.pth"))
+    SIMPLE_MODEL_SAFETENSORS_PATH = os.path.abspath(os.path.join(script_dir, "./assets/models/simple_model_checkpoint.pth"))
+    SIMPLE_MODEL_CKPT_PATH = os.path.abspath(os.path.join(script_dir, "./assets/models/simple_model_checkpoint.pth"))
+    SIMPLE_MODEL_PT_PATH = os.path.abspath(os.path.join(script_dir, "./assets/models/simple_model_checkpoint.pth"))
 
     def __init__(self):
         super().__init__()

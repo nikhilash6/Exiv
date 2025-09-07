@@ -24,11 +24,21 @@ def create_sanitized_path(file_path):
     return os.path.join(file_path, f"img_{idx}.jpg")
 
 
-def ensure_model_available(model_path: str, download_path: str, force_download: bool = False) -> str:
-    # downloads model if a url is provided else verifies the local path
+def ensure_model_available(model_path: str, download_path: str = None, force_download: bool = False) -> str:
+    """
+    - Downloads model if a URL is provided, else verifies the local path.
+    - Works with absolute paths (internally converts relative to absolute)
+    - Store stuff in .cache if download path is not provided
+    """
     parsed = urllib.parse.urlparse(model_path)
 
     if parsed.scheme in ("http", "https"):  # It's a URL
+        if download_path is None:
+            # default download path: same filename under ~/.cache/my_package/
+            cache_dir = os.path.expanduser("~/.cache/my_package")
+            os.makedirs(cache_dir, exist_ok=True)
+            download_path = os.path.join(cache_dir, os.path.basename(parsed.path))
+
         if force_download or not os.path.exists(download_path):
             print(f"Downloading model from {model_path} to {download_path} ...")
             response = requests.get(model_path, stream=True)
@@ -40,9 +50,11 @@ def ensure_model_available(model_path: str, download_path: str, force_download: 
                         f.write(chunk)
         else:
             print(f"Model already exists at {download_path} (use force_download=True to overwrite)")
-        return download_path
-    
-    else:  # Local file path
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"Model file not found at {model_path}")
-        return model_path
+        return os.path.abspath(download_path)
+
+    else: 
+        abs_path = os.path.abspath(os.path.expanduser(model_path))
+        if not os.path.exists(abs_path):
+            raise FileNotFoundError(f"Model file not found at {abs_path}")
+        return abs_path
+

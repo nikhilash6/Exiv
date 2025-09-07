@@ -4,19 +4,19 @@ import unittest
 
 
 from tests.test_utils.models import SimpleModel
-from kirin.utils.device import is_cuda_available, is_mps_available, is_xla_available, is_mps_available
+from kirin.utils.device import DEFAULT_DEVICE, is_cuda_available, is_mps_available, is_xla_available, is_mps_available
 
 class ModelMetaTest(unittest.TestCase):
     # model should be init on 'meta'
     def test_model_init(self):
         model = SimpleModel()
-        self.assertEqual(next(model.parameters()).device, torch.device("meta"))
+        self.assertEqual(next(model.parameters()).device.type, "meta")
     
-    # # normal load should go to the device / gpu
-    # def test_model_device(self):
-    #     model = SimpleModel()
-    #     for param in model.parameters():
-    #         self.assertEqual(param.device.type, 'mps')
+    # normal load should go to the default device
+    def test_model_device(self):
+        model = SimpleModel()
+        model.load_model(SimpleModel.SIMPLE_MODEL_CKPT_PATH)
+        self.assertEqual(next(model.parameters()).device.type, DEFAULT_DEVICE)
     
     # # low vram load should go to the cpu
     # def test_model_device_low_vram(self):
