@@ -17,7 +17,7 @@ is_cuda_available = False
 is_xla_available = False
 is_cpu_available = True
 
-if torch.cuda.is_available: is_cuda_available = True
+if torch.cuda.is_available(): is_cuda_available = True
 if hasattr(torch.backends, "mps") and torch.backends.mps.is_available(): is_mps_available = True
 try:
     import torch_xla.core.xla_model as xm

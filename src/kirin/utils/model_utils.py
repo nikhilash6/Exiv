@@ -6,7 +6,7 @@ import torch.nn as nn
 import psutil
 import safetensors
 
-from .device import DEFAULT_DEVICE, mem_manager
+from .device import DEFAULT_DEVICE, ProcDevice, mem_manager
 from .file import ensure_model_available
 from .logging import app_logger
 from ..constants import ALWAYS_SAFE_LOAD, DISABLE_MMAP, LOW_VRAM_MODE
@@ -18,8 +18,8 @@ class ModuleMeta(type(nn.Module)):
         # zero init weight load
         with torch.device("meta"):
             instance = super().__call__(*args, **kwargs)
-        if isinstance(instance, ModelMixin):    # mainly for safety
-            instance.patch_forward_pass()
+            if isinstance(instance, ModelMixin):    # mainly for safety
+                instance.patch_forward_pass()
         return instance
 
 class ModelMixin(nn.Module, metaclass=ModuleMeta):
@@ -37,12 +37,29 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     '''
     def __init__(self, device=None):
         super().__init__()
-        self.device = device or DEFAULT_DEVICE
+        self.offload_device = device or DEFAULT_DEVICE
         self.model_path = None
+        self._patched = False
+        self._fully_loaded = False
         
     def patch_forward_pass(self):
         current = 0
         self.full_load = []
+        
+        def _full_load():
+            if not self._patched or self._fully_loaded: return False
+            # load initial full_load modules
+            for m_ref in self.full_load:
+                m = m_ref()
+                if m is not None:
+                    # if params are meta, allocate fresh memory on target device
+                    if any(p.device.type == "meta" for p in m.parameters(recurse=False)):
+                        m.to_empty(device=self.offload_device)
+                    else:
+                        m.to(self.offload_device)
+            
+            self._fully_loaded = True
+            return True
 
         app_logger.debug("******** patching modules")
         # loading layers, doing work then moving them back to cpu
@@ -53,15 +70,15 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
             del kwargs["module"]
             
             try:
-                app_logger.debug("Moving ", module.__class__.__name__, f" to {self.device}")
+                app_logger.debug("Moving ", module.__class__.__name__, f" to {self.offload_device}")
                 if any(p.device.type == "meta" for p in module.parameters(recurse=False)):
-                    module.to_empty(self.device)
+                    module.to_empty(self.offload_device)
                 else:
-                    module.to(device=self.device)
+                    module.to(device=self.offload_device)
                 out = og_forward(obj, *args, **kwargs)
             finally:
                 app_logger.debug("Moving back ", module.__class__.__name__, " to cpu")
-                module.to("cpu")
+                module.to(ProcDevice.CPU.value)
             return out
 
         for m in self.modules():
@@ -69,21 +86,14 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
                 continue
 
             current += self._module_size(m)
-            if current < mem_manager.available_memory(self.device) - 50_000_000:  # 50 MB buffer
+            if current < mem_manager.available_memory(self.offload_device) - 50_000_000:  # 50 MB buffer
                 self.full_load.append(weakref.ref(m))
             else:
                 og_forward = m.forward
                 m.forward = functools.partial(_modified_forward, og_forward=og_forward, module=m)
-                
-        # load initial full_load modules
-        for m_ref in self.full_load:
-            m = m_ref()
-            if m is not None:
-                # if params are meta, allocate fresh memory on target device
-                if any(p.device.type == "meta" for p in m.parameters(recurse=False)):
-                    m.to_empty(device=self.device)
-                else:
-                    m.to(self.device)
+        
+        self.register_forward_pre_hook(_full_load)
+        
         
     @staticmethod
     @functools.lru_cache(maxsize=None)
