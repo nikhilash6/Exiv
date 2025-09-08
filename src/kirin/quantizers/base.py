@@ -1,12 +1,11 @@
-from ast import Dict
 import torch
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
-from typing import Any, List
-from sympy import Union
+from typing import Any, List, Dict
 
 from ..utils.enum import QuantizationMethod
+from .utils import validate_type
 
 
 class QuantizationConfig(ABC):
@@ -14,12 +13,10 @@ class QuantizationConfig(ABC):
         pass
     
     def __post_init__(self):
-        # quick data type checker
-        for field in self.__dataclass_fields__:
-            value = getattr(self, field)
-            expected_type = self.__dataclass_fields__[field].type
-            if not isinstance(value, expected_type):
-                raise TypeError(f"Variable '{field}' must be of type {expected_type.__name__}, but got {type(value).__name__}")
+        for field_name, field_def in self.__dataclass_fields__.items():
+            value = getattr(self, field_name)
+            expected_type = field_def.type
+            validate_type(value, expected_type, field_name)
 
     @property
     @abstractmethod
@@ -29,7 +26,7 @@ class QuantizationConfig(ABC):
 @dataclass
 class TorchAOConfig(QuantizationConfig):
     kwargs: Dict[str, Any]          # https://github.com/pytorch/ao/blob/main/torchao/quantization/quant_api.py
-    skip_modules: List[str] = []
+    skip_modules: List[str] = field(default_factory=list)
     quant_type: str = "float8wo"
     
     # not sure if this should be present here..
@@ -86,7 +83,7 @@ class TorchAOConfig(QuantizationConfig):
 @dataclass
 class QuantoConfig(QuantizationConfig):
     quant_type: str = "int8"        # basically dtype to quant in
-    skip_modules: List[str] = []    # these won't be quantized
+    skip_modules: List[str] = field(default_factory=list)    # these won't be quantized
     
     @property
     def quantization_dtype(self):
@@ -100,15 +97,15 @@ class QuantoConfig(QuantizationConfig):
 class BNBQuantizerConfig(QuantizationConfig):
     load_in_8bit: bool = False
     load_in_4bit: bool = False
-    llm_int8_threshold: bool = 6.0      # int8 handles values ~6 (99.9%), outside this
+    llm_int8_threshold: float = 6.0      # int8 handles values ~6 (99.9%), outside this
                                         # range the ops are done in fp16 (empirical data for LLMs)
-    llm_int8_skip_modules: List[str] = []   # these won't be quantized
+    llm_int8_skip_modules: List[str] = field(default_factory=list)   # these won't be quantized
     bnb_4bit_quant_type: str = "fp4"    # supported - fp4 , nf4
-    bnb_4bit_compute_dtype: Union[torch.dtype, str] = torch.float32     # internal computation dtype
+    bnb_4bit_compute_dtype: Any = torch.float32     # internal computation dtype
     bnb_4bit_use_double_quant: bool = False     # weights ~ quant_val * scale + offset
                                                 # this also quantizes scale, offset
                                                 # which are normally in higher precision
-    bnb_4bit_quant_storage: Union[torch.dtype, str] = torch.uint8   # naturally computers store 1 byte = 8 bits at 
+    bnb_4bit_quant_storage: Any = torch.uint8   # naturally computers store 1 byte = 8 bits at 
                                                                     # minimum, so setting it to torch.uint4 will pack
                                                                     # stored weights tightly in a single byte
     

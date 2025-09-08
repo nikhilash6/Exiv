@@ -41,10 +41,14 @@ class ModelLoadTest(unittest.TestCase):
             self.assertEqual(next(model.parameters()).device.type, "cpu")
             MemoryManager.clear_memory()
 
-    
-
-'''
-- quantization
-    - quantization happens + should happen in the meta (no mem usage)
-    - this should speed up the perf , lower mem
-'''
+    # testing quantization during model load
+    @unittest.skipIf(not is_cuda_available, "Test not supported on non-cuda machines")
+    def test_model_quant(self):
+        from kirin.quantizers.bnb.bnb import BNBQuantizer
+        
+        quantizer = BNBQuantizer()
+        model = SimpleModel()
+        quantizer.pre_process(model)
+        model.load_model(SimpleModel.CKPT_PATH)
+        quantizer.post_process(model)
+        self.assertEqual(next(model.parameters()).device.type, DEFAULT_DEVICE)

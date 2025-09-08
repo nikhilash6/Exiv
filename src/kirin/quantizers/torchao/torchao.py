@@ -2,8 +2,8 @@ from transformers import is_torchao_available
 if is_torchao_available():
     from torchao.quantization import quantize_
 
-from ...constants import CUDA_AVAILABLE, CUDA_COMPUTE_CAPABILITY
 from ..base import Quantizer, TorchAOConfig
+from ...utils.device import is_cuda_available, CUDA_COMPUTE_CAPABILITY
 
 
 # NOTE: crude implementation, will polish later
@@ -15,7 +15,7 @@ class TorchAOQuantizer(Quantizer):
         if not is_torchao_available():
             raise ImportError("torchao package not installed")
         
-        if not CUDA_AVAILABLE:
+        if not is_cuda_available:
             raise RuntimeError("CUDA not found")
         
         # https://huggingface.co/docs/diffusers/quantization/torchao

@@ -19,9 +19,6 @@ LOW_VRAM_MODE = _get_flag("low_vram", 0)        # O : FALSE, 1 : TRUE
 DISABLE_MMAP = _get_flag("disable_mmap", 0)     # some OS have poor / buggy implementation of mmap
 ALWAYS_SAFE_LOAD = _get_flag("safe_load", 1) 
 
-# -------- System Info
-CUDA_AVAILABLE = torch.cuda.is_available()
-CUDA_COMPUTE_CAPABILITY = (None, None) if not CUDA_AVAILABLE else torch.cuda.get_device_capability()
 
 # -------- Default prompts
 DEFAULT_T2I_PROMPT = "a surreal scenery"

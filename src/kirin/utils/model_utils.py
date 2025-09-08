@@ -37,7 +37,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     '''
     def __init__(self, device=None):
         super().__init__()
-        self.offload_device = device or DEFAULT_DEVICE
+        self.gpu_device = device or DEFAULT_DEVICE
         self.model_path = None
         self._patched = False
         self._fully_loaded = False
@@ -54,9 +54,9 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
                 if m is not None:
                     # if params are meta, allocate fresh memory on target device
                     if any(p.device.type == "meta" for p in m.parameters(recurse=False)):
-                        m.to_empty(device=self.offload_device)
+                        m.to_empty(device=self.gpu_device)
                     else:
-                        m.to(self.offload_device)
+                        m.to(self.gpu_device)
             
             self._fully_loaded = True
             return True
@@ -70,11 +70,11 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
             del kwargs["module"]
             
             try:
-                app_logger.debug("Moving ", module.__class__.__name__, f" to {self.offload_device}")
+                app_logger.debug("Moving ", module.__class__.__name__, f" to {self.gpu_device}")
                 if any(p.device.type == "meta" for p in module.parameters(recurse=False)):
-                    module.to_empty(self.offload_device)
+                    module.to_empty(self.gpu_device)
                 else:
-                    module.to(device=self.offload_device)
+                    module.to(device=self.gpu_device)
                 out = og_forward(obj, *args, **kwargs)
             finally:
                 app_logger.debug("Moving back ", module.__class__.__name__, " to cpu")
@@ -86,7 +86,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
                 continue
 
             current += self._module_size(m)
-            if current < MemoryManager.available_memory(self.offload_device) - 50_000_000:  # 50 MB buffer
+            if current < MemoryManager.available_memory(self.gpu_device) - 50_000_000:  # 50 MB buffer
                 self.full_load.append(weakref.ref(m))
             else:
                 og_forward = m.forward
@@ -123,9 +123,9 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         force_low_vram=False,
     ):
         assert model_path is not None, "model_path is required"
-        self.offload_device = device or self.offload_device
+        self.gpu_device = device or self.gpu_device
         model_path = ensure_model_available(model_path, download_path, force_download)
-        self.load_state_dict(self.get_state_dict(model_path, device=self.offload_device, force_low_vram=force_low_vram), assign=True)
+        self.load_state_dict(self.get_state_dict(model_path, device=self.gpu_device, force_low_vram=force_low_vram), assign=True)
     
     # code adapted from ComfyUI
     def get_state_dict(self, model_path, device, force_low_vram=False):

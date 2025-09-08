@@ -6,13 +6,17 @@ from transformers import is_bitsandbytes_available
 from ...utils.model_utils import ModelMixin
 from ...utils.logging import app_logger
 from ..base import BNBQuantizerConfig, Quantizer
+from ...utils.device import is_cuda_available
 
 
 class BNBQuantizer(Quantizer):
-    def __init__(self, quantization_config: BNBQuantizerConfig, **kwargs):
+    def __init__(self, quantization_config: BNBQuantizerConfig = None, **kwargs):
+        if quantization_config is None: quantization_config = BNBQuantizerConfig()
         super().__init__(quantization_config, **kwargs)
-        
-        if not is_bitsandbytes_available():
+
+        if not is_cuda_available:
+            raise ImportError("bitsandbytes quant requires a CUDA machine")
+        elif not is_bitsandbytes_available():
             raise ImportError("please install bitsandbytes package to use this feature")
     
     # replaces nn.Linear with bnb.nn.Linear4bit / 8bit

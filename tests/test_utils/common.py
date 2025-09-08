@@ -1,4 +1,5 @@
 import os
+from functools import wraps
 import torch
 from torch import nn
 
@@ -6,8 +7,6 @@ from kirin.utils.device import MemoryManager, ProcDevice, is_mps_available
 from kirin.utils.model_utils import ModelMixin
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
-
-from functools import wraps
 
 def check_memory_usage(expected_mem, device=ProcDevice.CPU.value, atol=50, rtol=0.01):
     def decorator(test_func):
