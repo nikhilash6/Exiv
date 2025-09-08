@@ -10,6 +10,7 @@ from .device import DEFAULT_DEVICE, MemoryManager, ProcDevice
 from .file import ensure_model_available
 from .logging import app_logger
 from ..constants import ALWAYS_SAFE_LOAD, DISABLE_MMAP, LOW_VRAM_MODE
+from ..quantizers.base import Quantizer
 
 
 # bypassing weight creation at model init
@@ -35,28 +36,38 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     - safetensor support
     - URL download support
     '''
-    def __init__(self, device=None):
+    def __init__(self, device: str = None, quantizer: Quantizer = None):
         super().__init__()
         self.gpu_device = device or DEFAULT_DEVICE
         self.model_path = None
         self._patched = False
         self._fully_loaded = False
         
+        self.quantizer = quantizer
+        
     def patch_forward_pass(self):
         current = 0
         self.full_load = []
+        
+        def _load_module(module):
+            if module is None: return   # m_ref can turn out to be None
+            is_val_quantized = self.quantizer is not None and self.quantizer.is_quant_supported_val()
+            
+            if is_val_quantized:
+                pass
+            else:
+                app_logger.debug("Moving ", module.__class__.__name__, f" to {self.gpu_device}")
+                if any(p.device.type == "meta" for p in module.parameters(recurse=False)):
+                    module.to_empty(self.gpu_device)
+                else:
+                    module.to(device=self.gpu_device)
         
         def _full_load():
             if not self._patched or self._fully_loaded: return False
             # load initial full_load modules
             for m_ref in self.full_load:
                 m = m_ref()
-                if m is not None:
-                    # if params are meta, allocate fresh memory on target device
-                    if any(p.device.type == "meta" for p in m.parameters(recurse=False)):
-                        m.to_empty(device=self.gpu_device)
-                    else:
-                        m.to(self.gpu_device)
+                _load_module(m)
             
             self._fully_loaded = True
             return True
@@ -68,13 +79,9 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
             og_forward, module = kwargs["og_forward"], kwargs["module"]
             del kwargs["og_forward"]
             del kwargs["module"]
-            
+
             try:
-                app_logger.debug("Moving ", module.__class__.__name__, f" to {self.gpu_device}")
-                if any(p.device.type == "meta" for p in module.parameters(recurse=False)):
-                    module.to_empty(self.gpu_device)
-                else:
-                    module.to(device=self.gpu_device)
+                _load_module(module)
                 out = og_forward(obj, *args, **kwargs)
             finally:
                 app_logger.debug("Moving back ", module.__class__.__name__, " to cpu")
@@ -86,7 +93,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
                 continue
 
             current += self._module_size(m)
-            if current < MemoryManager.available_memory(self.gpu_device) - 50_000_000:  # 50 MB buffer
+            if current < MemoryManager.available_memory(self.gpu_device) - 50:  # 50 MB buffer
                 self.full_load.append(weakref.ref(m))
             else:
                 og_forward = m.forward
@@ -123,6 +130,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         force_low_vram=False,
     ):
         assert model_path is not None, "model_path is required"
+        
         self.gpu_device = device or self.gpu_device
         model_path = ensure_model_available(model_path, download_path, force_download)
         self.load_state_dict(self.get_state_dict(model_path, device=self.gpu_device, force_low_vram=force_low_vram), assign=True)

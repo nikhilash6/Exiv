@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from typing import Any, List, Dict
 
 from ..utils.enum import QuantizationMethod
-from .utils import validate_type
+from ..utils.common import validate_type
 
 
 class QuantizationConfig(ABC):
@@ -17,6 +17,11 @@ class QuantizationConfig(ABC):
             value = getattr(self, field_name)
             expected_type = field_def.type
             validate_type(value, expected_type, field_name)
+            
+    @property
+    @abstractmethod
+    def quantization_method(self):
+        pass
 
     @property
     @abstractmethod
@@ -129,11 +134,19 @@ class Quantizer(ABC):
         self.quantization_config = quantization_config
         self.kwargs = kwargs
     
-    # runs before loading the weights
-    def pre_process(self, model, **kwargs):
+    # given a value (from the state dict), this determines if that
+    # value/tensor can be quantized by this quantizer
+    def is_quant_supported_val(self, key):
         pass
     
-    # runs after loading the weights
-    # noop for - bnb, quanto
-    def post_process(self, model, **kwargs):
+    def quantize_val(self, key):
         pass
+    
+    # runs before loading the weights
+    def pre_process(self, model, **kwargs):
+        return model
+    
+    # runs after loading the weights
+    # noop for - bnb, quanto, torchao
+    def post_process(self, model, **kwargs):
+        return model

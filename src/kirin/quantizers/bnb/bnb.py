@@ -101,6 +101,8 @@ class BNBQuantizer(Quantizer):
         if not quant_layers_replaced:
             app_logger.warning("BnB quantization not applied, no linear layers found")
         
+        return model
+        
     def post_process(
         self,
         model: "ModelMixin",
