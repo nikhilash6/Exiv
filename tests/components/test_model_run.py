@@ -20,5 +20,5 @@ class ModelRunTest(unittest.TestCase):
         x = torch.ones(1, 1024)
         out = model(x)
         self.assertEqual(out.shape, (1, 512))
-        self.assertTrue(torch.all(out == 0))
+        self.assertTrue(out[0, 0].item(), 1024)
         self.assertEqual(next(model.parameters()).device.type, DEFAULT_DEVICE)

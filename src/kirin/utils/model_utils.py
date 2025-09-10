@@ -9,7 +9,7 @@ import safetensors
 from .device import DEFAULT_DEVICE, MemoryManager, ProcDevice
 from .file import ensure_model_available
 from .logging import app_logger
-from ..constants import ALWAYS_SAFE_LOAD, DISABLE_MMAP, LOW_VRAM_MODE
+from ..constants import ALWAYS_SAFE_LOAD, DISABLE_MMAP, LOW_VRAM_MODE, BYTES_IN_MB
 from ..quantizers.base import Quantizer
 
 
@@ -33,6 +33,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     - (TODO) multi gpu sharding
     - auto block swaping during low memory
     - (TODO) priority swapping
+    - (TODO) cuda streams for offloading
     - quantization support
     - safetensor support
     - URL download support
@@ -64,8 +65,8 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
                 else:
                     module.to(device=self.gpu_device)
         
-        def _full_load(self, *args):
-            if not self._patched or self._fully_loaded: return False
+        def _full_load(self, *args, **kwargs):
+            if not self._patched or self._fully_loaded: return None
             # load initial full_load modules
             for m_ref in self.full_load:
                 m = m_ref()
@@ -73,7 +74,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
                 _load_module(m)
             
             self._fully_loaded = True
-            return True
+            return None
 
         app_logger.debug("******** patching modules")
         # loading layers, doing work then moving them back to cpu
@@ -98,7 +99,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
                 continue
 
             current += self._module_size(m)
-            if False and current < MemoryManager.available_memory(self.gpu_device) - 50:  # 50 MB buffer
+            if current < MemoryManager.available_memory(self.gpu_device) - 50:  # 50 MB buffer
                 self.full_load.append(weakref.ref(m))
             else:
                 app_logger.debug(f"Adding modified forward load: {m.__class__.__name__}")
@@ -120,20 +121,13 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         ms = 0
         for param in module.parameters(recurse=False):
             ms += param.nelement() * param.element_size()
-        return ms
+        return round(ms / BYTES_IN_MB, 2)
     
     def __call__(self, *args, **kwargs):
-        # basically what nn.Module.__call__ does internally
-        # NOTE: this for reference here, it will be overridden in future
-        for hook in self._forward_pre_hooks.values():
-            hook(self, args)
-        if self._forward_hooks or self._backward_hooks:
-            result = self._call_impl(*args, **kwargs)
-        else:
-            result = self.forward(*args, **kwargs)
-        for hook in self._forward_hooks.values():
-            hook(self, args, result)
-        return result
+        # moving the inputs to GPU
+        new_args = tuple(a.to(self.gpu_device, non_blocking=True) if torch.is_tensor(a) else a for a in args)
+        new_kwargs = {k: (v.to(self.gpu_device, non_blocking=True) if torch.is_tensor(v) else v) for k, v in kwargs.items()}
+        return super().__call__(*new_args, **new_kwargs)
     
     # TODO: support GGUF loading
     def load_model(

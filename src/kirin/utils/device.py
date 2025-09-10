@@ -1,6 +1,7 @@
 import torch
 import psutil
 
+from ..constants import BYTES_IN_MB
 from .enum import ExtendedEnum
 
 
@@ -36,7 +37,6 @@ elif is_xla_available:
     DEFAULT_DEVICE = ProcDevice.XLA.value
 
 # ------------------ Memory availability
-BYTES_IN_MB = 1024 * 1024
 class MemoryManager:
     @staticmethod
     def available_memory(device=ProcDevice.CPU.value):
