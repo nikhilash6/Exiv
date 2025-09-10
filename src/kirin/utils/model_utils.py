@@ -102,10 +102,9 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
             if current < MemoryManager.available_memory(self.gpu_device) - 50:  # 50 MB buffer
                 self.full_load.append(weakref.ref(m))
             else:
-                app_logger.debug(f"Adding modified forward load: {m.__class__.__name__}")
                 og_forward = m.forward
                 m.forward = functools.partial(_modified_forward, og_forward=og_forward, module=m)
-                self._patched = True
+            self._patched = True
         
         self.register_forward_pre_hook(_full_load)
         
@@ -143,19 +142,17 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         
         self.gpu_device = device or self.gpu_device
         model_path = ensure_model_available(model_path, download_path, force_download)
-        self.load_state_dict(self.get_state_dict(model_path, device=self.gpu_device, force_low_vram=force_low_vram), assign=True)
+        self.load_state_dict(self.get_state_dict(model_path), assign=True)
     
     # code adapted from ComfyUI
-    def get_state_dict(self, model_path, device, force_low_vram=False):
-        # loading to cpu, then loading it on demand on gpu
-        if LOW_VRAM_MODE or force_low_vram: device = torch.device("cpu")
-
+    def get_state_dict(self, model_path, device=torch.device("cpu")):
         file_extension = os.path.basename(model_path).split(".")[-1]
         if file_extension in ["safetensors", "sft"]:
             try:
                 # safetensor's zero copy loading (pt - pytorch)
                 kwargs = {"framework": "pt"}
-                if device.type != "cpu": kwargs["device"] = device  # safetensors doesn't take cpu arg
+                # safetensors only support cpu and cuda, and doesn't take cpu as param
+                if device.type == "cuda": kwargs["device"] = device
                 with safetensors.safe_open(model_path, **kwargs) as f:
                     sd = {}
                     for k in f.keys():

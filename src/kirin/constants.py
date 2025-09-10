@@ -15,8 +15,6 @@ elif LOGGING_LEVEL_FLAG in [2, "2"]: LOGGING_LEVEL = logging.WARNING
 elif LOGGING_LEVEL_FLAG in [3, "3"]: LOGGING_LEVEL = logging.INFO
 elif LOGGING_LEVEL_FLAG in [4, "4"]: LOGGING_LEVEL = logging.DEBUG
 
-# the only function of low_vram_mode rn is that state_dict is loaded
-# on the CPU first, instead of directly being loaded to the vram
 LOW_VRAM_MODE = _get_flag("low_vram", 0)        # O : FALSE, 1 : TRUE
 DISABLE_MMAP = _get_flag("disable_mmap", 0)     # some OS have poor / buggy implementation of mmap
 ALWAYS_SAFE_LOAD = _get_flag("safe_load", 1) 

@@ -36,8 +36,8 @@ def check_memory_usage(expected_mem, device=ProcDevice.CPU.value, atol=50, rtol=
     return decorator
 
 # --------------- Dummy models
+# TODO: put checkpoints on git lfs and have them be downloaded automatically during test run
 class SimpleModel(ModelMixin):
-    # TODO: create individual model type
     PTH_PATH = os.path.abspath(os.path.join(script_dir, "./assets/models/simple_model.pth"))
     SAFETENSORS_PATH = os.path.abspath(os.path.join(script_dir, "./assets/models/simple_model.safetensors"))
     SFT_PATH = os.path.abspath(os.path.join(script_dir, "./assets/models/simple_model.sft"))
@@ -52,3 +52,18 @@ class SimpleModel(ModelMixin):
 
     def forward(self, x):
         return self.output_layer(self.input_layer(x))
+    
+class LargeModel(ModelMixin):
+    SAFETENSORS_PATH = os.path.abspath(os.path.join(script_dir, "./assets/models/large_model.safetensors"))
+    ALL_MODEL_PATHS = [SAFETENSORS_PATH]
+    
+    def __init__(self):
+        super().__init__()
+        self.input_layer = nn.Linear(16384, 32768)
+        self.hidden_layer = nn.Linear(32768, 16384)
+        self.output_layer = nn.Linear(16384, 4096)
+
+    def forward(self, x):
+        x = self.input_layer(x)
+        x = self.hidden_layer(x)
+        return self.output_layer(x)

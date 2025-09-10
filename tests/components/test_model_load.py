@@ -2,7 +2,7 @@ import torch
 
 import unittest
 
-from tests.test_utils.common import SimpleModel, check_memory_usage
+from tests.test_utils.common import LargeModel, SimpleModel, check_memory_usage
 from kirin.utils.device import MemoryManager, DEFAULT_DEVICE, is_cuda_available, is_mps_available, is_xla_available, is_mps_available
 
 class ModelLoadTest(unittest.TestCase):
@@ -21,25 +21,26 @@ class ModelLoadTest(unittest.TestCase):
         model = SimpleModel()
         self.assertEqual(next(model.parameters()).device.type, "meta")
     
-    # normal load should go to the default device
-    @check_memory_usage(expected_mem=12, device=DEFAULT_DEVICE)
+    # normal load should go to the cpu (loaded into the vram during forward)
+    @check_memory_usage(expected_mem=12, device="cpu")
     def test_model_device(self):
         model = SimpleModel()
         model.load_model(SimpleModel.CKPT_PATH)
-        self.assertEqual(next(model.parameters()).device.type, DEFAULT_DEVICE)
-    
-    # low vram load should go to the cpu
-    @check_memory_usage(expected_mem=12)
-    def test_model_device_low_vram(self):
-        model = SimpleModel()
-        model.load_model(SimpleModel.CKPT_PATH, force_low_vram=True)
         self.assertEqual(next(model.parameters()).device.type, "cpu")
     
     # test different kinds of format loading
     def test_model_formats(self):
         for model_path in SimpleModel.ALL_MODEL_PATHS:
             model = SimpleModel()
-            model.load_model(model_path, force_low_vram=True)
+            model.load_model(model_path)
+            self.assertEqual(next(model.parameters()).device.type, "cuda" if is_cuda_available else "cpu")
+            MemoryManager.clear_memory()
+            
+    # test large model loading
+    def test_large_model_load(self):
+        for model_path in LargeModel.ALL_MODEL_PATHS:
+            model = LargeModel()
+            model.load_model(model_path)
             self.assertEqual(next(model.parameters()).device.type, "cpu")
             MemoryManager.clear_memory()
 

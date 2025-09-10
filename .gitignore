@@ -40,3 +40,8 @@ temp.py
 # Test files
 .pytest_cache
 .coverage
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.sft
