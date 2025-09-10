@@ -126,10 +126,11 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         return round(ms / BYTES_IN_MB, 2)
     
     def __call__(self, *args, **kwargs):
-        # moving the inputs to GPU
-        new_args = tuple(a.to(self.gpu_device, non_blocking=True) if torch.is_tensor(a) else a for a in args)
-        new_kwargs = {k: (v.to(self.gpu_device, non_blocking=True) if torch.is_tensor(v) else v) for k, v in kwargs.items()}
-        return super().__call__(*new_args, **new_kwargs)
+        with torch.inference_mode():
+            # moving the inputs to GPU
+            new_args = tuple(a.to(self.gpu_device, non_blocking=True) if torch.is_tensor(a) else a for a in args)
+            new_kwargs = {k: (v.to(self.gpu_device, non_blocking=True) if torch.is_tensor(v) else v) for k, v in kwargs.items()}
+            return super().__call__(*new_args, **new_kwargs)
     
     # TODO: support GGUF loading
     def load_model(

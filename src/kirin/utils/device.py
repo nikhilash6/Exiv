@@ -37,6 +37,7 @@ elif is_xla_available:
     DEFAULT_DEVICE = ProcDevice.XLA.value
 
 # ------------------ Memory availability
+# TODO: do somekind of ttl based caching to eliminate repeated calls
 class MemoryManager:
     @staticmethod
     def available_memory(device=ProcDevice.CPU.value):
