@@ -1,6 +1,7 @@
 import torch
 
 import unittest
+from unittest.mock import patch
 
 from tests.test_utils.common import LargeModel, SimpleModel, check_memory_usage
 from kirin.utils.device import MemoryManager, DEFAULT_DEVICE
@@ -32,3 +33,31 @@ class ModelRunTest(unittest.TestCase):
         self.assertEqual(out.shape, (1, 4096))
         self.assertTrue(out[0, 0].item(), 16384)
         self.assertEqual(next(model.parameters()).device.type, DEFAULT_DEVICE)
+    
+    def test_low_mem_run(self):
+        with patch.multiple(
+                    MemoryManager, 
+                    available_memory=lambda device='cpu': 50.0,
+                    total_memory=lambda device='cpu': 100.0):
+            model = SimpleModel()
+            model.load_model(SimpleModel.SAFETENSORS_PATH)
+            x = torch.ones(1, 1024)
+            out = model(x)
+            self.assertEqual(out.shape, (1, 512))
+            self.assertTrue(out[0, 0].item(), 1024)
+            self.assertEqual(next(model.parameters()).device.type, "cpu")
+    
+    def test_low_mem_runtime_error(self):
+        with patch.multiple(
+                    MemoryManager, 
+                    available_memory=lambda device='cpu': 50.0,
+                    total_memory=lambda device='cpu': 100.0):
+            # not even a single layer can fit in the memory
+            with self.assertRaises(RuntimeError):
+                model = LargeModel()
+                model.load_model(LargeModel.SAFETENSORS_PATH)
+                x = torch.ones(1, 1024)
+                out = model(x)
+                self.assertEqual(out.shape, (1, 512))
+                self.assertTrue(out[0, 0].item(), 1024)
+                self.assertEqual(next(model.parameters()).device.type, "cpu")

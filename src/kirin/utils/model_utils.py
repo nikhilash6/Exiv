@@ -97,8 +97,11 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         for m in self.modules():
             if m is self or not self.is_leaf_module(m):
                 continue
-
+            
             current += self._module_size(m)
+            if self._module_size(m) >= MemoryManager.available_memory(self.gpu_device):
+                raise RuntimeError("Single layer exceeds total available memory, tf")
+            
             if current < MemoryManager.available_memory(self.gpu_device) - 50:  # 50 MB buffer
                 self.full_load.append(weakref.ref(m))
             else:
