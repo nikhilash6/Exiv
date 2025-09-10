@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from transformers import is_torchao_available
+from transformers.utils.import_utils import is_torchao_available
 if is_torchao_available():
     from torchao.quantization import quantize_
 
@@ -11,7 +11,8 @@ from ...utils.common import split_module_key
 
 # sample usage - https://docs.pytorch.org/ao/main/quick_start.html
 class TorchAOQuantizer(Quantizer):
-    def __init__(self, quantization_config: TorchAOConfig, **kwargs):
+    def __init__(self, quantization_config: TorchAOConfig = None, **kwargs):
+        if quantization_config is None: quantization_config = TorchAOConfig()
         super().__init__(quantization_config, **kwargs)
         
         if not is_torchao_available():

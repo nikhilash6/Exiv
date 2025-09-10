@@ -1,4 +1,5 @@
-from typing import Any, Tuple
+
+from typing import get_origin, get_args, Any, Union, Tuple
 
 # given a key, splits it into module, final key attr
 # layer1.block.0.weight -> (layer1.block[0], 'weight')
@@ -10,8 +11,6 @@ def split_module_key(module: Any, tensor_name: str) -> Tuple[Any, str]:
         except AttributeError:
             raise ValueError(f"{module} has no attribute {attr}.")
     return module, final
-
-from typing import get_origin, get_args, Any, Union
 
 def validate_type(value, expected_type, field_name: str):
     """
