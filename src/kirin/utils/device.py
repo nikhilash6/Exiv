@@ -3,7 +3,7 @@ import psutil
 
 from ..constants import BYTES_IN_MB
 from .enum import ExtendedEnum
-
+from .logging import app_logger
 
 # ------------------ Device availability
 # processing device
@@ -19,8 +19,9 @@ is_xla_available = False
 is_cpu_available = True
 
 if torch.cuda.is_available(): is_cuda_available = True
-CUDA_COMPUTE_CAPABILITY = (None, None) if not is_cuda_available \
+CUDA_CC_VERSION = (0, 0) if not is_cuda_available \
     else torch.cuda.get_device_capability()
+CUDA_CC = CUDA_CC_VERSION[0] * 10 + CUDA_CC_VERSION[1]
 if hasattr(torch.backends, "mps") and torch.backends.mps.is_available(): is_mps_available = True
 try:
     import torch_xla.core.xla_model as xm
@@ -45,6 +46,7 @@ class MemoryManager:
 
         # cuda (nvidia/rocm)
         if device.type == ProcDevice.CUDA.value:
+            torch.cuda.synchronize(device)
             stats = torch.cuda.memory_stats(device)
             mem_active = stats['active_bytes.all.current']
             mem_reserved = stats['reserved_bytes.all.current']
@@ -90,3 +92,15 @@ class MemoryManager:
             torch.cuda.empty_cache()
         if is_mps_available:
             torch.mps.empty_cache()
+            
+
+def print_mem_usage(model, tag):
+    app_logger.debug(f"----------------------- {tag}")
+    app_logger.debug(f"model params ****")
+    
+    for name, p in model.named_parameters():
+        app_logger.debug(f"{name} : {p.shape} : {p.dtype} : {p.__class__}")
+
+    app_logger.debug("model buffers ****")
+    for name, b in model.named_buffers():
+        app_logger.debug(f"{name} : {b.shape} : {b.dtype} : {b.__class__}")

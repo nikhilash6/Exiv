@@ -31,7 +31,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     - (TODO) better / modular patch system
     - zero init loading
     - (TODO) multi gpu sharding
-    - auto block swaping during low memory
+    - auto block swapping during low memory
     - (TODO) priority swapping
     - (TODO) cuda streams for offloading
     - quantization support
@@ -51,19 +51,21 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         current = 0
         self.full_load = []
         
-        # decides between loading in a quantized vs the normal way
+        # move module to the gpu_device
         def _load_module(module):
             if module is None: return   # m_ref can turn out to be None
-            is_val_quantized = False #self.quantizer is not None and self.quantizer.is_quant_supported_val()
             
-            if is_val_quantized:
-                pass
+            app_logger.debug(f"Moving {module.__class__.__name__} to {self.gpu_device}")
+            if any(p.device.type == "meta" for p in module.parameters(recurse=False)):
+                module.to_empty(self.gpu_device)
             else:
-                app_logger.debug(f"Moving {module.__class__.__name__} to {self.gpu_device}")
-                if any(p.device.type == "meta" for p in module.parameters(recurse=False)):
-                    module.to_empty(self.gpu_device)
-                else:
-                    module.to(device=self.gpu_device)
+                module.to(device=self.gpu_device)
+            
+            # NOTE: torchao does inplace quantization but others may not do it
+            if self.quantizer is not None:
+                app_logger.debug("quant seems to be supported")
+                self.quantizer.quantize(module)
+                
         
         def _full_load(self, *args, **kwargs):
             if not self._patched or self._fully_loaded: return None
@@ -94,15 +96,16 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
                 module.to(ProcDevice.CPU.value)
             return out
 
+        available_mem = MemoryManager.available_memory(self.gpu_device)
         for m in self.modules():
             if m is self or not self.is_leaf_module(m):
                 continue
             
             current += self._module_size(m)
-            if self._module_size(m) >= MemoryManager.available_memory(self.gpu_device):
+            if self._module_size(m) >= available_mem:
                 raise RuntimeError("Single layer exceeds total available memory, tf")
             
-            if current < MemoryManager.available_memory(self.gpu_device) - 50:  # 50 MB buffer
+            if current < available_mem - 50:  # 50 MB buffer
                 self.full_load.append(weakref.ref(m))
             else:
                 og_forward = m.forward

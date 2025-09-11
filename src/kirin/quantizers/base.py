@@ -3,6 +3,7 @@ import torch
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 from typing import Any, List, Dict
+from functools import partial
 
 from ..utils.enum import QuantizationMethod
 from ..utils.common import validate_type
@@ -30,13 +31,13 @@ class QuantizationConfig(ABC):
 
 @dataclass
 class TorchAOConfig(QuantizationConfig):
-    kwargs: Dict[str, Any]          # https://github.com/pytorch/ao/blob/main/torchao/quantization/quant_api.py
+    kwargs: Dict[str, Any] = field(default_factory=dict)         # https://github.com/pytorch/ao/blob/main/torchao/quantization/quant_api.py
     skip_modules: List[str] = field(default_factory=list)
-    quant_type: str = "float8wo"
+    quant_type: str = "fp8wo_e4m3"
     
     # not sure if this should be present here..
     def get_config_cls(self):
-        from transformers import is_torchao_available
+        from transformers.utils.import_utils import is_torchao_available
         if is_torchao_available():
             # there are couple of other methods available
             # but skipping them for now
@@ -60,8 +61,8 @@ class TorchAOConfig(QuantizationConfig):
             # float dynamic
             "fp8dq_e4m3": Float8DynamicActivationFloat8WeightConfig,
             "fp8dq_int4": Float8DynamicActivationInt4WeightConfig,
-            # float static
-            "fp8s_e4m3": Float8StaticActivationFloat8WeightConfig,
+            # float static (TODO: skipping for now)
+            # "fp8s_e4m3": Float8StaticActivationFloat8WeightConfig
             # int dynamic
             "int8dq_int4": Int8DynamicActivationInt4WeightConfig,
             "int4dq_int4": Int4DynamicActivationInt4WeightConfig,
@@ -70,7 +71,8 @@ class TorchAOConfig(QuantizationConfig):
             "int4": Int4WeightOnlyConfig,
             "int8": Int8WeightOnlyConfig,
             # float only
-            "e4m3": Float8WeightOnlyConfig,
+            "fp8wo_e4m3": partial(Float8WeightOnlyConfig, weight_dtype=torch.float8_e4m3fn),  # 'fn': finite numbers (no NaN, Inf..)
+            "fp8wo_e5m2": partial(Float8WeightOnlyConfig, weight_dtype=torch.float8_e5m2),
         }
         
         quant_config = self.kwargs.get("quant_config", None)

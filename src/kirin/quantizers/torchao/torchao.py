@@ -5,9 +5,9 @@ if is_torchao_available():
     from torchao.quantization import quantize_
 
 from ..base import Quantizer, TorchAOConfig
-from ...utils.device import is_cuda_available, CUDA_COMPUTE_CAPABILITY
+from ...utils.device import is_cuda_available, CUDA_CC
 from ...utils.common import split_module_key
-
+from ...utils.logging import app_logger
 
 # sample usage - https://docs.pytorch.org/ao/main/quick_start.html
 class TorchAOQuantizer(Quantizer):
@@ -23,24 +23,30 @@ class TorchAOQuantizer(Quantizer):
         
         # https://huggingface.co/docs/diffusers/quantization/torchao
         # compute capability 89 and above is needed
-        major_ver, minor_ver = CUDA_COMPUTE_CAPABILITY
-        if (major_ver == minor_ver == None) or \
-            (major_ver * 10 + minor_ver < 89):
-            raise RuntimeError("Cuda compute capability should atleast be 89")
+        if (CUDA_CC < 89):
+            raise RuntimeError(f"Cuda compute capability should atleast be 89, current capability {CUDA_CC}")
     
-    def is_quant_supported_val(self, model, key):
+    def is_quant_supported_val(self, mod, *args):
         for skip_key in self.quantization_config.skip_modules:
-            if (skip_key + "." in key) or (skip_key == key):
+            if skip_key == mod or hasattr(mod, skip_key): 
                 return False
-            
-        # supports quant of linear layer weights
-        module, tensor_name = split_module_key(model, key)
-        return isinstance(module, nn.Linear) and tensor_name == "weight"
+
+        # NOTE: the internal code of torchao has a much more comprehensive
+        # set of checks, wonder if that is needed here as well
+        return isinstance(mod, nn.Linear) and hasattr(mod, 'weight')
     
-    def quantize_val(self, model, key, value, device):
-        module, tensor_name = split_module_key(model, key)
-        module._parameters[tensor_name] = torch.nn.Parameter(value).to(device=device)
-        quantize_(module, self.quantization_config.get_config_cls())
+    def quantize(self, module):
+        '''
+        - many quantized layers (such as AffineQuantizedTensor) return the dtype
+            of the original high precision tensor
+        - 
+        '''
+        app_logger.debug("*** quantizing the module")
+        quantize_(
+            model=module, 
+            config=self.quantization_config.get_config_cls(), 
+            filter_fn=self.is_quant_supported_val
+        )
     
     def pre_process(self, model, **kwargs):
         model = super().pre_process(model, **kwargs)

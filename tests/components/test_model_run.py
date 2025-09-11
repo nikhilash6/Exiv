@@ -3,17 +3,19 @@ import torch
 import unittest
 from unittest.mock import patch
 
-from tests.test_utils.common import LargeModel, SimpleModel, check_memory_usage
-from kirin.utils.device import MemoryManager, DEFAULT_DEVICE
+from tests.test_utils.common import LargeModel, SimpleModel, check_memory_usage, create_large_model_file
+from kirin.utils.device import MemoryManager, DEFAULT_DEVICE, print_mem_usage
 
 
 class ModelRunTest(unittest.TestCase):
     def setUp(self):
+        create_large_model_file()
         MemoryManager.clear_memory()    
     
     def tearDown(self):
         MemoryManager.clear_memory()
-        
+    
+    # small model run
     @check_memory_usage(expected_mem=12, device=DEFAULT_DEVICE)
     def test_small_model_run(self):
         model = SimpleModel()
@@ -24,6 +26,7 @@ class ModelRunTest(unittest.TestCase):
         self.assertTrue(out[0, 0].item(), 1024)
         self.assertEqual(next(model.parameters()).device.type, DEFAULT_DEVICE)
     
+    # large model run
     @check_memory_usage(expected_mem=4350, device=DEFAULT_DEVICE)
     def test_large_model_run(self):
         model = LargeModel()
@@ -34,6 +37,7 @@ class ModelRunTest(unittest.TestCase):
         self.assertTrue(out[0, 0].item(), 16384)
         self.assertEqual(next(model.parameters()).device.type, DEFAULT_DEVICE)
     
+    # small model low mem run
     def test_low_mem_run(self):
         with patch.multiple(
                     MemoryManager, 
@@ -47,6 +51,7 @@ class ModelRunTest(unittest.TestCase):
             self.assertTrue(out[0, 0].item(), 1024)
             self.assertEqual(next(model.parameters()).device.type, "cpu")
     
+    # large model low mem run
     def test_low_mem_runtime_error(self):
         with patch.multiple(
                     MemoryManager, 
@@ -61,3 +66,20 @@ class ModelRunTest(unittest.TestCase):
                 self.assertEqual(out.shape, (1, 512))
                 self.assertTrue(out[0, 0].item(), 1024)
                 self.assertEqual(next(model.parameters()).device.type, "cpu")
+                
+    # torchao run
+    # TODO: this only checks the default fp8 quant, test others as well
+    @check_memory_usage(expected_mem=1130, device=DEFAULT_DEVICE)
+    def test_torchao_run(self):
+        from kirin.quantizers.torchao.torchao import TorchAOQuantizer
+        
+        quantizer = TorchAOQuantizer()
+        model = LargeModel(quantizer=quantizer)
+        model = quantizer.pre_process(model)
+        model.load_model(LargeModel.SAFETENSORS_PATH)
+        model = quantizer.post_process(model)
+        x = torch.ones(1, 16384)
+        out = model(x)
+        self.assertEqual(out.shape, (1, 4096))
+        self.assertTrue(out[0, 0].item(), 16384)
+        self.assertEqual(next(model.parameters()).device.type, DEFAULT_DEVICE)
