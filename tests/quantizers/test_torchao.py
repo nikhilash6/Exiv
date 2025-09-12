@@ -5,11 +5,12 @@ from unittest.mock import patch
 from parameterized import parameterized
 
 from tests.test_utils.common import LargeModel, SimpleModel, check_memory_usage, create_large_model_file
-from kirin.utils.device import MemoryManager, DEFAULT_DEVICE, print_mem_usage
+from kirin.utils.device import MemoryManager, DEFAULT_DEVICE, is_cuda_available
 from kirin.utils.logging import app_logger
 from kirin.utils.model_utils import ModelMixin
 
-class ModelRunTest(unittest.TestCase):
+@unittest.skipIf(not is_cuda_available, "Only available for cuda devices")
+class TorchAORunTest(unittest.TestCase):
     def setUp(self):
         create_large_model_file()
         MemoryManager.clear_memory()    
