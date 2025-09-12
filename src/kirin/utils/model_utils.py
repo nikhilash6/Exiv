@@ -52,7 +52,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         self.full_load = []
         
         # move module to the gpu_device
-        def _load_module(module):
+        def _load_module(module, quant_enabled=False):
             if module is None: return   # m_ref can turn out to be None
             
             app_logger.debug(f"Moving {module.__class__.__name__} to {self.gpu_device}")
@@ -61,19 +61,20 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
             else:
                 module.to(device=self.gpu_device)
             
-            # NOTE: torchao does inplace quantization but others may not do it
-            if self.quantizer is not None:
+            # - torchao does inplace quantization
+            # - partial loads are not quantized because many quantizers 
+            #   don't support offloading / swapping
+            if self.quantizer is not None and quant_enabled:
                 app_logger.debug("quant seems to be supported")
                 self.quantizer.quantize(module)
-                
-        
+
         def _full_load(self, *args, **kwargs):
             if not self._patched or self._fully_loaded: return None
             # load initial full_load modules
             for m_ref in self.full_load:
                 m = m_ref()
                 app_logger.debug(f"Loading via full load: {m.__class__.__name__}")
-                _load_module(m)
+                _load_module(m, quant_enabled=True)
             
             self._fully_loaded = True
             return None
@@ -103,7 +104,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
             
             current += self._module_size(m)
             if self._module_size(m) >= available_mem:
-                raise RuntimeError("Single layer exceeds total available memory, tf")
+                raise RuntimeError(f"Single layer mem size of {self._module_size(m)} exceeds the total available memory of {available_mem}")
             
             if current < available_mem - 50:  # 50 MB buffer
                 self.full_load.append(weakref.ref(m))

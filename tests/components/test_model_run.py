@@ -83,3 +83,25 @@ class ModelRunTest(unittest.TestCase):
         self.assertEqual(out.shape, (1, 4096))
         self.assertTrue(out[0, 0].item(), 16384)
         self.assertEqual(next(model.parameters()).device.type, DEFAULT_DEVICE)
+        
+    # torchao plus offloading
+    @check_memory_usage(expected_mem=550, device=DEFAULT_DEVICE)
+    def test_torchao_low_mem_run(self):
+        from kirin.quantizers.torchao.torchao import TorchAOQuantizer
+        
+        # this offloading pattern only quantizes the full_load modules
+        # that stay on the gpu, rest all are used and then offloaded
+        with patch.multiple(
+                    MemoryManager, 
+                    available_memory=lambda device: 2500.0,
+                    total_memory=lambda device: 2500.0):
+            quantizer = TorchAOQuantizer()
+            model = LargeModel(quantizer=quantizer)
+            model = quantizer.pre_process(model)
+            model.load_model(LargeModel.SAFETENSORS_PATH)
+            model = quantizer.post_process(model)
+            x = torch.ones(1, 16384)
+            out = model(x)
+            self.assertEqual(out.shape, (1, 4096))
+            self.assertTrue(out[0, 0].item(), 16384)
+            self.assertEqual(next(model.parameters()).device.type, DEFAULT_DEVICE)
