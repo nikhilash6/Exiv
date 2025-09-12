@@ -8,34 +8,42 @@ from kirin.utils.model_utils import ModelMixin
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
-def check_memory_usage(expected_mem, device=ProcDevice.CPU.value, atol=5, rtol=0.1):
-    def decorator(test_func):
+class check_memory_usage:
+    def __init__(self, expected_mem, device=ProcDevice.CPU.value, atol=5, rtol=0.1):
+        self.expected_mem = expected_mem
+        self.device = device
+        self.atol = atol
+        self.rtol = rtol
+        self.initial_mem_mb = 0
+
+    def __enter__(self):
+        self.initial_mem_mb = MemoryManager.available_memory(self.device)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        final_mem_mb = MemoryManager.available_memory(self.device)
+        mem_diff = self.initial_mem_mb - final_mem_mb
+        
+        is_close = torch.isclose(
+                        torch.tensor(float(mem_diff)), 
+                        torch.tensor(float(self.expected_mem)), 
+                        rtol=self.rtol,
+                        atol=self.atol
+                    )
+        
+        is_mac_cpu = is_mps_available and self.device == ProcDevice.CPU.value
+        
+        if not is_close and not is_mac_cpu:
+            raise AssertionError(
+                f"Memory usage difference {mem_diff:.2f} MB is not close to expected {self.expected_mem} MB."
+            )
+
+    def __call__(self, test_func):
         @wraps(test_func)
         def wrapper(*args, **kwargs):
-            initial_mem_mb = MemoryManager.available_memory(device)
-            test_func(*args, **kwargs)
-            final_mem_mb = MemoryManager.available_memory(device)
-            mem_diff = initial_mem_mb - final_mem_mb
-            
-            is_close = torch.isclose(
-                            torch.tensor(float(mem_diff)), 
-                            torch.tensor(float(expected_mem)), 
-                            rtol=rtol,
-                            atol=atol       # TODO: atol of 5 mb is a cope, fix this
-                        )
-            
-            # TODO: psutil is unreliable on mac (for cpu), find a work around
-            is_mac_cpu = is_mps_available and device == ProcDevice.CPU.value
-            
-            if not is_close and not is_mac_cpu:
-                raise AssertionError(
-                    f"Memory usage difference {mem_diff:.2f} MB is not close to expected {expected_mem} MB. "
-                    f"On the device {device}. "
-                    f"Absolute difference: {abs(mem_diff - expected_mem):.2f} MB. "
-                    f"Absolute tolerance (atol): {atol} MB, Relative tolerance (rtol): {rtol}."
-                )
+            with self:
+                test_func(*args, **kwargs)
         return wrapper
-    return decorator
 
 # --------------- Dummy models
 class SimpleModel(ModelMixin):

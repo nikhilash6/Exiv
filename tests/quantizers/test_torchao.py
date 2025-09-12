@@ -2,6 +2,7 @@ import torch
 
 import unittest
 from unittest.mock import patch
+from parameterized import parameterized
 
 from tests.test_utils.common import LargeModel, SimpleModel, check_memory_usage, create_large_model_file
 from kirin.utils.device import MemoryManager, DEFAULT_DEVICE, print_mem_usage
@@ -17,24 +18,24 @@ class ModelRunTest(unittest.TestCase):
         MemoryManager.clear_memory()
         
     # torchao run
-    # @check_memory_usage(expected_mem=1130, device=DEFAULT_DEVICE)
-    def test_torchao_run(self):
+    # these mem values are empirically determined
+    QUANT_PARAMS = [
+        ("fp8dq_e4m3", 1130),
+        ("int8dq_int4", 1360),
+        ("int4dq_int4", 550),
+        ("int8dq_int8", 1100),
+        ("int8", 1200),
+        ("fp8wo_e4m3", 1130),
+        ("fp8wo_e5m2", 1130),
+    ]
+    @parameterized.expand(QUANT_PARAMS)
+    def test_torchao_run(self, quant_type, expected_mem):
         from kirin.quantizers.torchao.torchao import TorchAOQuantizer
         from kirin.quantizers.base import TorchAOConfig
         
-        quant_dtype_list = [
-            "fp8dq_e4m3",
-            "int8dq_int4",
-            "int4dq_int4",
-            "int8dq_int8",
-            "int8",
-            "fp8wo_e4m3",
-            "fp8wo_e5m2",
-        ]
-        
-        for qd in quant_dtype_list:
-            app_logger.info(f"quantizing: {qd}")
-            quant_config = TorchAOConfig(quant_type=qd)
+        with check_memory_usage(expected_mem=expected_mem, device=DEFAULT_DEVICE):
+            app_logger.info(f"quantizing: {quant_type}")
+            quant_config = TorchAOConfig(quant_type=quant_type)
             quantizer = TorchAOQuantizer(quantization_config=quant_config)
             model = LargeModel(quantizer=quantizer)
             model = quantizer.pre_process(model)
@@ -46,13 +47,15 @@ class ModelRunTest(unittest.TestCase):
             self.assertTrue(out[0, 0].item(), 16384)
             self.assertEqual(next(model.parameters()).device.type, DEFAULT_DEVICE)
             
-            del model
-            del quantizer
-            del out
-            del x
-            del quant_config
-            ModelMixin.clear_caches()
-            MemoryManager.clear_memory()
+        # probably not needed since tests are being run in isolation
+        # but keeping them just to be safe
+        del model
+        del quantizer
+        del out
+        del x
+        del quant_config
+        ModelMixin.clear_caches()
+        MemoryManager.clear_memory()
         
     # torchao plus offloading
     @check_memory_usage(expected_mem=550, device=DEFAULT_DEVICE)
