@@ -60,7 +60,8 @@ class TorchAOConfig(QuantizationConfig):
         config_dict = {
             # float dynamic
             "fp8dq_e4m3": Float8DynamicActivationFloat8WeightConfig,
-            "fp8dq_int4": Float8DynamicActivationInt4WeightConfig,
+            # (skipping for now, needs additional package)
+            # "fp8dq_int4": Float8DynamicActivationInt4WeightConfig,
             # float static (TODO: skipping for now)
             # "fp8s_e4m3": Float8StaticActivationFloat8WeightConfig
             # int dynamic
@@ -68,7 +69,8 @@ class TorchAOConfig(QuantizationConfig):
             "int4dq_int4": Int4DynamicActivationInt4WeightConfig,
             "int8dq_int8": Int8DynamicActivationInt8WeightConfig,
             # int only
-            "int4": Int4WeightOnlyConfig,
+            # (skipping, not ideal for inference on consumer cards)
+            # "int4": Int4WeightOnlyConfig,
             "int8": Int8WeightOnlyConfig,
             # float only
             "fp8wo_e4m3": partial(Float8WeightOnlyConfig, weight_dtype=torch.float8_e4m3fn),  # 'fn': finite numbers (no NaN, Inf..)

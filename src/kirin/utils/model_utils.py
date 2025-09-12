@@ -115,7 +115,11 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         
         self.register_forward_pre_hook(_full_load)
         
-        
+    @classmethod
+    def clear_caches(cls):
+        cls._module_size.cache_clear()
+        cls.is_leaf_module.cache_clear()
+    
     @staticmethod
     @functools.lru_cache(maxsize=None)
     def is_leaf_module(module: nn.Module) -> bool:
