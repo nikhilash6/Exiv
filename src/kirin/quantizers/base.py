@@ -90,22 +90,12 @@ class TorchAOConfig(QuantizationConfig):
         return QuantizationMethod.TORCHAO.value
 
 @dataclass
-class QuantoConfig(QuantizationConfig):
-    quant_type: str = "int8"        # basically dtype to quant in
-    skip_modules: List[str] = field(default_factory=list)    # these won't be quantized
-    
-    @property
-    def quantization_dtype(self):
-        return self.quant_type
-    
-    @property
-    def quantization_method(self):
-        return QuantizationMethod.QUANTO.value
-
-@dataclass
 class BNBQuantizerConfig(QuantizationConfig):
     load_in_8bit: bool = False
     load_in_4bit: bool = False
+    llm_int8_has_fp16_weight: bool = False      # keeps an extra copy of fp16 weights for the 
+                                                # backward pass and weight updation
+                                                # more info - https://arxiv.org/pdf/2208.07339
     llm_int8_threshold: float = 6.0      # int8 handles values ~6 (99.9%), outside this
                                         # range the ops are done in fp16 (empirical data for LLMs)
     llm_int8_skip_modules: List[str] = field(default_factory=list)   # these won't be quantized

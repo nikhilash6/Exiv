@@ -23,6 +23,7 @@ class ModuleMeta(type(nn.Module)):
                 instance.patch_forward_pass()
         return instance
 
+
 class ModelMixin(nn.Module, metaclass=ModuleMeta):
     '''
     Adds additional feature to the base model
@@ -52,29 +53,33 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         self.full_load = []
         
         # move module to the gpu_device
-        def _load_module(module, quant_enabled=False):
+        def _load_module(module, module_name, quant_enabled=False):
             if module is None: return   # m_ref can turn out to be None
             
             app_logger.debug(f"Moving {module.__class__.__name__} to {self.gpu_device}")
             if any(p.device.type == "meta" for p in module.parameters(recurse=False)):
-                module.to_empty(self.gpu_device)
+                module.to_empty(device=self.gpu_device)
             else:
                 module.to(device=self.gpu_device)
-            
-            # - torchao does inplace quantization
+
             # - partial loads are not quantized because many quantizers 
             #   don't support offloading / swapping
             if self.quantizer is not None and quant_enabled:
-                app_logger.debug("quant seems to be supported")
-                self.quantizer.quantize(module)
+                app_logger.debug(f"quant seems to be supported {module_name}")
+                self.quantizer.quantize(self, module, module_name)
+                # print(" after quantization: ", module)
+
+            print("modules rn: ", [m.__class__.__name__ for mn, m in self.named_modules() if m != self])
+            
+            MemoryManager.clear_memory()
 
         def _full_load(self, *args, **kwargs):
             if not self._patched or self._fully_loaded: return None
             # load initial full_load modules
-            for m_ref in self.full_load:
+            for m_ref, m_name in self.full_load:
                 m = m_ref()
-                app_logger.debug(f"Loading via full load: {m.__class__.__name__}")
-                _load_module(m, quant_enabled=True)
+                app_logger.debug(f"Loading via full load: {m_name}")
+                _load_module(m, m_name, quant_enabled=True)
             
             self._fully_loaded = True
             return None
@@ -84,13 +89,14 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         # PONDER: is this better done through register_forward_pre_hook and register_forward_hook ?
         def _modified_forward(obj, *args, **kwargs):
             app_logger.debug("Inside the modified forward path")
-            og_forward, module = kwargs["og_forward"], kwargs["module"]
+            og_forward, module, module_name = kwargs["og_forward"], kwargs["module"], kwargs["module_name"]
             del kwargs["og_forward"]
             del kwargs["module"]
+            del kwargs["module_name"]
 
             try:
                 app_logger.debug(f"Loading via partial load: {m.__class__.__name__}")
-                _load_module(module)
+                _load_module(module, module_name)
                 out = og_forward(obj, *args, **kwargs)
             finally:
                 app_logger.debug(f"Moving back {module.__class__.__name__} to cpu")
@@ -98,19 +104,24 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
             return out
 
         available_mem = MemoryManager.available_memory(self.gpu_device)
-        for m in self.modules():
+        for m_name, m in self.named_modules():
             if m is self or not self.is_leaf_module(m):
                 continue
-            
+            print("layer: ", m_name)
             current += self._module_size(m)
             if self._module_size(m) >= available_mem:
                 raise RuntimeError(f"Single layer mem size of {self._module_size(m)} exceeds the total available memory of {available_mem}")
             
             if current < available_mem - 50:  # 50 MB buffer
-                self.full_load.append(weakref.ref(m))
+                self.full_load.append((weakref.ref(m), m_name))
             else:
                 og_forward = m.forward
-                m.forward = functools.partial(_modified_forward, og_forward=og_forward, module=m)
+                m.forward = functools.partial(
+                                _modified_forward, 
+                                og_forward=og_forward, 
+                                module=m, 
+                                module_name=m_name
+                            )
             self._patched = True
         
         self.register_forward_pre_hook(_full_load)
@@ -164,7 +175,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
                 # safetensor's zero copy loading (pt - pytorch)
                 kwargs = {"framework": "pt"}
                 # safetensors only support cpu and cuda, and doesn't take cpu as param
-                if device.type == "cuda": kwargs["device"] = device
+                if device.type == "cuda": kwargs["device"] = device.type
                 with safetensors.safe_open(model_path, **kwargs) as f:
                     sd = {}
                     for k in f.keys():

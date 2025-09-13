@@ -39,7 +39,6 @@ class TorchAOQuantizer(Quantizer):
         '''
         - many quantized layers (such as AffineQuantizedTensor) return the dtype
             of the original high precision tensor
-        - 
         '''
         app_logger.debug("*** quantizing the module")
         quantize_(

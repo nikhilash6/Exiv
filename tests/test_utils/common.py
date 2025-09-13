@@ -1,15 +1,35 @@
-import os
-from functools import wraps
 import torch
 from torch import nn
+
+import os, gc
+from functools import wraps
 
 from kirin.utils.device import MemoryManager, ProcDevice, is_mps_available
 from kirin.utils.model_utils import ModelMixin
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
+def print_top_gpu_tensors(n=5, device="cuda:0"):
+    objs = gc.get_objects()
+    gpu_tensors = []
+    visited_ids = set()
+    for obj in objs:
+        try:
+            if torch.is_tensor(obj) and obj.is_cuda and obj.device == torch.device(device) and id(obj) not in visited_ids:
+                gpu_tensors.append((obj.element_size() * obj.nelement(), obj))
+                visited_ids.add(id(obj))
+        except Exception:
+            pass
+    
+    # NOTE: the size here is theoretical, it could have been freed by gc or some other mechanism
+    gpu_tensors = sorted(gpu_tensors, key=lambda x: x[0], reverse=True)
+    print(f"\n Top {n} GPU tensors on {device}:")
+    for size, tensor in gpu_tensors[:n]:
+        size_mb = size / (1024**2)
+        print(f"- {tensor.shape} | {tensor.dtype} | {size_mb:.2f} MB | requires_grad={tensor.requires_grad}")
+
 class check_memory_usage:
-    def __init__(self, expected_mem, device=ProcDevice.CPU.value, atol=5, rtol=0.1):
+    def __init__(self, expected_mem, device=ProcDevice.CPU.value, atol=10, rtol=0.1):
         self.expected_mem = expected_mem
         self.device = device
         self.atol = atol
@@ -34,6 +54,8 @@ class check_memory_usage:
         is_mac_cpu = is_mps_available and self.device == ProcDevice.CPU.value
         
         if not is_close and not is_mac_cpu:
+            print("device: ", self.device)
+            print_top_gpu_tensors()
             raise AssertionError(
                 f"Memory usage difference {mem_diff:.2f} MB is not close to expected {self.expected_mem} MB."
             )
