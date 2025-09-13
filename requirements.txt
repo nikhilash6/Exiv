@@ -4,9 +4,8 @@ packaging
 transformers==4.56.1
 einops
 psutil
+colorlog
 # quantizers (make these optional installs)
 torchao
 bitsandbytes
 optimum-quanto
-# simple utils
-colorlog

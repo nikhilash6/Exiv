@@ -5,15 +5,16 @@ def read_requirements_file(file_name: str) -> List[str]:
     with open(f"./{file_name}.txt", "r", encoding="utf-8") as file:
         requirements = file.readlines()
 
-    requirements: List[str] = []
+    res: List[str] = []
     for line in requirements:
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        requirements.append(line)
-    return requirements
+        res.append(line)
+    return res
 
 main_deps = read_requirements_file("requirements")
+dev_deps = read_requirements_file("requirements-dev")
 
 setup(
     name="kirin",
@@ -25,12 +26,9 @@ setup(
     package_dir={"": "src"},
     packages=find_packages(where="src"),
     # package_data={"test_pkg": ["data.txt"]},
-    install_requies=main_deps,
+    install_requires=main_deps,
     extras_require={
-        'test': [
-            'pytest',
-            'pytest-cov',
-        ],
+        'dev': dev_deps,
     },
     include_package_data=True,
     entry_points={
