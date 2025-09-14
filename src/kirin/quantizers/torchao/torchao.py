@@ -26,7 +26,7 @@ class TorchAOQuantizer(Quantizer):
         if (CUDA_CC < 89):
             raise RuntimeError(f"Cuda compute capability should atleast be 89, current capability {CUDA_CC}")
     
-    def is_quant_supported_val(self, mod, *args):
+    def _is_quant_supported_val(self, mod, *args):
         for skip_key in self.quantization_config.skip_modules:
             if skip_key == mod or hasattr(mod, skip_key): 
                 return False
@@ -44,14 +44,5 @@ class TorchAOQuantizer(Quantizer):
         quantize_(
             model=module, 
             config=self.quantization_config.get_config_cls(), 
-            filter_fn=self.is_quant_supported_val
+            filter_fn=self._is_quant_supported_val
         )
-    
-    def pre_process(self, model, **kwargs):
-        model = super().pre_process(model, **kwargs)
-        return model    # no-op
-    
-    # torchao quantizes the weights in place
-    def post_process(self, model, **kwargs):
-        model = super().post_process(model, **kwargs)
-        return model    # no-op

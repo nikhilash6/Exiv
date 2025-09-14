@@ -127,20 +127,6 @@ class Quantizer(ABC):
     def __init__(self, quantization_config: QuantizationConfig, **kwargs):
         self.quantization_config = quantization_config
         self.kwargs = kwargs
-    
-    # given a value (from the state dict), this determines if that
-    # value/tensor can be quantized by this quantizer
-    def is_quant_supported_val(self, key):
-        pass
-    
+
     def quantize(self, model, module, module_name):
         pass
-    
-    # runs before loading the weights
-    def pre_process(self, model, **kwargs):
-        return model
-    
-    # runs after loading the weights
-    # noop for - bnb, quanto, torchao
-    def post_process(self, model, **kwargs):
-        return model

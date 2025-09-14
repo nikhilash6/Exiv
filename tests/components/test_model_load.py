@@ -52,9 +52,7 @@ class ModelLoadTest(unittest.TestCase):
         
         quantizer = BNBQuantizer()
         model = SimpleModel()
-        model = quantizer.pre_process(model)
         model.load_model(SimpleModel.CKPT_PATH)
-        model = quantizer.post_process(model)
         self.assertEqual(next(model.parameters()).device.type, DEFAULT_DEVICE)
     
     # testing torchao quantization
@@ -64,7 +62,5 @@ class ModelLoadTest(unittest.TestCase):
         
         quantizer = TorchAOQuantizer()
         model = SimpleModel(quantizer=quantizer)
-        model = quantizer.pre_process(model)
         model.load_model(SimpleModel.CKPT_PATH)
-        model = quantizer.post_process(model)
         self.assertEqual(next(model.parameters()).device.type, "cpu")

@@ -86,21 +86,3 @@ class BNBQuantizer(Quantizer):
 
         del weight_data, bias_data
         torch.cuda.empty_cache()
-
-    def pre_process(
-        self,
-        model: "ModelMixin",
-        **kwargs
-    ):
-        # model, quant_layers_replaced = self._recusive_linear_layer_replace(model)
-        # if not quant_layers_replaced:
-        #     app_logger.warning("BnB quantization not applied, no linear layers found")
-        
-        return model
-        
-    def post_process(
-        self,
-        model: "ModelMixin",
-        **kwargs
-    ):
-        return model    # noop at this point, will update later
