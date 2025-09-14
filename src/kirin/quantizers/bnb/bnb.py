@@ -50,12 +50,6 @@ class BNBQuantizer(Quantizer):
 
         return model, quant_layers_replaced
     
-    def _is_excluded(self, full_key: str) -> bool:
-        for key in self.quantization_config.llm_int8_skip_modules:
-            if full_key == key or full_key.startswith(key + "."):
-                return True
-        return False
-    
     def quantize(self, model, module, module_name):
         from bitsandbytes.nn import Int8Params, Params4bit
         import bitsandbytes as bnb
@@ -67,10 +61,11 @@ class BNBQuantizer(Quantizer):
         
         weight_data = module.weight.data
         bias_data = module.bias.data if module.bias is not None else None
-        # deleting original tensors before creating quantized version
-        del module.weight
         
         if quantization_config.quantization_dtype == "llm_int8":
+            if module in quantization_config.llm_int8_skip_modules:
+                return module  # skip quantization
+            
             quantized = bnb.nn.Linear8bitLt(
                 in_features,
                 out_features,
@@ -85,9 +80,6 @@ class BNBQuantizer(Quantizer):
                 requires_grad=False,
             )
         else:
-            if module in quantization_config.llm_int8_skip_modules:
-                return module  # skip quantization
-
             extra_kwargs = {}
             if "quant_storage" in signature(bnb.nn.Linear4bit).parameters:
                 extra_kwargs["quant_storage"] = quantization_config.bnb_4bit_quant_storage
@@ -106,13 +98,14 @@ class BNBQuantizer(Quantizer):
                 weight_data,
                 requires_grad=False,
                 quant_type=quantization_config.bnb_4bit_quant_type,
-            )
+            ).to(module.weight.device)
         
         if bias_data is not None:
             quantized.bias = module.bias
             
         if module.bias is not None:
             del module.bias
+        del module.weight
 
         app_logger.debug(f'quantized dtype: {quantized.__class__.__name__} {quantized.weight.dtype}')
         
@@ -121,7 +114,7 @@ class BNBQuantizer(Quantizer):
         for part in parent_path:
             parent = getattr(parent, part)
         setattr(parent, attr_name, quantized)
-        
+
         del weight_data, bias_data
         torch.cuda.empty_cache()
 

@@ -19,20 +19,29 @@ class TorchBNBRunTest(unittest.TestCase):
         MemoryManager.clear_memory()
         
     # bnb run
-    @check_memory_usage(expected_mem=1100, device=DEFAULT_DEVICE)
-    def test_torchao_run(self):
+    QUANT_PARAMS = [
+        ("fp8", 1120),
+        ("fp4", 580),
+    ]
+    @parameterized.expand(QUANT_PARAMS)
+    def test_torchao_run(self, quant_type, expected_mem):
         from kirin.quantizers.bnb.bnb import BNBQuantizer
         from kirin.quantizers.base import BNBQuantizerConfig
         
-        app_logger.info(f"quantizing: 8bit")
-        quant_config = BNBQuantizerConfig(load_in_4bit=True)
-        quantizer = BNBQuantizer(quantization_config=quant_config)
-        model = LargeModel(quantizer=quantizer)
-        model.load_model(LargeModel.SAFETENSORS_PATH)
-        x = torch.ones(1, 16384)
-        out = model(x)
-        self.assertEqual(out.shape, (1, 4096))
-        self.assertTrue(out[0, 0].item(), 16384)
-        self.assertEqual(next(model.parameters()).device.type, DEFAULT_DEVICE)
+        with check_memory_usage(expected_mem=expected_mem, device=DEFAULT_DEVICE):
+            kwargs_dict = {
+                "fp4": {'load_in_4bit': True},
+                "fp8": {'load_in_8bit': True}
+            }
+            app_logger.info(f"quantizing: {quant_type}")
+            quant_config = BNBQuantizerConfig(**kwargs_dict[quant_type])
+            quantizer = BNBQuantizer(quantization_config=quant_config)
+            model = LargeModel(quantizer=quantizer)
+            model.load_model(LargeModel.SAFETENSORS_PATH)
+            x = torch.ones(1, 16384)
+            out = model(x)
+            self.assertEqual(out.shape, (1, 4096))
+            self.assertTrue(out[0, 0].item(), 16384)
+            self.assertEqual(next(model.parameters()).device.type, DEFAULT_DEVICE)
 
    
