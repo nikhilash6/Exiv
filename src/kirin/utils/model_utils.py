@@ -68,7 +68,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
                 app_logger.debug(f"quant seems to be supported {module_name}")
                 self.quantizer.quantize(model=self, module=module, module_name=module_name)
 
-            app_logger.debug("modules rn: ", [m.__class__.__name__ for mn, m in self.named_modules() if m != self])
+            app_logger.debug(f"modules rn: {[m.__class__.__name__ for mn, m in self.named_modules() if m != self]}")
             
             MemoryManager.clear_memory()
 

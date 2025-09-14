@@ -22,6 +22,7 @@ class TorchBNBRunTest(unittest.TestCase):
     QUANT_PARAMS = [
         ("fp8", 1120),
         ("fp4", 580),
+        ("nf4", 580),
     ]
     @parameterized.expand(QUANT_PARAMS)
     def test_torchao_run(self, quant_type, expected_mem):
@@ -31,6 +32,7 @@ class TorchBNBRunTest(unittest.TestCase):
         with check_memory_usage(expected_mem=expected_mem, device=DEFAULT_DEVICE):
             kwargs_dict = {
                 "fp4": {'load_in_4bit': True},
+                "nf4": {'load_in_4bit': True, 'bnb_4bit_quant_type': "nf4"},
                 "fp8": {'load_in_8bit': True}
             }
             app_logger.info(f"quantizing: {quant_type}")

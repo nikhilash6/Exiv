@@ -18,38 +18,7 @@ class BNBQuantizer(Quantizer):
             raise ImportError("bitsandbytes quant requires a CUDA machine")
         elif not is_bitsandbytes_available():
             raise ImportError("please install bitsandbytes package to use this feature")
-    
-    # replaces nn.Linear with bnb.nn.Linear4bit / 8bit
-    def _recusive_linear_layer_replace(
-        self,
-        model: "ModelMixin",
-        parent_key: str = "",
-        quant_layers_replaced: bool = False,
-    ):
-        for name, module in model.named_children():
-            full_key = f"{parent_key}.{name}" if parent_key else name
 
-            # NOTE: this case is a little tricky and depends on what we want to
-            # allow. do we want module level skip or layer level
-            if self._is_excluded(full_key):
-                continue
-            
-            # replaceable linear layer
-            if isinstance(module, nn.Linear):
-                model._modules[name] = self._make_quantized_linear(module)
-                quant_layers_replaced = True
-
-            # nested modules
-            elif len(list(module.children())) > 0:
-                _, child_replaced = self._recusive_linear_layer_replace(
-                    module,
-                    parent_key=full_key,
-                    quant_layers_replaced=quant_layers_replaced,
-                )
-                quant_layers_replaced = quant_layers_replaced or child_replaced
-
-        return model, quant_layers_replaced
-    
     def quantize(self, model, module, module_name):
         from bitsandbytes.nn import Int8Params, Params4bit
         import bitsandbytes as bnb
@@ -117,7 +86,6 @@ class BNBQuantizer(Quantizer):
 
         del weight_data, bias_data
         torch.cuda.empty_cache()
-
 
     def pre_process(
         self,
