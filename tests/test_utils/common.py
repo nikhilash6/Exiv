@@ -5,7 +5,7 @@ import os, gc
 from functools import wraps
 
 from kirin.utils.device import MemoryManager, ProcDevice, is_mps_available
-from kirin.utils.model_utils import ModelMixin
+from kirin.model_utils.model_mixin import ModelMixin
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 

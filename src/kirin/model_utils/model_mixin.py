@@ -1,16 +1,15 @@
 import os
-import weakref
 import functools
 import torch
 import torch.nn as nn
-import psutil
 import safetensors
 
-from .device import DEFAULT_DEVICE, MemoryManager, ProcDevice
-from .file import ensure_model_available
-from .logging import app_logger
-from ..constants import ALWAYS_SAFE_LOAD, DISABLE_MMAP, LOW_VRAM_MODE, BYTES_IN_MB
+from ..utils.device import DEFAULT_DEVICE
+from ..utils.file import ensure_model_available
+from ..utils.logging import app_logger
+from ..constants import ALWAYS_SAFE_LOAD, DISABLE_MMAP, BYTES_IN_MB
 from ..quantizers.base import Quantizer
+from .model_patcher import ModelPatcher
 
 
 # bypassing weight creation at model init
@@ -20,7 +19,7 @@ class ModuleMeta(type(nn.Module)):
         with torch.device("meta"):
             instance = super().__call__(*args, **kwargs)
             if isinstance(instance, ModelMixin):    # mainly for safety
-                instance.patch_forward_pass()
+                ModelPatcher.patch_forward_pass(instance)
         return instance
 
 
@@ -47,84 +46,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         self._fully_loaded = False
         
         self.quantizer = quantizer
-        
-    def patch_forward_pass(self):
-        current = 0
-        self.full_load = []
-        
-        # move module to the gpu_device
-        def _load_module(module, module_name, quant_enabled=False):
-            if module is None: return   # m_ref can turn out to be None
-            
-            app_logger.debug(f"Moving {module.__class__.__name__} to {self.gpu_device}")
-            if any(p.device.type == "meta" for p in module.parameters(recurse=False)):
-                module.to_empty(device=self.gpu_device)
-            else:
-                module.to(device=self.gpu_device)
 
-            # - partial loads are not quantized because many quantizers 
-            #   don't support offloading / swapping
-            if self.quantizer is not None and quant_enabled:
-                app_logger.debug(f"quant seems to be supported {module_name}")
-                self.quantizer.quantize(model=self, module=module, module_name=module_name)
-
-            app_logger.debug(f"modules rn: {[m.__class__.__name__ for mn, m in self.named_modules() if m != self]}")
-            
-            MemoryManager.clear_memory()
-
-        def _full_load(self, *args, **kwargs):
-            if not self._patched or self._fully_loaded: return None
-            # load initial full_load modules
-            for m_ref, m_name in self.full_load:
-                m = m_ref()
-                app_logger.debug(f"Loading via full load: {m_name}")
-                _load_module(m, m_name, quant_enabled=True)
-            
-            self._fully_loaded = True
-            return None
-
-        app_logger.debug("******** patching modules")
-        # loading layers, doing work then moving them back to cpu
-        # PONDER: is this better done through register_forward_pre_hook and register_forward_hook ?
-        def _modified_forward(obj, *args, **kwargs):
-            app_logger.debug("Inside the modified forward path")
-            og_forward, module, module_name = kwargs["og_forward"], kwargs["module"], kwargs["module_name"]
-            del kwargs["og_forward"]
-            del kwargs["module"]
-            del kwargs["module_name"]
-
-            try:
-                app_logger.debug(f"Loading via partial load: {m.__class__.__name__}")
-                _load_module(module, module_name)
-                out = og_forward(obj, *args, **kwargs)
-            finally:
-                app_logger.debug(f"Moving back {module.__class__.__name__} to cpu")
-                module.to(ProcDevice.CPU.value)
-            return out
-
-        available_mem = MemoryManager.available_memory(self.gpu_device)
-        for m_name, m in self.named_modules():
-            if m is self or not self.is_leaf_module(m):
-                continue
-            print("layer: ", m_name)
-            current += self._module_size(m)
-            if self._module_size(m) >= available_mem:
-                raise RuntimeError(f"Single layer mem size of {self._module_size(m)} exceeds the total available memory of {available_mem}")
-            
-            if current < available_mem - 50:  # 50 MB buffer
-                self.full_load.append((weakref.ref(m), m_name))
-            else:
-                og_forward = m.forward
-                m.forward = functools.partial(
-                                _modified_forward, 
-                                og_forward=og_forward, 
-                                module=m, 
-                                module_name=m_name
-                            )
-            self._patched = True
-        
-        self.register_forward_pre_hook(_full_load)
-        
     @classmethod
     def clear_caches(cls):
         cls._module_size.cache_clear()

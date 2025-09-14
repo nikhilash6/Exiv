@@ -7,7 +7,7 @@ from parameterized import parameterized
 from tests.test_utils.common import LargeModel, SimpleModel, check_memory_usage, create_large_model_file
 from kirin.utils.device import MemoryManager, DEFAULT_DEVICE, is_cuda_available, CUDA_CC
 from kirin.utils.logging import app_logger
-from kirin.utils.model_utils import ModelMixin
+from kirin.model_utils.model_mixin import ModelMixin
 
 @unittest.skipIf(not is_cuda_available or CUDA_CC < 89, "Only available for cuda devices")
 class TorchAORunTest(unittest.TestCase):

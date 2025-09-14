@@ -1,6 +1,6 @@
 import torch
 
-from ...utils.model_utils import ModelMixin
+from ...model_utils.model_mixin import ModelMixin
 
 
 class LatentNoiseGenerator(ModelMixin):
