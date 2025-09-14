@@ -35,7 +35,7 @@ class TorchAOQuantizer(Quantizer):
         # set of checks, wonder if that is needed here as well
         return isinstance(mod, nn.Linear) and hasattr(mod, 'weight')
     
-    def quantize(self, module):
+    def quantize(self, model, module, module_name):
         '''
         - many quantized layers (such as AffineQuantizedTensor) return the dtype
             of the original high precision tensor

@@ -133,7 +133,7 @@ class Quantizer(ABC):
     def is_quant_supported_val(self, key):
         pass
     
-    def quantize_val(self, key):
+    def quantize(self, model, module, module_name):
         pass
     
     # runs before loading the weights

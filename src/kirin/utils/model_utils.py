@@ -66,10 +66,9 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
             #   don't support offloading / swapping
             if self.quantizer is not None and quant_enabled:
                 app_logger.debug(f"quant seems to be supported {module_name}")
-                self.quantizer.quantize(self, module, module_name)
-                # print(" after quantization: ", module)
+                self.quantizer.quantize(model=self, module=module, module_name=module_name)
 
-            print("modules rn: ", [m.__class__.__name__ for mn, m in self.named_modules() if m != self])
+            app_logger.debug("modules rn: ", [m.__class__.__name__ for mn, m in self.named_modules() if m != self])
             
             MemoryManager.clear_memory()
 
