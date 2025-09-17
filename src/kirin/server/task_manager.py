@@ -29,6 +29,8 @@ class ScriptResponse(BaseModel):
     status: str = ScriptStatus.PENDING.value
     output: Dict | None = None                  # output file locations
     data: Any | None = None                     # time taken, memory usage, err msg etc..
+    progress: float = 0.0
+    progress_message: str = ""                      # current component being processed
 
 @dataclass
 class TaskDetails:

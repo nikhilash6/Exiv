@@ -12,5 +12,5 @@ optimum-quanto
 # server stuff
 fastapi
 pydantic
-uvicorn
+uvicorn[standard]
 click
