@@ -5,7 +5,6 @@ transformers==4.56.1
 einops
 psutil
 colorlog
-click
 # quantizers (make these optional installs)
 torchao
 bitsandbytes
@@ -14,3 +13,4 @@ optimum-quanto
 fastapi
 pydantic
 uvicorn
+click

@@ -33,7 +33,7 @@ setup(
     include_package_data=True,
     entry_points={
         "console_scripts": [
-            "show_dummy_data = kirin.main:print_stuff"
+            "kirin = kirin.main:cli"
         ]
     }
 )

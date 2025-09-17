@@ -16,8 +16,9 @@ class ScriptStatus(ExtendedEnum):
 # -------------- Serializers -----------------
 class ScriptRequest(BaseModel):
     filename: str
-    git_url: str
+    git_url: str | None = None
     git_commit: str | None = None
+    metadata: Dict | None = None                # for saved settings / inputs
     
 class ServerResponse(BaseModel):
     status: int
@@ -38,21 +39,25 @@ class TaskDetails:
 class TaskManager:
     def __init__(self):
         # TODO: replace with a sqlite db maybe?
-        self.task_list: Dict[str, TaskDetails] = {}     # status and res is updated in place for now
+        self.task_dict: Dict[str, TaskDetails] = {}     # status and res is updated in place for now
         self.task_queue = Queue()
 
     def add_task(self, script_request: ScriptRequest):
         task_id = str(uuid.uuid4())
-        self.task_list[task_id] = TaskDetails(
+        self.task_dict[task_id] = TaskDetails(
             payload=script_request,
             result=ScriptResponse()
         )
         self.task_queue.put((task_id, script_request))
         return task_id
+    
+    def update_task(self, task_id, result: ScriptResponse):
+        if not task_id in self.task_dict: raise RuntimeError(f"invalid task_id {task_id}")
+        self.task_dict[task_id].result = result
 
     def get_task_progress(self, task_id: str):
-        if task_id in self.task_list:
-            return self.task_list[task_id].result.model_dump()
+        if task_id in self.task_dict:
+            return self.task_dict[task_id].result.model_dump()
         else:
             return None
         

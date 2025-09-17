@@ -2,30 +2,50 @@ import threading
 import time
 from fastapi import FastAPI, HTTPException
 
-from .task_manager import ScriptRequest, task_manager
+from .task_manager import ScriptRequest, ScriptResponse, ScriptStatus, task_manager
 from ..utils.logging import app_logger
 
 
-def start_worker():
+def process_task(task_id, task_details):
+    app_logger.info(f"Processing task {task_id}: {task_details}")
+    try:
+        # simulate a long-running task
+        time.sleep(2)
+        task_manager.update_task(
+            task_id, 
+            ScriptResponse(
+                status=ScriptStatus.COMPLETED.value,
+                output={"output1": "output_file.png"},
+                data=None
+            )
+        )
+    except Exception as e:
+        app_logger.error(f"Exception occured: {e}")
+        task_manager.update_task(
+            task_id, 
+            ScriptResponse(
+                status=ScriptStatus.FAILED.value,
+                output=None,
+                data={"err_message": str(e)}
+            )
+        )
+
+def start_worker(sync_mode=False):
     while True:
         task_id, task_details = task_manager.task_queue.get()
         if task_id is None:     # for stopping
             break
-        app_logger.info(f"Processing task {task_id}: {task_details}")
-        # simulate a long-running task
-        time.sleep(5)
-        task_manager.results[task_id] = {
-            "status": "completed",
-            "output": f"Result for {task_details.get('prompt', 'N/A')}"
-        }
+        process_task(task_id, task_details)
         task_manager.task_queue.task_done()
+        
+        if sync_mode: break     # for cli, pkg import
 
 
 app = FastAPI()
 
 @app.post("/queue")
-async def queue_script(task_request: ScriptRequest):
-    task_id = task_manager.add_task(task_request)
+async def queue_script(script_request: ScriptRequest):
+    task_id = task_manager.add_task(script_request)
     return {"message": "Task received", "task_id": task_id}
 
 @app.get("/status/{task_id}")
