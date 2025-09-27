@@ -6,7 +6,6 @@ if is_torchao_available():
 
 from ..base import Quantizer, TorchAOConfig
 from ...utils.device import is_cuda_available, CUDA_CC
-from ...utils.common import split_module_key
 from ...utils.logging import app_logger
 
 # sample usage - https://docs.pytorch.org/ao/main/quick_start.html

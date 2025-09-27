@@ -67,7 +67,7 @@ def start_worker(sync_mode=False):
         task_id: str
         task_details: ScriptRequest
         task_id, task_details = task_manager.task_queue.get()
-        if task_id is None:     # for stopping
+        if task_id is None:     # for stopping (funny thing, this is called 'poison pill')
             break
         process_task(task_id, task_details)
         task_manager.task_queue.task_done()

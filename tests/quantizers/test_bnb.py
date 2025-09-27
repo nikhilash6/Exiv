@@ -1,7 +1,6 @@
 import torch
 
 import unittest
-from unittest.mock import patch
 from parameterized import parameterized
 
 from tests.test_utils.common import LargeModel, check_memory_usage, create_large_model_file

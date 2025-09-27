@@ -3,7 +3,6 @@ from torch import nn
 from inspect import signature
 from transformers import is_bitsandbytes_available
 
-from ...model_utils.model_mixin import ModelMixin
 from ...utils.logging import app_logger
 from ..base import BNBQuantizerConfig, Quantizer
 from ...utils.device import is_cuda_available
