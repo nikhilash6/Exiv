@@ -1,32 +1,45 @@
+import os, sys, importlib
 import asyncio
 import threading
 import time
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 
-from .task_manager import ScriptRequest, ScriptResponse, ScriptStatus, task_manager
+from .task_manager import ScriptRequest, ScriptResponse, ScriptStatus, TaskDetails, task_manager
 from ..utils.logging import app_logger
 
 
-def process_task(task_id, task_details):
-    app_logger.info(f"Processing task {task_id}: {task_details}")
+def process_task(task_id: str, script_request: ScriptRequest):
+    app_logger.info(f"Processing task {task_id[-5:]}: {script_request.filename}")
     try:
-        import random   # this is temp, will be removed
-        total_steps = 5
-        for i in range(total_steps):
-            time.sleep(1)
-            
-            if random.random() < 0.1:
-                raise RuntimeError("error occurred!")
+        # get script path
+        script_path = os.path.abspath(script_request.filename)
+        script_dir = os.path.dirname(script_path)
+        script_name = os.path.splitext(os.path.basename(script_path))[0]
 
-            progress_percent = (i + 1) / total_steps
-            task_manager.update_task(
-                task_id,
-                ScriptResponse(
-                    status=ScriptStatus.PROCESSING.value,
-                    progress=progress_percent,
-                    progress_message=f"Completed step {i+1} of {total_steps}"
-                )
+        # add the script's directory to the python path to handle relative imports
+        if script_dir not in sys.path:
+            sys.path.insert(0, script_dir)
+
+        # import the script as a module
+        spec = importlib.util.spec_from_file_location(script_name, script_path)
+        script_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(script_module)
+
+        # executing the 'main' function
+        if hasattr(script_module, 'main'):
+            script_module.main(script_request.metadata)
+        else:
+            raise RuntimeError(f"Script {script_request.filename} does not have a main function.")
+
+        progress_percent = 1
+        task_manager.update_task(
+            task_id,
+            ScriptResponse(
+                status=ScriptStatus.PROCESSING.value,
+                progress=progress_percent,
+                progress_message=f"Completed step {1} of {1}"
             )
+        )
 
         task_manager.update_task(
             task_id, 
@@ -51,6 +64,8 @@ def process_task(task_id, task_details):
 
 def start_worker(sync_mode=False):
     while True:
+        task_id: str
+        task_details: ScriptRequest
         task_id, task_details = task_manager.task_queue.get()
         if task_id is None:     # for stopping
             break

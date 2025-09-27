@@ -42,9 +42,9 @@ class TaskManager:
     def __init__(self):
         # TODO: replace with a sqlite db maybe?
         self.task_dict: Dict[str, TaskDetails] = {}     # status and res is updated in place for now
-        self.task_queue = Queue()
+        self.task_queue: Queue[ScriptRequest] = Queue()
 
-    def add_task(self, script_request: ScriptRequest):
+    def add_task(self, script_request: ScriptRequest) -> str:
         task_id = str(uuid.uuid4())
         self.task_dict[task_id] = TaskDetails(
             payload=script_request,
@@ -57,7 +57,7 @@ class TaskManager:
         if not task_id in self.task_dict: raise RuntimeError(f"invalid task_id {task_id}")
         self.task_dict[task_id].result = result
 
-    def get_task_progress(self, task_id: str):
+    def get_task_progress(self, task_id: str) -> Dict:
         if task_id in self.task_dict:
             return self.task_dict[task_id].result.model_dump()
         else:
