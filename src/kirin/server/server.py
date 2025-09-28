@@ -9,7 +9,20 @@ from ..utils.logging import app_logger
 
 
 def process_task(task_id: str, script_request: ScriptRequest):
+    def _update_task(status, progress, msg, output=None, data=None):
+        task_manager.update_task(
+            task_id,
+            ScriptResponse(
+                status=status,
+                progress=progress,
+                progress_message=msg,
+                output=output,
+                data=data,
+            )
+        )    
+    
     app_logger.info(f"Processing task {task_id[-5:]}: {script_request.filename}")
+    _update_task(ScriptStatus.PROCESSING.value, 0, "Task Started")
     try:
         # get script path
         script_path = os.path.abspath(script_request.filename)
@@ -31,35 +44,19 @@ def process_task(task_id: str, script_request: ScriptRequest):
         else:
             raise RuntimeError(f"Script {script_request.filename} does not have a main function.")
 
-        progress_percent = 1
-        task_manager.update_task(
-            task_id,
-            ScriptResponse(
-                status=ScriptStatus.PROCESSING.value,
-                progress=progress_percent,
-                progress_message=f"Completed step {1} of {1}"
-            )
-        )
-
-        task_manager.update_task(
-            task_id, 
-            ScriptResponse(
-                status=ScriptStatus.COMPLETED.value,
-                progress=1.0,
-                progress_message="Task finished successfully",
-                output={"output1": "output_file.png"},
-                data=None
-            )
+        _update_task(
+            ScriptStatus.COMPLETED.value, 
+            1, 
+            "Task finished successfully", 
+            output={"output1": "output_file.png"},
+            data=None
         )
     except Exception as e:
         app_logger.error(f"Exception occured: {e}")
-        task_manager.update_task(
-            task_id, 
-            ScriptResponse(
-                status=ScriptStatus.FAILED.value,
-                output=None,
-                data={"err_message": str(e)}
-            )
+        _update_task(
+            ScriptStatus.FAILED.value, 0,
+            "Task Failed", output=None,
+            data={"err_message": str(e)}
         )
 
 def start_worker(sync_mode=False):
