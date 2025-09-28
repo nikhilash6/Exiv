@@ -25,3 +25,12 @@ BYTES_IN_MB = 1024 * 1024
 # -------- Default prompts
 DEFAULT_T2I_PROMPT = "a surreal scenery"
 
+# -------- Shared state
+class SharedState:
+    # different flags can be added here
+    stop_generation: bool = False
+    
+    def reset(self):
+        self.stop_generation = False
+
+shared_state = SharedState()
