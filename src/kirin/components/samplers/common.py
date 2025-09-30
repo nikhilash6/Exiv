@@ -10,8 +10,4 @@ class SchedulerBase:
     pass
 
 class SamplerBase:
-    def __init__(self, sample_func):
-        self.sample_func = sample_func
-        
-    def start_sampling(self, steps):
-        pass
+    pass
