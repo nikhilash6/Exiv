@@ -3,7 +3,7 @@ import torch
 import math
 
 from .utils import make_beta_schedule
-from .common import BetaSchedule
+from .common import BetaSchedule, ModelType
 
 # code adapted from Forge and ComfyUI
 
@@ -17,8 +17,6 @@ class EPS:
 
     def calculate_denoised(self, sigma, model_output, model_input):
         sigma = sigma.view(sigma.shape[:1] + (1,) * (model_output.ndim - 1))
-        # early EPS models (like DDPM) already predict noise with unit variance
-        # so no scaling is needed here
         return model_input - model_output * sigma
 
     def noise_scaling(self, sigma, noise, latent_image):
@@ -27,7 +25,8 @@ class EPS:
     def inverse_noise_scaling(self, sigma, latent):
         return latent
 
-# scaling the model ouput of these as per the paper
+# scaling the model ouput of these as per the EDM paper
+# this same class is used for EDM and non-EDM models (empirical observation)
 class V_PREDICTION(EPS):
     def calculate_denoised(self, sigma, model_output, model_input):
         sigma = sigma.view(sigma.shape[:1] + (1,) * (model_output.ndim - 1))
@@ -258,3 +257,22 @@ class ModelSamplingFlux(torch.nn.Module):
         if percent >= 1.0:
             return 0.0
         return 1.0 - percent
+
+
+MODEL_REGISTRY = {
+    ModelType.EPS: (ModelSamplingDiscrete, EPS),
+    ModelType.V_PREDICTION: (ModelSamplingDiscrete, V_PREDICTION),
+    ModelType.V_PREDICTION_EDM: (ModelSamplingContinuousEDM, V_PREDICTION),
+    ModelType.V_PREDICTION_CONTINUOUS: (ModelSamplingContinuousV, V_PREDICTION),
+    ModelType.FLOW: (ModelSamplingDiscreteFlow, CONST),
+    ModelType.EDM: (ModelSamplingContinuousEDM, EDM),
+    ModelType.FLUX: (ModelSamplingFlux, CONST),
+}
+
+def model_sampling(model_config, model_type):
+    sampling_class, config_class = MODEL_REGISTRY.get(model_type)
+    if not sampling_class:
+        raise ValueError(f"Unknown model_type: {model_type}")
+
+    ModelSampling = type("ModelSampling", (sampling_class, config_class), {})
+    return ModelSampling(model_config)
