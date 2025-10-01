@@ -3,7 +3,7 @@ import torch
 import math
 
 from .utils import make_beta_schedule
-from .common import BetaSchedule, ModelType
+from .enum import BetaSchedule, ModelType
 
 # code adapted from Forge and ComfyUI
 
@@ -19,8 +19,14 @@ class EPS:
         sigma = sigma.view(sigma.shape[:1] + (1,) * (model_output.ndim - 1))
         return model_input - model_output * sigma
 
-    def noise_scaling(self, sigma, noise, latent_image):
-        return noise * sigma + latent_image
+    def noise_scaling(self, sigma, noise, latent_image, max_denoise=False):
+        if max_denoise:
+            noise = noise * torch.sqrt(1.0 + sigma ** 2.0)
+        else:
+            noise = noise * sigma
+
+        noise += latent_image
+        return noise
 
     def inverse_noise_scaling(self, sigma, latent):
         return latent
@@ -37,7 +43,7 @@ class EDM(V_PREDICTION):
         sigma = sigma.view(sigma.shape[:1] + (1,) * (model_output.ndim - 1))
         return model_input * self.sigma_data ** 2 / (sigma ** 2 + self.sigma_data ** 2) + model_output * sigma * self.sigma_data / (sigma ** 2 + self.sigma_data ** 2) ** 0.5
 
-# constant noise
+# constant noise (no input/output scaling)
 class CONST:
     def calculate_input(self, sigma, noise):
         return noise
