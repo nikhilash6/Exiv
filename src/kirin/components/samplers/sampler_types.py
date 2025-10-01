@@ -276,9 +276,9 @@ MODEL_REGISTRY = {
 }
 
 def model_sampling(model_config, model_type):
-    sampling_class, config_class = MODEL_REGISTRY.get(model_type)
+    sampling_class, scaling_class = MODEL_REGISTRY.get(model_type)
     if not sampling_class:
         raise ValueError(f"Unknown model_type: {model_type}")
 
-    ModelSampling = type("ModelSampling", (sampling_class, config_class), {})
+    ModelSampling = type("ModelSampling", (sampling_class, scaling_class), {})
     return ModelSampling(model_config)

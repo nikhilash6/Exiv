@@ -133,20 +133,3 @@ def get_sigmas_vp(n, beta_d=19.9, beta_min=0.1, eps_s=1e-3, device='cpu'):
     return append_zero(sigmas)
 
 
-def to_d(x, sigma, denoised):
-    """Converts a denoiser output to a Karras ODE derivative."""
-    return (x - denoised) / append_dims(sigma, x.ndim)
-
-
-def get_ancestral_step(sigma_from, sigma_to, eta=1.):
-    """Calculates the noise level (sigma_down) to step down to and the amount
-    of noise to add (sigma_up) when doing an ancestral sampling step."""
-    if not eta:
-        return sigma_to, 0.
-    sigma_up = min(sigma_to, eta * (sigma_to ** 2 * (sigma_from ** 2 - sigma_to ** 2) / sigma_from ** 2) ** 0.5)
-    sigma_down = (sigma_to ** 2 - sigma_up ** 2) ** 0.5
-    return sigma_down, sigma_up
-
-
-def default_noise_sampler(x):
-    return lambda sigma, sigma_next: torch.randn_like(x)

@@ -1,4 +1,5 @@
 torch
+torchsde
 numpy
 scipy
 sentencepiece
