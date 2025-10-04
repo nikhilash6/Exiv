@@ -1,3 +1,4 @@
+import types
 from typing import Any, Callable, List, Optional
 import torch
 from torch import nn, Tensor
@@ -44,23 +45,25 @@ def ksampler_factory(sampler_name, extra_options={}, inpaint_options={}):
 
     return Sampler(sampler_function, extra_options, inpaint_options)
 
-
-# TODO: make a universal __call__ wrapper if this pattern repeats
-class KSamplerX0Inpaint:
-    def __init__(self, model, sigmas):
-        self.inner_model = model
-        self.sigmas = sigmas
+# TODO: move this into model patcher
+def inpaint_preprocessing(self, x: Tensor, sigma, denoise_mask: Tensor, model_options={}, seed=None):
+    # self: instance of ModelWrapper class
+    # x: current step latent
+    # denoise_mask: denoise everything except the masked area (0s)
+    if denoise_mask is not None:
+        latent_mask = 1. - denoise_mask
+        # sigma is defined for each batch, for a latent image of size [batch_size, channels, height, width]
+        # so reshaping sigma from [4] -> [4, 1, 1, 1]   (assuming batch_size = 4)
+        reshaped_sigma = sigma.reshape([sigma.shape[0]] + [1] * (len(self.noise.shape) - 1))
+        scaled_noise = self.model_sampling.noise_scaling(reshaped_sigma, self.noise, self.latent_image)
+        x = x * denoise_mask + scaled_noise * latent_mask
     
-    def __call__(self, x, sigma, denoise_mask, model_options={}, seed=None):
-        if denoise_mask is not None:
-            if "denoise_mask_function" in model_options:
-                denoise_mask = model_options["denoise_mask_function"](sigma, denoise_mask, extra_options={"model": self.inner_model, "sigmas": self.sigmas})
-            latent_mask = 1. - denoise_mask
-            x = x * denoise_mask + self.inner_model.model_sampling.noise_scaling(sigma.reshape([sigma.shape[0]] + [1] * (len(self.noise.shape) - 1)), self.noise, self.latent_image) * latent_mask
-        out = self.inner_model(x, sigma, model_options=model_options, seed=seed)
-        if denoise_mask is not None:
-            out = out * denoise_mask + self.latent_image * latent_mask
-        return out
+    out = self(x, sigma, model_options=model_options, seed=seed)
+    
+    if denoise_mask is not None:
+        out = out * denoise_mask + self.latent_image * latent_mask
+    return out
+
 
 class Sampler:
     def __init__(self, sampler_function: Callable[..., Tensor], extra_options={}, inpaint_options={}):
@@ -76,7 +79,7 @@ class Sampler:
     def sample(
         self, 
         wrapped_model: ModelWrapper, 
-        sigmas: List[int], 
+        sigmas,
         extra_args: Any, 
         callback: Callable[..., Any],
         noise: Tensor, 
@@ -85,14 +88,18 @@ class Sampler:
         disable_pbar: bool = False
     ):
         extra_args["denoise_mask"] = denoise_mask
-        model_k = KSamplerX0Inpaint(wrapped_model, sigmas)
-        model_k.latent_image = latent_image
-        if self.inpaint_options.get("random", False): #TODO: Should this be the default?
+        # adding inpaint preprocessing
+        patched_method = types.MethodType(inpaint_preprocessing, wrapped_model)
+        wrapped_model.__call__ = patched_method
+        
+        wrapped_model.latent_image = latent_image
+        if self.inpaint_options.get("random", False):
             generator = torch.manual_seed(extra_args.get("seed", 41) + 1)
-            model_k.noise = torch.randn(noise.shape, generator=generator, device="cpu").to(noise.dtype).to(noise.device)
+            wrapped_model.noise = torch.randn(noise.shape, generator=generator, device="cpu").to(noise.dtype).to(noise.device)
         else:
-            model_k.noise = noise
+            wrapped_model.noise = noise
 
+        # TODO: find different variable shapes here
         noise = wrapped_model.model_sampling.noise_scaling(sigmas[0], noise, latent_image, self.max_denoise(wrapped_model, sigmas))
 
         k_callback = None
@@ -100,15 +107,15 @@ class Sampler:
         if callback is not None:
             k_callback = lambda x: callback(x["i"], x["denoised"], x["x"], total_steps)
 
-        samples = self.sampler_function(model_k, noise, sigmas, extra_args=extra_args, callback=k_callback, disable=disable_pbar, **self.extra_options)
+        samples = self.sampler_function(wrapped_model, noise, sigmas, extra_args=extra_args, callback=k_callback, disable=disable_pbar, **self.extra_options)
         samples = wrapped_model.model_sampling.inverse_noise_scaling(sigmas[-1], samples)
         return samples
 
-def to_d(x: Tensor, sigma: int, denoised: Tensor):
+def to_d(x: Tensor, sigma, denoised: Tensor):
     """Converts a denoiser output to a Karras ODE derivative."""
     return (x - denoised) / append_dims(sigma, x.ndim)
 
-def get_ancestral_step(sigma_from: int, sigma_to: int, eta=1.):
+def get_ancestral_step(sigma_from, sigma_to, eta=1.):
     """Calculates the noise level (sigma_down) to step down to and the amount
     of noise to add (sigma_up) when doing an ancestral sampling step."""
     if not eta:

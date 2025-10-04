@@ -2,6 +2,7 @@ import torch
 
 from .scheduler_types import calculate_sigmas
 from .enum import DISCARD_PENULTIMATE_SIGMA_SAMPLERS, KSamplerType, SamplerType, SchedulerType
+from .sampler_impl import ksampler_factory
 from ...utils.tensor import fix_empty_latent_channels, prepare_noise
 from ...model_utils.model_wrapper import ModelWrapper
 from ...model_utils.latent import Latent
@@ -65,6 +66,31 @@ class KSampler:
             batch_inds = self.latent_image.batch_index
             noise = prepare_noise(latent_image, self.seed, batch_inds)
 
-        # TODO: enable calculation as per vars injected at the runtime
+        # TODO: enable calculation of new sigmas as per vars injected at the runtime
         # such as last_step, start_step
         
+        sampler = ksampler_factory(self.sampler_name)
+        return sample(
+            self.wrapped_model,
+            noise,
+            self.positive,
+            self.negative,
+            self.cfg,
+            sampler,
+            self.model_options,
+            latent_image=latent_image,
+            denoise_mask=self.latent_image.noise_mask,
+            callback=lambda *args, **kwargs: None,      # TODO: pass a null fn from the top
+            seed=self.seed
+        )
+        
+def sample(*args, **kwargs):
+    # TODO: complete this
+    pass
+
+'''
+denoise_mask,
+callback,
+disable_pbar,
+seed
+'''
