@@ -4,10 +4,12 @@ from torch import Tensor
 import math
 
 from .scheduler_types import calculate_sigmas
-from .sampling_helpers import process_conds, prepare_mask
+from .sampling_helpers import get_area_and_mult, process_conds, prepare_mask
 from .enum import DISCARD_PENULTIMATE_SIGMA_SAMPLERS, KSamplerType, SamplerType, SchedulerType
 from .sampler_impl import ksampler_factory
+from ..conditionals import can_concat_cond, cond_cat
 from ...utils.tensor import fix_empty_latent_channels, prepare_noise
+from ...utils.device import MemoryManager
 from ...model_utils.model_wrapper import ModelWrapper
 from ...model_utils.latent import Latent
 
@@ -170,6 +172,8 @@ def model_sampling(model, x, timestep, uncond, cond, cond_scale, model_options={
         out  = fn(args)
 
     cond_pred, uncond_pred = out[0], out[1]
+    
+    # ------ applying cfg ---------
     if "sampler_cfg_function" in model_options:
         args = {"cond": x - cond_pred, "uncond": x - uncond_pred, "cond_scale": cond_scale, "timestep": timestep, "input": x, "sigma": timestep,
                 "cond_denoised": cond_pred, "uncond_denoised": uncond_pred, "model": model, "model_options": model_options}
@@ -185,7 +189,7 @@ def model_sampling(model, x, timestep, uncond, cond, cond_scale, model_options={
     return cfg_result
 
 
-
+# TODO: adapt and refactor, don't need many of these functionalities
 def calc_cond_batch(model, conds, x_in, timestep, model_options):
     out_conds = []
     out_counts = []
@@ -215,7 +219,7 @@ def calc_cond_batch(model, conds, x_in, timestep, model_options):
         to_batch_temp.reverse()
         to_batch = to_batch_temp[:1]
 
-        free_memory = model_management.get_free_memory(x_in.device)
+        free_memory = MemoryManager.available_memory(x_in.device)
         for i in range(1, len(to_batch_temp) + 1):
             batch_amount = to_batch_temp[:len(to_batch_temp)//i]
             input_shape = [len(batch_amount) * first_shape[0]] + list(first_shape)[1:]

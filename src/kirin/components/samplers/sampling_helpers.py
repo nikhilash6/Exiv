@@ -1,8 +1,102 @@
 import torch
 
+import collections
+
 from ...utils.tensor import repeat_to_batch_size
 
-# TODO: properly refactor
+
+# TODO: refactor these methods neatly
+
+def get_area_and_mult(conds, x_in, timestep_in):
+    '''
+    basically tells where the conds are being applied in the current timestep
+    (if it is being applied) and by how much (strength). 
+    returns
+    - input_x : actual patch of data the cond is being applied on
+    - mult : strength of cond
+    - conditioning : conds
+    - area : bounds of the application area
+    - control : controlnet conds ?
+    '''
+    
+    # shape of x_in - [batch_size, channels, height, width, ...]    (maybe seq_len or other dims)
+    dims = tuple(x_in.shape[2:])    # skipping batch_size and channels
+    area = None
+    strength = 1.0
+
+    # ---- checking if cond is applicable in the current timestep
+    if 'timestep_start' in conds:
+        timestep_start = conds['timestep_start']
+        if timestep_in[0] > timestep_start:
+            return None
+
+    if 'timestep_end' in conds:
+        timestep_end = conds['timestep_end']
+        if timestep_in[0] < timestep_end:
+            return None
+
+    # ---- finding the are, the cond applies to
+    if 'area' in conds:
+        area = list(conds['area'])
+    if 'strength' in conds:
+        strength = conds['strength']
+
+    input_x = x_in
+    if area is not None:
+        for i in range(len(dims)):
+            # input_x.shape[i + 2] -> skipping bs and ch, area[len(dims) + i] -> i is the offset of the ith dim in 'dims'
+            area[i] = min(input_x.shape[i + 2] - area[len(dims) + i], area[i])
+            input_x = input_x.narrow(i + 2, area[len(dims) + i], area[i])
+
+    # ---- multiplier for different parts in the area
+    if 'mask' in conds:
+        mask_strength = conds.get("mask_strength", 1.0)
+        mask = conds['mask']
+        assert(mask.shape[1:] == x_in.shape[2:])    # batch is the first dim in mask
+
+        # crop the mask
+        if area is not None:
+            for i in range(len(dims)):
+                mask = mask.narrow(i + 1, area[len(dims) + i], area[i])
+
+        mask = mask * mask_strength
+        mult = mask.unsqueeze(1)
+    else:
+        # apply cond everywhere equally in the area
+        mult = torch.ones_like(input_x)
+
+    mult *= strength
+
+    # ---- soften area edge
+    # soften the edges of the area, however we don't do it if the mask is present
+    if 'mask' not in conds and area is not None:
+        rr = 8 # 8 pixels
+        # e.g. loop over height and width
+        for i in range(len(dims)):
+            # starting edge (left or top)
+            if area[len(dims) + i] != 0:
+                for t in range(rr):
+                    m = mult.narrow(i + 2, t, 1)
+                    m *= ((1.0/rr) * (t + 1)) # linear gradient
+            
+            # ending edge (right or bottom)
+            if (area[i] + area[len(dims) + i]) < x_in.shape[i + 2]:
+                for t in range(rr):
+                    m = mult.narrow(i + 2, area[i] - 1 - t, 1)
+                    m *= ((1.0/rr) * (t + 1)) # linear gradient
+
+    # ---- prepare conditioning tensors
+    conditioning = {}
+    model_conds = conds["model_conds"]
+    for c in model_conds:
+        conditioning[c] = model_conds[c].process_cond(batch_size=x_in.shape[0], device=x_in.device, area=area)
+
+    # controlnet ?
+    control = conds.get('control', None)
+
+    cond_obj = collections.namedtuple('cond_obj', ['input_x', 'mult', 'conditioning', 'area', 'control'])
+    return cond_obj(input_x, mult, conditioning, area, control)
+
 
 def prepare_mask(noise_mask, shape, device):
     """ensures noise mask is of proper dimensions"""
@@ -11,6 +105,7 @@ def prepare_mask(noise_mask, shape, device):
     noise_mask = repeat_to_batch_size(noise_mask, shape[0])
     noise_mask = noise_mask.to(device)
     return noise_mask
+
 
 def process_conds(model, noise, conds, device, latent_image=None, denoise_mask=None, seed=None):
     for k in conds:
@@ -171,6 +266,7 @@ def calculate_start_end_timesteps(model, conds):
                 n['timestep_end'] = timestep_end
             conds[t] = n
 
+
 def resolve_areas_and_cond_masks_multidim(conditions, dims, device):
     # We need to decide on an area outside the sampling loop in order to properly generate opposite areas of equal sizes.
     # While we're doing this, we can also resolve the mask device and scaling for performance reasons
@@ -217,3 +313,26 @@ def resolve_areas_and_cond_masks_multidim(conditions, dims, device):
 
             modified['mask'] = mask
             conditions[i] = modified
+            
+def get_mask_aabb(masks):
+    if masks.numel() == 0:
+        return torch.zeros((0, 4), device=masks.device, dtype=torch.int)
+
+    b = masks.shape[0]
+
+    bounding_boxes = torch.zeros((b, 4), device=masks.device, dtype=torch.int)
+    is_empty = torch.zeros((b), device=masks.device, dtype=torch.bool)
+    for i in range(b):
+        mask = masks[i]
+        if mask.numel() == 0:
+            continue
+        if torch.max(mask != 0) == False:
+            is_empty[i] = True
+            continue
+        y, x = torch.where(mask)
+        bounding_boxes[i, 0] = torch.min(x)
+        bounding_boxes[i, 1] = torch.min(y)
+        bounding_boxes[i, 2] = torch.max(x)
+        bounding_boxes[i, 3] = torch.max(y)
+
+    return bounding_boxes, is_empty
