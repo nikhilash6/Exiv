@@ -47,7 +47,7 @@ def ksampler_factory(sampler_name, extra_options={}, inpaint_options={}):
 
 # TODO: move this into model patcher
 def inpaint_preprocessing(self, x: Tensor, sigma, denoise_mask: Tensor, model_options={}, seed=None):
-    # self: instance of ModelWrapper class
+    # self: instance of Callable[..., Any] class
     # x: current step latent
     # denoise_mask: denoise everything except the masked area (0s)
     if denoise_mask is not None:
@@ -190,8 +190,10 @@ class BrownianTreeNoiseSampler:
         return self.tree(t0, t1) / (t1 - t0).abs().sqrt()
 
 
+# NOTE: model_forward in the following samplers is the forward pass of the model
+
 @torch.no_grad()
-def sample_euler(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callback=None, disable=None, s_churn=0., s_tmin=0., s_tmax=float('inf'), s_noise=1.):
+def sample_euler(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, s_churn=0., s_tmin=0., s_tmax=float('inf'), s_noise=1.):
     """Implements Algorithm 2 (Euler steps) from Karras et al. (2022)."""
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
@@ -206,7 +208,7 @@ def sample_euler(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callba
         if gamma > 0:
             eps = torch.randn_like(x) * s_noise
             x = x + eps * (sigma_hat ** 2 - sigmas[i] ** 2) ** 0.5
-        denoised = wrapped_model(x, sigma_hat * s_in, **extra_args)
+        denoised = model_forward(x, sigma_hat * s_in, **extra_args)
         d = to_d(x, sigma_hat, denoised)
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigma_hat, 'denoised': denoised})
@@ -217,13 +219,13 @@ def sample_euler(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callba
 
 
 @torch.no_grad()
-def sample_euler_ancestral(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
+def sample_euler_ancestral(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
     """Ancestral sampling with Euler method steps."""
     extra_args = {} if extra_args is None else extra_args
     noise_sampler = default_noise_sampler(x) if noise_sampler is None else noise_sampler
     s_in = x.new_ones([x.shape[0]])
     for i in trange(len(sigmas) - 1, disable=disable):
-        denoised = wrapped_model(x, sigmas[i] * s_in, **extra_args)
+        denoised = model_forward(x, sigmas[i] * s_in, **extra_args)
         sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=eta)
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
@@ -237,7 +239,7 @@ def sample_euler_ancestral(wrapped_model: ModelWrapper, x, sigmas, extra_args=No
 
 
 @torch.no_grad()
-def sample_heun(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callback=None, disable=None, s_churn=0., s_tmin=0., s_tmax=float('inf'), s_noise=1.):
+def sample_heun(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, s_churn=0., s_tmin=0., s_tmax=float('inf'), s_noise=1.):
     """Implements Algorithm 2 (Heun steps) from Karras et al. (2022)."""
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
@@ -253,7 +255,7 @@ def sample_heun(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callbac
         if gamma > 0:
             eps = torch.randn_like(x) * s_noise
             x = x + eps * (sigma_hat ** 2 - sigmas[i] ** 2) ** 0.5
-        denoised = wrapped_model(x, sigma_hat * s_in, **extra_args)
+        denoised = model_forward(x, sigma_hat * s_in, **extra_args)
         d = to_d(x, sigma_hat, denoised)
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigma_hat, 'denoised': denoised})
@@ -264,7 +266,7 @@ def sample_heun(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callbac
         else:
             # Heun's method
             x_2 = x + d * dt
-            denoised_2 = wrapped_model(x_2, sigmas[i + 1] * s_in, **extra_args)
+            denoised_2 = model_forward(x_2, sigmas[i + 1] * s_in, **extra_args)
             d_2 = to_d(x_2, sigmas[i + 1], denoised_2)
             d_prime = (d + d_2) / 2
             x = x + d_prime * dt
@@ -272,7 +274,7 @@ def sample_heun(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callbac
 
 
 @torch.no_grad()
-def sample_dpm_2(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callback=None, disable=None, s_churn=0., s_tmin=0., s_tmax=float('inf'), s_noise=1.):
+def sample_dpm_2(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, s_churn=0., s_tmin=0., s_tmax=float('inf'), s_noise=1.):
     """A sampler inspired by DPM-Solver-2 and Algorithm 2 from Karras et al. (2022)."""
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
@@ -287,7 +289,7 @@ def sample_dpm_2(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callba
         if gamma > 0:
             eps = torch.randn_like(x) * s_noise
             x = x + eps * (sigma_hat ** 2 - sigmas[i] ** 2) ** 0.5
-        denoised = wrapped_model(x, sigma_hat * s_in, **extra_args)
+        denoised = model_forward(x, sigma_hat * s_in, **extra_args)
         d = to_d(x, sigma_hat, denoised)
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigma_hat, 'denoised': denoised})
@@ -301,20 +303,20 @@ def sample_dpm_2(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callba
             dt_1 = sigma_mid - sigma_hat
             dt_2 = sigmas[i + 1] - sigma_hat
             x_2 = x + d * dt_1
-            denoised_2 = wrapped_model(x_2, sigma_mid * s_in, **extra_args)
+            denoised_2 = model_forward(x_2, sigma_mid * s_in, **extra_args)
             d_2 = to_d(x_2, sigma_mid, denoised_2)
             x = x + d_2 * dt_2
     return x
 
 
 @torch.no_grad()
-def sample_dpm_2_ancestral(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
+def sample_dpm_2_ancestral(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
     """Ancestral sampling with DPM-Solver second-order steps."""
     extra_args = {} if extra_args is None else extra_args
     noise_sampler = default_noise_sampler(x) if noise_sampler is None else noise_sampler
     s_in = x.new_ones([x.shape[0]])
     for i in trange(len(sigmas) - 1, disable=disable):
-        denoised = wrapped_model(x, sigmas[i] * s_in, **extra_args)
+        denoised = model_forward(x, sigmas[i] * s_in, **extra_args)
         sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=eta)
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
@@ -329,7 +331,7 @@ def sample_dpm_2_ancestral(wrapped_model: ModelWrapper, x, sigmas, extra_args=No
             dt_1 = sigma_mid - sigmas[i]
             dt_2 = sigma_down - sigmas[i]
             x_2 = x + d * dt_1
-            denoised_2 = wrapped_model(x_2, sigma_mid * s_in, **extra_args)
+            denoised_2 = model_forward(x_2, sigma_mid * s_in, **extra_args)
             d_2 = to_d(x_2, sigma_mid, denoised_2)
             x = x + d_2 * dt_2
             x = x + noise_sampler(sigmas[i], sigmas[i + 1]) * s_noise * sigma_up
@@ -350,13 +352,13 @@ def linear_multistep_coeff(order, t, i, j):
 
 
 @torch.no_grad()
-def sample_lms(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callback=None, disable=None, order=4):
+def sample_lms(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, order=4):
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
     sigmas_cpu = sigmas.detach().cpu().numpy()
     ds = []
     for i in trange(len(sigmas) - 1, disable=disable):
-        denoised = wrapped_model(x, sigmas[i] * s_in, **extra_args)
+        denoised = model_forward(x, sigmas[i] * s_in, **extra_args)
         d = to_d(x, sigmas[i], denoised)
         ds.append(d)
         if len(ds) > order:
@@ -401,9 +403,9 @@ class PIDStepSizeController:
 class DPMSolver(nn.Module):
     """DPM-Solver. See https://arxiv.org/abs/2206.00927."""
 
-    def __init__(self, wrapped_model, extra_args=None, eps_callback=None, info_callback=None):
+    def __init__(self, model_forward, extra_args=None, eps_callback=None, info_callback=None):
         super().__init__()
-        self.wrapped_model = wrapped_model
+        self.model_forward = model_forward
         self.extra_args = {} if extra_args is None else extra_args
         self.eps_callback = eps_callback
         self.info_callback = info_callback
@@ -418,7 +420,7 @@ class DPMSolver(nn.Module):
         if key in eps_cache:
             return eps_cache[key], eps_cache
         sigma = self.sigma(t) * x.new_ones([x.shape[0]])
-        eps = (x - self.wrapped_model(x, sigma, *args, **self.extra_args, **kwargs)) / self.sigma(t)
+        eps = (x - self.model_forward(x, sigma, *args, **self.extra_args, **kwargs)) / self.sigma(t)
         if self.eps_callback is not None:
             self.eps_callback()
         return eps, {key: eps, **eps_cache}
@@ -547,23 +549,23 @@ class DPMSolver(nn.Module):
 
 
 @torch.no_grad()
-def sample_dpm_fast(wrapped_model: ModelWrapper, x, sigma_min, sigma_max, n, extra_args=None, callback=None, disable=None, eta=0., s_noise=1., noise_sampler=None):
+def sample_dpm_fast(model_forward: Callable[..., Any], x, sigma_min, sigma_max, n, extra_args=None, callback=None, disable=None, eta=0., s_noise=1., noise_sampler=None):
     """DPM-Solver-Fast (fixed step size). See https://arxiv.org/abs/2206.00927."""
     if sigma_min <= 0 or sigma_max <= 0:
         raise ValueError('sigma_min and sigma_max must not be 0')
     with tqdm(total=n, disable=disable) as pbar:
-        dpm_solver = DPMSolver(wrapped_model, extra_args, eps_callback=pbar.update)
+        dpm_solver = DPMSolver(model_forward, extra_args, eps_callback=pbar.update)
         if callback is not None:
             dpm_solver.info_callback = lambda info: callback({'sigma': dpm_solver.sigma(info['t']), 'sigma_hat': dpm_solver.sigma(info['t_up']), **info})
         return dpm_solver.dpm_solver_fast(x, dpm_solver.t(torch.tensor(sigma_max)), dpm_solver.t(torch.tensor(sigma_min)), n, eta, s_noise, noise_sampler)
 
 @torch.no_grad()
-def sample_dpm_adaptive(wrapped_model: ModelWrapper, x, sigma_min, sigma_max, extra_args=None, callback=None, disable=None, order=3, rtol=0.05, atol=0.0078, h_init=0.05, pcoeff=0., icoeff=1., dcoeff=0., accept_safety=0.81, eta=0., s_noise=1., noise_sampler=None, return_info=False):
+def sample_dpm_adaptive(model_forward: Callable[..., Any], x, sigma_min, sigma_max, extra_args=None, callback=None, disable=None, order=3, rtol=0.05, atol=0.0078, h_init=0.05, pcoeff=0., icoeff=1., dcoeff=0., accept_safety=0.81, eta=0., s_noise=1., noise_sampler=None, return_info=False):
     """DPM-Solver-12 and 23 (adaptive step size). See https://arxiv.org/abs/2206.00927."""
     if sigma_min <= 0 or sigma_max <= 0:
         raise ValueError('sigma_min and sigma_max must not be 0')
     with tqdm(disable=disable) as pbar:
-        dpm_solver = DPMSolver(wrapped_model, extra_args, eps_callback=pbar.update)
+        dpm_solver = DPMSolver(model_forward, extra_args, eps_callback=pbar.update)
         if callback is not None:
             dpm_solver.info_callback = lambda info: callback({'sigma': dpm_solver.sigma(info['t']), 'sigma_hat': dpm_solver.sigma(info['t_up']), **info})
         x, info = dpm_solver.dpm_solver_adaptive(x, dpm_solver.t(torch.tensor(sigma_max)), dpm_solver.t(torch.tensor(sigma_min)), order, rtol, atol, h_init, pcoeff, icoeff, dcoeff, accept_safety, eta, s_noise, noise_sampler)
@@ -572,9 +574,9 @@ def sample_dpm_adaptive(wrapped_model: ModelWrapper, x, sigma_min, sigma_max, ex
     return x
 
 @torch.no_grad()
-def sample_dpmpp_2s_ancestral(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
-    if isinstance(wrapped_model.model_sampling, CONST):
-        return sample_dpmpp_2s_ancestral_RF(wrapped_model, x, sigmas, extra_args, callback, disable, eta, s_noise, noise_sampler)
+def sample_dpmpp_2s_ancestral(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
+    if isinstance(model_forward.model_sampling, CONST):
+        return sample_dpmpp_2s_ancestral_RF(model_forward, x, sigmas, extra_args, callback, disable, eta, s_noise, noise_sampler)
 
     """Ancestral sampling with DPM-Solver++(2S) second-order steps."""
     extra_args = {} if extra_args is None else extra_args
@@ -584,7 +586,7 @@ def sample_dpmpp_2s_ancestral(wrapped_model: ModelWrapper, x, sigmas, extra_args
     t_fn = lambda sigma: sigma.log().neg()
 
     for i in trange(len(sigmas) - 1, disable=disable):
-        denoised = wrapped_model(x, sigmas[i] * s_in, **extra_args)
+        denoised = model_forward(x, sigmas[i] * s_in, **extra_args)
         sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=eta)
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
@@ -600,7 +602,7 @@ def sample_dpmpp_2s_ancestral(wrapped_model: ModelWrapper, x, sigmas, extra_args
             h = t_next - t
             s = t + r * h
             x_2 = (sigma_fn(s) / sigma_fn(t)) * x - (-h * r).expm1() * denoised
-            denoised_2 = wrapped_model(x_2, sigma_fn(s) * s_in, **extra_args)
+            denoised_2 = model_forward(x_2, sigma_fn(s) * s_in, **extra_args)
             x = (sigma_fn(t_next) / sigma_fn(t)) * x - (-h).expm1() * denoised_2
         # Noise addition
         if sigmas[i + 1] > 0:
@@ -608,7 +610,7 @@ def sample_dpmpp_2s_ancestral(wrapped_model: ModelWrapper, x, sigmas, extra_args
     return x
 
 @torch.no_grad()
-def sample_dpmpp_2s_ancestral_RF(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
+def sample_dpmpp_2s_ancestral_RF(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
     """Ancestral sampling with DPM-Solver++(2S) second-order steps."""
     extra_args = {} if extra_args is None else extra_args
     noise_sampler = default_noise_sampler(x) if noise_sampler is None else noise_sampler
@@ -619,7 +621,7 @@ def sample_dpmpp_2s_ancestral_RF(wrapped_model: ModelWrapper, x, sigmas, extra_a
     # logged_x = x.unsqueeze(0)
 
     for i in trange(len(sigmas) - 1, disable=disable):
-        denoised = wrapped_model(x, sigmas[i] * s_in, **extra_args)
+        denoised = model_forward(x, sigmas[i] * s_in, **extra_args)
         downstep_ratio = 1 + (sigmas[i+1]/sigmas[i] - 1) * eta
         sigma_down = sigmas[i+1] * downstep_ratio
         alpha_ip1 = 1 - sigmas[i+1]
@@ -646,7 +648,7 @@ def sample_dpmpp_2s_ancestral_RF(wrapped_model: ModelWrapper, x, sigmas, extra_a
             # sigma_s = sigmas[i+1]
             sigma_s_i_ratio = sigma_s / sigmas[i]
             u = sigma_s_i_ratio * x + (1 - sigma_s_i_ratio) * denoised
-            D_i = wrapped_model(u, sigma_s * s_in, **extra_args)
+            D_i = model_forward(u, sigma_s * s_in, **extra_args)
             sigma_down_i_ratio = sigma_down / sigmas[i]
             x = sigma_down_i_ratio * x + (1 - sigma_down_i_ratio) * D_i
             # print("sigma_i", sigmas[i], "sigma_ip1", sigmas[i+1],"sigma_down", sigma_down, "sigma_down_i_ratio", sigma_down_i_ratio, "sigma_s_i_ratio", sigma_s_i_ratio, "renoise_coeff", renoise_coeff)
@@ -657,7 +659,7 @@ def sample_dpmpp_2s_ancestral_RF(wrapped_model: ModelWrapper, x, sigmas, extra_a
     return x
 
 @torch.no_grad()
-def sample_dpmpp_sde(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None, r=1 / 2):
+def sample_dpmpp_sde(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None, r=1 / 2):
     """DPM-Solver++ (stochastic)."""
     if len(sigmas) <= 1:
         return x
@@ -671,7 +673,7 @@ def sample_dpmpp_sde(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, ca
     t_fn = lambda sigma: sigma.log().neg()
 
     for i in trange(len(sigmas) - 1, disable=disable):
-        denoised = wrapped_model(x, sigmas[i] * s_in, **extra_args)
+        denoised = model_forward(x, sigmas[i] * s_in, **extra_args)
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
         if sigmas[i + 1] == 0:
@@ -691,7 +693,7 @@ def sample_dpmpp_sde(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, ca
             s_ = t_fn(sd)
             x_2 = (sigma_fn(s_) / sigma_fn(t)) * x - (t - s_).expm1() * denoised
             x_2 = x_2 + noise_sampler(sigma_fn(t), sigma_fn(s)) * s_noise * su
-            denoised_2 = wrapped_model(x_2, sigma_fn(s) * s_in, **extra_args)
+            denoised_2 = model_forward(x_2, sigma_fn(s) * s_in, **extra_args)
 
             # Step 2
             sd, su = get_ancestral_step(sigma_fn(t), sigma_fn(t_next), eta)
@@ -702,7 +704,7 @@ def sample_dpmpp_sde(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, ca
     return x
 
 @torch.no_grad()
-def sample_dpmpp_2m(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callback=None, disable=None):
+def sample_dpmpp_2m(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None):
     """DPM-Solver++(2M)."""
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
@@ -711,7 +713,7 @@ def sample_dpmpp_2m(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, cal
     old_denoised = None
 
     for i in trange(len(sigmas) - 1, disable=disable):
-        denoised = wrapped_model(x, sigmas[i] * s_in, **extra_args)
+        denoised = model_forward(x, sigmas[i] * s_in, **extra_args)
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
         t, t_next = t_fn(sigmas[i]), t_fn(sigmas[i + 1])
@@ -727,7 +729,7 @@ def sample_dpmpp_2m(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, cal
     return x
 
 @torch.no_grad()
-def sample_dpmpp_2m_sde(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None, solver_type='midpoint'):
+def sample_dpmpp_2m_sde(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None, solver_type='midpoint'):
     """DPM-Solver++(2M) SDE."""
     if len(sigmas) <= 1:
         return x
@@ -746,7 +748,7 @@ def sample_dpmpp_2m_sde(wrapped_model: ModelWrapper, x, sigmas, extra_args=None,
     h = None
 
     for i in trange(len(sigmas) - 1, disable=disable):
-        denoised = wrapped_model(x, sigmas[i] * s_in, **extra_args)
+        denoised = model_forward(x, sigmas[i] * s_in, **extra_args)
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
         if sigmas[i + 1] == 0:
@@ -775,7 +777,7 @@ def sample_dpmpp_2m_sde(wrapped_model: ModelWrapper, x, sigmas, extra_args=None,
     return x
 
 @torch.no_grad()
-def sample_dpmpp_3m_sde(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
+def sample_dpmpp_3m_sde(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
     """DPM-Solver++(3M) SDE."""
 
     if len(sigmas) <= 1:
@@ -791,7 +793,7 @@ def sample_dpmpp_3m_sde(wrapped_model: ModelWrapper, x, sigmas, extra_args=None,
     h, h_1, h_2 = None, None, None
 
     for i in trange(len(sigmas) - 1, disable=disable):
-        denoised = wrapped_model(x, sigmas[i] * s_in, **extra_args)
+        denoised = model_forward(x, sigmas[i] * s_in, **extra_args)
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
         if sigmas[i + 1] == 0:
@@ -828,31 +830,31 @@ def sample_dpmpp_3m_sde(wrapped_model: ModelWrapper, x, sigmas, extra_args=None,
     return x
 
 @torch.no_grad()
-def sample_dpmpp_3m_sde_gpu(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
+def sample_dpmpp_3m_sde_gpu(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
     if len(sigmas) <= 1:
         return x
 
     sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
     noise_sampler = BrownianTreeNoiseSampler(x, sigma_min, sigma_max, seed=extra_args.get("seed", None), cpu=False) if noise_sampler is None else noise_sampler
-    return sample_dpmpp_3m_sde(wrapped_model, x, sigmas, extra_args=extra_args, callback=callback, disable=disable, eta=eta, s_noise=s_noise, noise_sampler=noise_sampler)
+    return sample_dpmpp_3m_sde(model_forward, x, sigmas, extra_args=extra_args, callback=callback, disable=disable, eta=eta, s_noise=s_noise, noise_sampler=noise_sampler)
 
 @torch.no_grad()
-def sample_dpmpp_2m_sde_gpu(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None, solver_type='midpoint'):
+def sample_dpmpp_2m_sde_gpu(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None, solver_type='midpoint'):
     if len(sigmas) <= 1:
         return x
 
     sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
     noise_sampler = BrownianTreeNoiseSampler(x, sigma_min, sigma_max, seed=extra_args.get("seed", None), cpu=False) if noise_sampler is None else noise_sampler
-    return sample_dpmpp_2m_sde(wrapped_model, x, sigmas, extra_args=extra_args, callback=callback, disable=disable, eta=eta, s_noise=s_noise, noise_sampler=noise_sampler, solver_type=solver_type)
+    return sample_dpmpp_2m_sde(model_forward, x, sigmas, extra_args=extra_args, callback=callback, disable=disable, eta=eta, s_noise=s_noise, noise_sampler=noise_sampler, solver_type=solver_type)
 
 @torch.no_grad()
-def sample_dpmpp_sde_gpu(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None, r=1 / 2):
+def sample_dpmpp_sde_gpu(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None, r=1 / 2):
     if len(sigmas) <= 1:
         return x
 
     sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
     noise_sampler = BrownianTreeNoiseSampler(x, sigma_min, sigma_max, seed=extra_args.get("seed", None), cpu=False) if noise_sampler is None else noise_sampler
-    return sample_dpmpp_sde(wrapped_model, x, sigmas, extra_args=extra_args, callback=callback, disable=disable, eta=eta, s_noise=s_noise, noise_sampler=noise_sampler, r=r)
+    return sample_dpmpp_sde(model_forward, x, sigmas, extra_args=extra_args, callback=callback, disable=disable, eta=eta, s_noise=s_noise, noise_sampler=noise_sampler, r=r)
 
 def DDPMSampler_step(x, sigma, sigma_prev, noise, noise_sampler):
     alpha_cumprod = 1 / ((sigma * sigma) + 1)
@@ -864,13 +866,13 @@ def DDPMSampler_step(x, sigma, sigma_prev, noise, noise_sampler):
         mu += ((1 - alpha) * (1. - alpha_cumprod_prev) / (1. - alpha_cumprod)).sqrt() * noise_sampler(sigma, sigma_prev)
     return mu
 
-def generic_step_sampler(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, step_function=None):
+def generic_step_sampler(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, step_function=None):
     extra_args = {} if extra_args is None else extra_args
     noise_sampler = default_noise_sampler(x) if noise_sampler is None else noise_sampler
     s_in = x.new_ones([x.shape[0]])
 
     for i in trange(len(sigmas) - 1, disable=disable):
-        denoised = wrapped_model(x, sigmas[i] * s_in, **extra_args)
+        denoised = model_forward(x, sigmas[i] * s_in, **extra_args)
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
         x = step_function(x / torch.sqrt(1.0 + sigmas[i] ** 2.0), sigmas[i], sigmas[i + 1], (x - denoised) / sigmas[i], noise_sampler)
@@ -879,26 +881,26 @@ def generic_step_sampler(wrapped_model: ModelWrapper, x, sigmas, extra_args=None
     return x
 
 @torch.no_grad()
-def sample_ddpm(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None):
-    return generic_step_sampler(wrapped_model, x, sigmas, extra_args, callback, disable, noise_sampler, DDPMSampler_step)
+def sample_ddpm(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None):
+    return generic_step_sampler(model_forward, x, sigmas, extra_args, callback, disable, noise_sampler, DDPMSampler_step)
 
 @torch.no_grad()
-def sample_lcm(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None):
+def sample_lcm(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None):
     extra_args = {} if extra_args is None else extra_args
     noise_sampler = default_noise_sampler(x) if noise_sampler is None else noise_sampler
     s_in = x.new_ones([x.shape[0]])
     for i in trange(len(sigmas) - 1, disable=disable):
-        denoised = wrapped_model(x, sigmas[i] * s_in, **extra_args)
+        denoised = model_forward(x, sigmas[i] * s_in, **extra_args)
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
 
         x = denoised
         if sigmas[i + 1] > 0:
-            x = wrapped_model.model_sampling.noise_scaling(sigmas[i + 1], noise_sampler(sigmas[i], sigmas[i + 1]), x)
+            x = model_forward.model_sampling.noise_scaling(sigmas[i + 1], noise_sampler(sigmas[i], sigmas[i + 1]), x)
     return x
 
 @torch.no_grad()
-def sample_heunpp2(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callback=None, disable=None, s_churn=0., s_tmin=0., s_tmax=float('inf'), s_noise=1.):
+def sample_heunpp2(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, s_churn=0., s_tmin=0., s_tmax=float('inf'), s_noise=1.):
     # From MIT licensed: https://github.com/Carzit/sd-webui-samplers-scheduler/
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
@@ -909,7 +911,7 @@ def sample_heunpp2(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, call
         sigma_hat = sigmas[i] * (gamma + 1)
         if gamma > 0:
             x = x + eps * (sigma_hat ** 2 - sigmas[i] ** 2) ** 0.5
-        denoised = wrapped_model(x, sigma_hat * s_in, **extra_args)
+        denoised = model_forward(x, sigma_hat * s_in, **extra_args)
         d = to_d(x, sigma_hat, denoised)
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigma_hat, 'denoised': denoised})
@@ -921,7 +923,7 @@ def sample_heunpp2(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, call
 
             # Heun's method
             x_2 = x + d * dt
-            denoised_2 = wrapped_model(x_2, sigmas[i + 1] * s_in, **extra_args)
+            denoised_2 = model_forward(x_2, sigmas[i + 1] * s_in, **extra_args)
             d_2 = to_d(x_2, sigmas[i + 1], denoised_2)
 
             w = 2 * sigmas[0]
@@ -936,12 +938,12 @@ def sample_heunpp2(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, call
         else:
             # Heun++
             x_2 = x + d * dt
-            denoised_2 = wrapped_model(x_2, sigmas[i + 1] * s_in, **extra_args)
+            denoised_2 = model_forward(x_2, sigmas[i + 1] * s_in, **extra_args)
             d_2 = to_d(x_2, sigmas[i + 1], denoised_2)
             dt_2 = sigmas[i + 2] - sigmas[i + 1]
 
             x_3 = x_2 + d_2 * dt_2
-            denoised_3 = wrapped_model(x_3, sigmas[i + 2] * s_in, **extra_args)
+            denoised_3 = model_forward(x_3, sigmas[i + 2] * s_in, **extra_args)
             d_3 = to_d(x_3, sigmas[i + 2], denoised_3)
 
             w = 3 * sigmas[0]
@@ -956,7 +958,7 @@ def sample_heunpp2(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, call
 
 #From https://github.com/zju-pi/diff-sampler/blob/main/diff-solvers-main/solvers.py
 #under Apache 2 license
-def sample_ipndm(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callback=None, disable=None, max_order=4):
+def sample_ipndm(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, max_order=4):
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
 
@@ -969,7 +971,7 @@ def sample_ipndm(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callba
 
         x_cur = x_next
 
-        denoised = wrapped_model(x_cur, t_cur * s_in, **extra_args)
+        denoised = model_forward(x_cur, t_cur * s_in, **extra_args)
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
 
@@ -996,7 +998,7 @@ def sample_ipndm(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callba
 
 #From https://github.com/zju-pi/diff-sampler/blob/main/diff-solvers-main/solvers.py
 #under Apache 2 license
-def sample_ipndm_v(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callback=None, disable=None, max_order=4):
+def sample_ipndm_v(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, max_order=4):
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
 
@@ -1010,7 +1012,7 @@ def sample_ipndm_v(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, call
 
         x_cur = x_next
 
-        denoised = wrapped_model(x_cur, t_cur * s_in, **extra_args)
+        denoised = model_forward(x_cur, t_cur * s_in, **extra_args)
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
 
@@ -1058,7 +1060,7 @@ def sample_ipndm_v(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, call
     return x_next
 
 @torch.no_grad()
-def sample_euler_cfg_pp(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callback=None, disable=None):
+def sample_euler_cfg_pp(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None):
     extra_args = {} if extra_args is None else extra_args
 
     temp = [0]
@@ -1067,12 +1069,12 @@ def sample_euler_cfg_pp(wrapped_model: ModelWrapper, x, sigmas, extra_args=None,
         return args["denoised"]
 
     # TODO: maybe we don't need to pass it again since we are updating it in place
-    extra_args["model_options"] = wrapped_model.update_options(ModelOption.POST_CFG_FUNC.value, post_cfg_function)
+    extra_args["model_options"] = model_forward.update_options(ModelOption.POST_CFG_FUNC.value, post_cfg_function)
 
     s_in = x.new_ones([x.shape[0]])
     for i in trange(len(sigmas) - 1, disable=disable):
         sigma_hat = sigmas[i]
-        denoised = wrapped_model(x, sigma_hat * s_in, **extra_args)
+        denoised = model_forward(x, sigma_hat * s_in, **extra_args)
         d = to_d(x, sigma_hat, temp[0])
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigma_hat, 'denoised': denoised})
@@ -1082,7 +1084,7 @@ def sample_euler_cfg_pp(wrapped_model: ModelWrapper, x, sigmas, extra_args=None,
     return x
 
 @torch.no_grad()
-def sample_euler_ancestral_cfg_pp(wrapped_model: ModelWrapper, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
+def sample_euler_ancestral_cfg_pp(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
     """Ancestral sampling with Euler method steps."""
     extra_args = {} if extra_args is None else extra_args
     noise_sampler = default_noise_sampler(x) if noise_sampler is None else noise_sampler
@@ -1093,11 +1095,11 @@ def sample_euler_ancestral_cfg_pp(wrapped_model: ModelWrapper, x, sigmas, extra_
         return args["denoised"]
 
     # TODO: maybe we don't need to pass it again since we are updating it in place
-    extra_args["model_options"] = wrapped_model.update_options(ModelOption.POST_CFG_FUNC.value, post_cfg_function)
+    extra_args["model_options"] = model_forward.update_options(ModelOption.POST_CFG_FUNC.value, post_cfg_function)
 
     s_in = x.new_ones([x.shape[0]])
     for i in trange(len(sigmas) - 1, disable=disable):
-        denoised = wrapped_model(x, sigmas[i] * s_in, **extra_args)
+        denoised = model_forward(x, sigmas[i] * s_in, **extra_args)
         sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=eta)
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
