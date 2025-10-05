@@ -4,12 +4,11 @@ from torch import Tensor
 import math
 
 from .scheduler_types import calculate_sigmas
-from .sampling_helpers import get_area_and_mult, process_conds, prepare_mask
+from .sampling_helpers import preprocess_cond, process_conds, prepare_mask
 from .enum import DISCARD_PENULTIMATE_SIGMA_SAMPLERS, KSamplerType, SamplerType, SchedulerType
 from .sampler_impl import ksampler_factory
 from ..conditionals import can_concat_cond, cond_cat
 from ...utils.tensor import fix_empty_latent_channels, prepare_noise
-from ...utils.device import MemoryManager
 from ...model_utils.model_wrapper import ModelWrapper
 from ...model_utils.latent import Latent
 
@@ -97,7 +96,7 @@ class KSampler:
             denoise=self.denoise,
         )
 
-# TODO: refactor in a clean way
+
 def sample(
     wrapped_model: ModelWrapper,
     noise: Tensor,
@@ -132,7 +131,7 @@ def sample(
     if latent_image is not None and torch.count_nonzero(latent_image) > 0:
         latent_image = wrapped_model.process_latent_in(latent_image)
         
-    conds = process_conds(wrapped_model, noise, conds, wrapped_model.device, latent_image, denoise_mask, seed)
+    conds = process_conds(noise, conds, wrapped_model.device, latent_image, denoise_mask, seed)
     pos_conds, neg_conds = conds.get("positive"), conds.get("negative")
     
     extra_args = {"model_options": model_options, "seed":seed}
@@ -155,7 +154,8 @@ def sample(
 
 def model_sampling(model, x, timestep, uncond, cond, cond_scale, model_options={}, seed=None):
     '''
-    single sampling step for a given model. This has to be used inside the sampler's sample methods.
+    Single sampling step for a given model. This has to be used inside the sampler's sample methods.
+    CFG and post-CFG methods (if any) are applied here.
     '''
     
     if math.isclose(cond_scale, 1.0) and model_options.get("disable_cfg1_optimization", False) == False:
@@ -189,113 +189,69 @@ def model_sampling(model, x, timestep, uncond, cond, cond_scale, model_options={
     return cfg_result
 
 
-# TODO: adapt and refactor, don't need many of these functionalities
+# TODO: still WIP, model_options not in use
 def calc_cond_batch(model, conds, x_in, timestep, model_options):
-    out_conds = []
-    out_counts = []
-    to_run = []
+    """
+    It batches all conditioning (pos, neg, controlnet etc..) together, runs the
+    model once, and then returns the separated results.
+    """
+    # nothing to process
+    if all(c is None for c in conds):
+        return [torch.zeros_like(x_in) for _ in conds]
 
-    for i in range(len(conds)):
-        out_conds.append(torch.zeros_like(x_in))
-        out_counts.append(torch.ones_like(x_in) * 1e-37)
+    # ---- prepare conditioning
+    applied_cond = []
+    applied_cond_group = []
 
-        cond = conds[i]
-        if cond is not None:
-            for x in cond:
-                p = get_area_and_mult(x, x_in, timestep)
-                if p is None:
-                    continue
+    for i, cond_list in enumerate(conds):
+        if cond_list is None: continue
+        for c in cond_list:
+            prepared_chunk = preprocess_cond(c, x_in)
+            applied_cond.append(prepared_chunk)
+            applied_cond_group.append(i)
 
-                to_run += [(p, i)]
+    # returning if no conditional applied
+    if not applied_cond:
+        return [torch.zeros_like(x_in) for _ in range(len(conds))]
 
-    while len(to_run) > 0:
-        first = to_run[0]
-        first_shape = first[0][0].shape
-        to_batch_temp = []
-        for x in range(len(to_run)):
-            if can_concat_cond(to_run[x][0], first[0]):
-                to_batch_temp += [x]
+    # ---- build the batch
+    num_tasks = len(applied_cond)
+    batched_input_x = x_in.repeat(num_tasks, 1, 1, 1)
+    batched_timestep = timestep.repeat(num_tasks)
+    conditioning_to_cat = [t.conditioning for t in applied_cond]
 
-        to_batch_temp.reverse()
-        to_batch = to_batch_temp[:1]
+    batched_conditioning = cond_cat(conditioning_to_cat)
 
-        free_memory = MemoryManager.available_memory(x_in.device)
-        for i in range(1, len(to_batch_temp) + 1):
-            batch_amount = to_batch_temp[:len(to_batch_temp)//i]
-            input_shape = [len(batch_amount) * first_shape[0]] + list(first_shape)[1:]
-            if model.memory_required(input_shape) * 1.5 < free_memory:
-                to_batch = batch_amount
-                break
+    controlnet_cond = next((t.control for t in applied_cond if t.control is not None), None)
+    if controlnet_cond is not None:
+        batched_conditioning['control'] = controlnet_cond.get_control(batched_input_x, batched_timestep, batched_conditioning, num_tasks)
 
-        input_x = []
-        mult = []
-        c = []
-        cond_or_uncond = []
-        area = []
-        control = None
-        patches = None
-        for x in to_batch:
-            o = to_run.pop(x)
-            p = o[0]
-            input_x.append(p.input_x)
-            mult.append(p.mult)
-            c.append(p.conditioning)
-            area.append(p.area)
-            cond_or_uncond.append(o[1])
-            control = p.control
-            patches = p.patches
+    # ---- run model
+    output = model.apply_model(batched_input_x, batched_timestep, **batched_conditioning)
 
-        batch_chunks = len(cond_or_uncond)
-        input_x = torch.cat(input_x)
-        c = cond_cat(c)
-        timestep_ = torch.cat([timestep] * batch_chunks)
+    # ---- average the results
+    final_outputs = [torch.zeros_like(x_in) for _ in range(len(conds))]
+    final_counts = [torch.zeros_like(x_in) + 1e-37 for _ in range(len(conds))]
 
-        if control is not None:
-            c['control'] = control.get_control(input_x, timestep_, c, len(cond_or_uncond))
+    output_chunks = output.chunk(num_tasks)
 
-        transformer_options = {}
-        if 'transformer_options' in model_options:
-            transformer_options = model_options['transformer_options'].copy()
+    for i, result_chunk in enumerate(output_chunks):
+        original_index = applied_cond_group[i]
+        strength_mult = applied_cond[i].mult
 
-        if patches is not None:
-            if "patches" in transformer_options:
-                cur_patches = transformer_options["patches"].copy()
-                for p in patches:
-                    if p in cur_patches:
-                        cur_patches[p] = cur_patches[p] + patches[p]
-                    else:
-                        cur_patches[p] = patches[p]
-                transformer_options["patches"] = cur_patches
-            else:
-                transformer_options["patches"] = patches
+        final_outputs[original_index] += result_chunk * strength_mult
+        final_counts[original_index] += strength_mult
 
-        transformer_options["cond_or_uncond"] = cond_or_uncond[:]
-        transformer_options["sigmas"] = timestep
+    for i in range(len(final_outputs)):
+        final_outputs[i] /= final_counts[i]
 
-        c['transformer_options'] = transformer_options
-
-        if 'model_function_wrapper' in model_options:
-            output = model_options['model_function_wrapper'](model.apply_model, {"input": input_x, "timestep": timestep_, "c": c, "cond_or_uncond": cond_or_uncond}).chunk(batch_chunks)
+    final_results = []
+    output_idx = 0
+    for c in conds:
+        if c is None: final_results.append(torch.zeros_like(x_in))
         else:
-            output = model.apply_model(input_x, timestep_, **c).chunk(batch_chunks)
+            final_results.append(final_outputs[output_idx])
+            output_idx += 1
 
-        for o in range(batch_chunks):
-            cond_index = cond_or_uncond[o]
-            a = area[o]
-            if a is None:
-                out_conds[cond_index] += output[o] * mult[o]
-                out_counts[cond_index] += mult[o]
-            else:
-                out_c = out_conds[cond_index]
-                out_cts = out_counts[cond_index]
-                dims = len(a) // 2
-                for i in range(dims):
-                    out_c = out_c.narrow(i + 2, a[i + dims], a[i])
-                    out_cts = out_cts.narrow(i + 2, a[i + dims], a[i])
-                out_c += output[o] * mult[o]
-                out_cts += mult[o]
+    return final_results
 
-    for i in range(len(out_conds)):
-        out_conds[i] /= out_counts[i]
-
-    return out_conds

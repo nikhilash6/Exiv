@@ -1,4 +1,6 @@
 # TODO: make the COND classes and try to add these methods + refactor
+# TODO: these are placeholders for now, these have to updated
+
 def can_concat_cond(c1, c2):
     if c1.input_x.shape != c2.input_x.shape:
         return False
@@ -45,4 +47,3 @@ def cond_cat(c_list):
         out[k] = conds[0].concat(conds[1:])
 
     return out
-
