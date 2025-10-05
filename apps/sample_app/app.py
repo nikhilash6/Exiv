@@ -1,7 +1,7 @@
 import torch
 
-from kirin.quantizers import TorchAOConfig, TorchAOQuantizer
-from kirin.components import latent_noise_generator
+from exiv.quantizers import TorchAOConfig, TorchAOQuantizer
+from exiv.components import latent_noise_generator
 
 # TODO: WIP
 denoising_step_list = [1000, 750, 500, 250]

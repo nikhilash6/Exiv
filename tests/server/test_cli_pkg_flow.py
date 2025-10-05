@@ -8,7 +8,7 @@ FAILED_APP_PATH = "tests/test_utils/assets/apps/fail_app.py"
 class CLITest(unittest.TestCase):
     def test_cli_run_success(self):
         result = subprocess.run(
-            ["kirin", "run", SUCCESS_APP_PATH],
+            ["exiv", "run", SUCCESS_APP_PATH],
             capture_output=True,
             text=True,
             check=False
@@ -19,7 +19,7 @@ class CLITest(unittest.TestCase):
 
     def test_cli_run_fail(self):
         result = subprocess.run(
-            ["kirin", "run", FAILED_APP_PATH],
+            ["exiv", "run", FAILED_APP_PATH],
             capture_output=True,
             text=True,
             check=False

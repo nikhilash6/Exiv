@@ -3,7 +3,7 @@ import torch
 import unittest
 
 from tests.test_utils.common import LargeModel, SimpleModel, check_memory_usage, create_large_model_file
-from kirin.utils.device import MemoryManager, CUDA_CC, DEFAULT_DEVICE, is_cuda_available, is_mps_available, is_xla_available, is_mps_available
+from exiv.utils.device import MemoryManager, CUDA_CC, DEFAULT_DEVICE, is_cuda_available, is_mps_available, is_xla_available, is_mps_available
 
 class ModelLoadTest(unittest.TestCase):
     # clear mem / cache before n after each test
@@ -48,7 +48,7 @@ class ModelLoadTest(unittest.TestCase):
     # testing bnb quantization
     @unittest.skip("not fixed")
     def test_bnb_model_quant(self):
-        from kirin.quantizers.bnb.bnb import BNBQuantizer
+        from exiv.quantizers.bnb.bnb import BNBQuantizer
         
         quantizer = BNBQuantizer()
         model = SimpleModel()
@@ -58,7 +58,7 @@ class ModelLoadTest(unittest.TestCase):
     # testing torchao quantization
     @unittest.skipIf(CUDA_CC < 89, "Compute capability > 89 required")
     def test_torchao_model_quant(self):
-        from kirin.quantizers.torchao.torchao import TorchAOQuantizer
+        from exiv.quantizers.torchao.torchao import TorchAOQuantizer
         
         quantizer = TorchAOQuantizer()
         model = SimpleModel(quantizer=quantizer)

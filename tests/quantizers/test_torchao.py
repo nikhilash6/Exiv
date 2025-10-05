@@ -5,9 +5,9 @@ from unittest.mock import patch
 from parameterized import parameterized
 
 from tests.test_utils.common import LargeModel, SimpleModel, check_memory_usage, create_large_model_file
-from kirin.utils.device import MemoryManager, DEFAULT_DEVICE, is_cuda_available, CUDA_CC
-from kirin.utils.logging import app_logger
-from kirin.model_utils.model_mixin import ModelMixin
+from exiv.utils.device import MemoryManager, DEFAULT_DEVICE, is_cuda_available, CUDA_CC
+from exiv.utils.logging import app_logger
+from exiv.model_utils.model_mixin import ModelMixin
 
 @unittest.skipIf(not is_cuda_available or CUDA_CC < 89, "Only available for cuda devices")
 class TorchAORunTest(unittest.TestCase):
@@ -31,8 +31,8 @@ class TorchAORunTest(unittest.TestCase):
     ]
     @parameterized.expand(QUANT_PARAMS)
     def test_torchao_run(self, quant_type, expected_mem):
-        from kirin.quantizers.torchao.torchao import TorchAOQuantizer
-        from kirin.quantizers.base import TorchAOConfig
+        from exiv.quantizers.torchao.torchao import TorchAOQuantizer
+        from exiv.quantizers.base import TorchAOConfig
         
         with check_memory_usage(expected_mem=expected_mem, device=DEFAULT_DEVICE):
             app_logger.info(f"quantizing: {quant_type}")
@@ -59,7 +59,7 @@ class TorchAORunTest(unittest.TestCase):
     # torchao plus offloading
     @check_memory_usage(expected_mem=550, device=DEFAULT_DEVICE)
     def test_torchao_low_mem_run(self):
-        from kirin.quantizers.torchao.torchao import TorchAOQuantizer
+        from exiv.quantizers.torchao.torchao import TorchAOQuantizer
         
         # this offloading pattern only quantizes the full_load modules
         # that stay on the gpu, rest all are used and then offloaded

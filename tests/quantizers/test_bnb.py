@@ -4,8 +4,8 @@ import unittest
 from parameterized import parameterized
 
 from tests.test_utils.common import LargeModel, check_memory_usage, create_large_model_file
-from kirin.utils.device import MemoryManager, DEFAULT_DEVICE, is_cuda_available
-from kirin.utils.logging import app_logger
+from exiv.utils.device import MemoryManager, DEFAULT_DEVICE, is_cuda_available
+from exiv.utils.logging import app_logger
 
 @unittest.skipIf(not is_cuda_available, "Only available for cuda devices")
 class TorchBNBRunTest(unittest.TestCase):
@@ -24,8 +24,8 @@ class TorchBNBRunTest(unittest.TestCase):
     ]
     @parameterized.expand(QUANT_PARAMS)
     def test_torchao_run(self, quant_type, expected_mem):
-        from kirin.quantizers.bnb.bnb import BNBQuantizer
-        from kirin.quantizers.base import BNBQuantizerConfig
+        from exiv.quantizers.bnb.bnb import BNBQuantizer
+        from exiv.quantizers.base import BNBQuantizerConfig
         
         with check_memory_usage(expected_mem=expected_mem, device=DEFAULT_DEVICE):
             kwargs_dict = {

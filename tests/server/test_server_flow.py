@@ -5,8 +5,8 @@ import requests
 import threading
 import uvicorn
 import websocket
-from kirin.server import ScriptStatus
-from kirin.server.server import app, start_worker, task_manager
+from exiv.server import ScriptStatus
+from exiv.server.server import app, start_worker, task_manager
 
 
 TEST_HOST = "127.0.0.1"

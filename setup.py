@@ -17,7 +17,7 @@ main_deps = read_requirements_file("requirements")
 dev_deps = read_requirements_file("requirements-dev")
 
 setup(
-    name="kirin",
+    name="exiv",
     version="0.1",
     description="Fastest and lightest Gen AI backend!",
     long_description=open("README.md", "r", encoding="utf-8").read(),
@@ -33,7 +33,7 @@ setup(
     include_package_data=True,
     entry_points={
         "console_scripts": [
-            "kirin = kirin.main:cli"
+            "exiv = exiv.main:cli"
         ]
     }
 )

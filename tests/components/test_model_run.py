@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from tests.test_utils.common import LargeModel, SimpleModel, check_memory_usage, create_large_model_file
-from kirin.utils.device import MemoryManager, DEFAULT_DEVICE, print_mem_usage
+from exiv.utils.device import MemoryManager, DEFAULT_DEVICE, print_mem_usage
 
 
 class ModelRunTest(unittest.TestCase):
