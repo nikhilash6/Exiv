@@ -5,7 +5,7 @@ import math
 
 from .scheduler_types import calculate_sigmas
 from .sampling_helpers import preprocess_cond, process_conds, prepare_mask
-from .enum import DISCARD_PENULTIMATE_SIGMA_SAMPLERS, KSamplerType, SamplerType, SchedulerType
+from ..enum import DISCARD_PENULTIMATE_SIGMA_SAMPLERS, KSamplerType, SamplerType, SchedulerType
 from .sampler_impl import ksampler_factory
 from ..conditionals import can_concat_cond, cond_cat
 from ...utils.tensor import fix_empty_latent_channels, prepare_noise

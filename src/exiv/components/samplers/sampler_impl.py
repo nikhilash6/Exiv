@@ -8,7 +8,7 @@ from scipy import integrate
 
 import math
 
-from .enum import KSamplerType
+from ..enum import KSamplerType
 from .sampler_types import CONST
 from ...model_utils.model_wrapper import ModelOption, ModelWrapper
 

@@ -1,5 +1,5 @@
 from websockets import ExtensionName
-from ...utils.enum import ExtendedEnum
+from ..utils.enum import ExtendedEnum
 
 
 class KSamplerType(ExtendedEnum):
@@ -71,8 +71,22 @@ class ModelType(ExtendedEnum):
     V_PREDICTION_CONTINUOUS = "v_pred_cont"
     FLUX = "flux"
 
-class SchedulerBase:
-    pass
+class TextEncoderType(ExtendedEnum):
+    CLIP_G = "clip_g"
+    CLIP_H = "clip_h"
+    CLIP_L = "clip_l"
 
-class SamplerBase:
-    pass
+    T5_XXL = "t5_xxl"
+    T5_XL = "t5_xl"
+    T5_XXL_OLD = "t5_xxl_old"
+    T5_BASE = "t5_base"
+    BYT5_SMALL_GLYPH = "byt5_small_glyph"
+
+    GEMMA_2_2B = "gemma_2_2b"
+    QWEN25_3B = "qwen25_3b"
+    QWEN25_7B = "qwen25_7b"
+    LLAMA3_8 = "llama3_8"
+
+class Model(ExtendedEnum):
+    WAN = "wan"
+    QWEN_IMAGE = "qwen_image"

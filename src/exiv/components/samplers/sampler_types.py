@@ -3,7 +3,7 @@ import torch
 import math
 
 from .utils import make_beta_schedule
-from .enum import BetaSchedule, ModelType
+from ..enum import BetaSchedule, ModelType
 
 # code adapted from Forge and ComfyUI
 

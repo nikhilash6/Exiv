@@ -4,7 +4,7 @@ import math
 import numpy as np
 import scipy
 
-from .enum import SchedulerType
+from ..enum import SchedulerType
 from ...utils.logging import app_logger
 from ...utils.tensor import append_dims
 

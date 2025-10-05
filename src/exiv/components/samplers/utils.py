@@ -2,7 +2,7 @@ import torch
 
 import numpy as np
 
-from .enum import BetaSchedule
+from ..enum import BetaSchedule
 
 def make_beta_schedule(schedule_type, n_timestep, linear_start=1e-4, linear_end=2e-2, cosine_s=8e-3):
     # added noise is proportional to sqrt(beta) and thus schedules are also defined with that in mind
