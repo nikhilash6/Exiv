@@ -8,6 +8,7 @@ from ..enum import TextEncoderType
 from ...utils.file import ensure_model_available
 from ...model_utils.model_mixin import ModelMixin
 from ...utils.device import DEFAULT_DEVICE
+from ...utils.logging import app_logger
 
 TE_TYPE_CLS_MAP = {
     TextEncoderType.T5_XXL: T5XXL
@@ -25,7 +26,7 @@ class TextEncoder:
     def load_model(self):
         path = ensure_model_available(self.path)
         if not path:
-            warnings.warn(f"text encoder {path} not found!")
+            app_logger.warning(f"text encoder {path} not found!")
             return None
 
         self.te_model = self.load_text_encoder(path)
