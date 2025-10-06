@@ -1,12 +1,22 @@
+import functools
 import warnings
 from typing import List, Optional
 
-from exiv.components.enum import TextEncoderType
-
+from .t5_xxl import T5XXL
 from .text_tokenizer import WanT5Tokenizer
+from ..enum import TextEncoderType
 from ...utils.file import ensure_model_available
+from ...model_utils.model_mixin import ModelMixin
+from ...utils.device import DEFAULT_DEVICE
 
-# NOTE: not inheriting from ModelMixin, model is loaded all at once
+TE_TYPE_CLS_MAP = {
+    TextEncoderType.T5_XXL: T5XXL
+}
+
+# NOTE: not inheriting from ModelMixin, model is loaded all at once (for now)
+# primary reason rn is that we infer the TE type after loading it, this can
+# be made better by *maybe* loading partial layers, infering the type and then
+# doing memory optimized loading as present in ModelMixin
 class TextEncoder:
     def __init__(self, path: str):
         self.path = path
@@ -18,14 +28,19 @@ class TextEncoder:
             warnings.warn(f"text encoder {path} not found!")
             return None
 
-        self.te_model = load_text_encoder_sd(path)
+        self.te_model = self.load_text_encoder(path)
     
-    @property
-    def te_type(self):
-        if self.te_model is None:
-            raise Exception("can't determine TE type without loading the model")
+    def load_text_encoder(self, model_path: str):
+        state_dict = ModelMixin.get_state_dict(model_path, DEFAULT_DEVICE)
+        if self.te_type is None or self.te_type not in TE_TYPE_CLS_MAP:
+            raise Exception("Text encoder not supported")
         
-        sd = self.te_model
+        te_cls = TE_TYPE_CLS_MAP[self.te_type]
+        return te_cls.load_state_dict(state_dict)
+        
+    @functools.lru_cache(max_size=2)
+    @property
+    def te_type(self, sd):
         if "text_model.encoder.layers.30.mlp.fc1.weight" in sd:
             return TextEncoderType.CLIP_G
         if "text_model.encoder.layers.22.mlp.fc1.weight" in sd:
@@ -70,3 +85,4 @@ class WanTextEncoder(ModelTextEncoder):
         self.t5_xxl.load_model()
         assert self.t5_xxl.te_type == TextEncoderType.T5_XXL, f"expected T5_XXL but found {self.t5_xxl.te_type}"
         
+        # TODO: wip

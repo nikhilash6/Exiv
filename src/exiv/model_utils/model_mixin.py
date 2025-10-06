@@ -86,10 +86,11 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         
         self.gpu_device = device or self.gpu_device
         model_path = ensure_model_available(model_path, download_path, force_download)
-        self.load_state_dict(self.get_state_dict(model_path), assign=True)
+        self.load_state_dict(ModelMixin.get_state_dict(model_path), assign=True)
     
     # code adapted from ComfyUI
-    def get_state_dict(self, model_path, device=torch.device("cpu")):
+    @staticmethod
+    def get_state_dict(model_path, device=torch.device("cpu")):
         file_extension = os.path.basename(model_path).split(".")[-1]
         if file_extension in ["safetensors", "sft"]:
             try:
