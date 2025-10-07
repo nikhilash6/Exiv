@@ -1,8 +1,8 @@
 import torch
 import math
 
-
-
+from .activations import ACT2FN
+from ..attention import optimized_attention
 
 class T5LayerNorm(torch.nn.Module):
     def __init__(self, hidden_size, eps=1e-6, dtype=None, device=None, operations=None):
@@ -15,10 +15,6 @@ class T5LayerNorm(torch.nn.Module):
         x = x * torch.rsqrt(variance + self.variance_epsilon)
         return cast_to_input(self.weight, x) * x
 
-activations = {
-    "gelu_pytorch_tanh": lambda a: torch.nn.functional.gelu(a, approximate="tanh"),
-    "relu": torch.nn.functional.relu,
-}
 
 class T5DenseActDense(torch.nn.Module):
     def __init__(self, model_dim, ff_dim, ff_activation, dtype, device, operations):
@@ -26,7 +22,7 @@ class T5DenseActDense(torch.nn.Module):
         self.wi = operations.Linear(model_dim, ff_dim, bias=False, dtype=dtype, device=device)
         self.wo = operations.Linear(ff_dim, model_dim, bias=False, dtype=dtype, device=device)
         # self.dropout = nn.Dropout(config.dropout_rate)
-        self.act = activations[ff_activation]
+        self.act = ACT2FN[ff_activation]
 
     def forward(self, x):
         x = self.act(self.wi(x))
@@ -41,7 +37,7 @@ class T5DenseGatedActDense(torch.nn.Module):
         self.wi_1 = operations.Linear(model_dim, ff_dim, bias=False, dtype=dtype, device=device)
         self.wo = operations.Linear(ff_dim, model_dim, bias=False, dtype=dtype, device=device)
         # self.dropout = nn.Dropout(config.dropout_rate)
-        self.act = activations[ff_activation]
+        self.act = ACT2FN[ff_activation]
 
     def forward(self, x):
         hidden_gelu = self.act(self.wi_0(x))
@@ -207,7 +203,7 @@ class T5Stack(torch.nn.Module):
             mask = mask.masked_fill(mask.to(torch.bool), -torch.finfo(x.dtype).max)
 
         intermediate = None
-        optimized_attention = optimized_attention_for_device(x.device, mask=attention_mask is not None, small_input=True)
+        optimized_attention = optimized_attention(x.device, mask=attention_mask is not None, small_input=True)
         past_bias = None
 
         if intermediate_output is not None:
@@ -248,7 +244,3 @@ class T5(torch.nn.Module):
         if self.dtype not in [torch.float32, torch.float16, torch.bfloat16]:
             x = torch.nan_to_num(x) #Fix for fp8 T5 base
         return self.encoder(x, attention_mask=attention_mask, **kwargs)
-
-
-class T5XXL:
-    pass
