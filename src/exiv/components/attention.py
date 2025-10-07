@@ -17,6 +17,7 @@ def standard_attention(q, k, v, heads, mask=None):
     if mask is not None:
         # heuristic: If the mask is 2D and square, assume it's a causal mask.
         # casual_mask: (seq_len, seq_len)
+        # NOTE: general causal mask can be (seq_len, key_len)
         if mask.ndim == 2 and mask.shape[0] == mask.shape[1]:
             # adding batch and head dim, same mask is applied to every head/batch
             # reshaping (seq_len, seq_len) -> (1, 1, seq_len, seq_len)

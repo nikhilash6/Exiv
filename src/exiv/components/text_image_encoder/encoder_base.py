@@ -33,5 +33,6 @@ class T5Config(EncoderConfig):
     output_past = True,
     pad_token_id = 0,
     relative_attention_num_buckets = 32,
+    relative_attention_max_distance = 128,
     tie_word_embeddings = False,
     vocab_size = 32128
