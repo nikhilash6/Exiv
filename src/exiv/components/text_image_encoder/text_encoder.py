@@ -1,9 +1,8 @@
 import functools
-import warnings
 from typing import List, Optional
 
-from .t5_xxl import T5XXL
-from .text_tokenizer import WanT5Tokenizer
+from .t5 import T5XXL
+from .text_tokenizer import UMTT5XXLTokenizer, WanT5Tokenizer
 from ..enum import TextEncoderType
 from ...utils.file import ensure_model_available
 from ...model_utils.model_mixin import ModelMixin
@@ -80,7 +79,7 @@ class ModelTextEncoder:
 class WanTextEncoder(ModelTextEncoder):
     def __init__(self, t5_xxl: TextEncoder):
         self.t5_xxl = t5_xxl
-        self.tokenizer = WanT5Tokenizer()
+        self.tokenizer = UMTT5XXLTokenizer()
     
     def load_encoder_dict(self):
         self.t5_xxl.load_model()

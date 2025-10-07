@@ -1,11 +1,12 @@
-import torch
-from transformers import CLIPTokenizer
+from transformers import CLIPTokenizer, AutoTokenizer
 
 from .utils import load_embed, parse_prompt_attention
 
 from ...utils.logging import app_logger
 
-
+# NOTE: we are loading the tokenizer directly on init because generally
+# they are very small compared to other parts of the workflow. But this can be 
+# optimized if need be.
 class SDTokenizer:
     def __init__(
         self, 
@@ -139,18 +140,15 @@ class SDTokenizer:
         token_ids = [t for t, w in token_weight_pair[0] if isinstance(t, int)]
         return self.tokenizer.decode(token_ids)
 
-class SD1Tokenizer:
-    def __init__(self, embedding_directory=None, clip_name="l"):
-        self.clip_name = clip_name
-        self.tokenizer = SDTokenizer(embedding_directory=embedding_directory)
 
-    def tokenize_with_weights(self, text:str, return_word_ids=False, **kwargs):
-        return {self.clip_name: self.tokenizer.tokenize_with_weights(text, return_word_ids, **kwargs)}
-
-    def untokenize(self, token_weight_pair):
-        return self.tokenizer.decode_tokens(token_weight_pair)
-
-
-# TODO: complete this
-class WanT5Tokenizer(SD1Tokenizer):
-    pass
+class UMTT5XXLTokenizer(SDTokenizer):
+    def __init__(self, embedding_directory=None):
+        super().__init__(
+            "google/umt5-xxl",
+            max_length=99999999, 
+            pad_with_end=True, 
+            embedding_directory=embedding_directory, 
+            embedding_size=4096, 
+            embedding_key='umt5xxl',
+            tokenizer_class=AutoTokenizer,
+        )

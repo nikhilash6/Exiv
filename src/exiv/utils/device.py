@@ -1,9 +1,11 @@
 import torch
+import torch.nn.functional as F
+
 import psutil
 
-from ..constants import BYTES_IN_MB
 from .enum import ExtendedEnum
 from .logging import app_logger
+from ..constants import BYTES_IN_MB
 
 # ------------------ Device availability
 # processing device
@@ -104,3 +106,29 @@ def print_mem_usage(model, tag):
     app_logger.debug("model buffers ****")
     for name, b in model.named_buffers():
         app_logger.debug(f"{name} : {b.shape} : {b.dtype} : {b.__class__}")
+        
+
+# -------------- ATTN availability
+XFORMERS_AVAILABLE = False
+try:
+    import xformers
+    import xformers.ops
+    XFORMERS_IS_AVAILABLE = True
+    try:
+        XFORMERS_IS_AVAILABLE = xformers._has_cpp_library
+    except:
+        pass
+    try:
+        XFORMERS_VERSION = xformers.version.__version__
+        app_logger.info("xformers version: {}".format(XFORMERS_VERSION))
+        if XFORMERS_VERSION.startswith("0.0.18"):
+            # bug according to comfy devs
+            app_logger.warning("\nWARNING: This version of xformers has a major bug where you will get black images when generating high resolution images.")
+            app_logger.warning("Please downgrade or upgrade xformers to a different version.\n")
+            XFORMERS_ENABLED_VAE = False
+    except:
+        pass
+except:
+    XFORMERS_IS_AVAILABLE = False
+    
+SDPA_AVAILABLE = hasattr(F, 'scaled_dot_product_attention')
