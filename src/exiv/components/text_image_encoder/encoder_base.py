@@ -24,6 +24,7 @@ class T5Config(EncoderConfig):
     dense_act_fn = "relu",
     initializer_factor = 1.0,
     is_encoder_decoder = True,
+    is_decoder = False,
     is_gated_act = False,
     layer_norm_epsilon = 1e-06,
     model_type = "t5",
