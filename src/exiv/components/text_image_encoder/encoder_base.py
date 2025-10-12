@@ -5,9 +5,11 @@ from ...utils.device import ProcDevice
 from ...model_utils.model_mixin import ModelMixin
 
 # this is the base of all the encoder models like T5 and CLIP
-class TextEncoderBase(ModelMixin):
-    def __init__(self, *args, **kwargs):
-        pass
+class TextEncoder(ModelMixin):
+    def __init__(self, model_path, config):
+        self.model_path = model_path
+        self.config = config
+        super().__init__(ProcDevice.CUDA.value, None, model_path)
     
     # TODO: check if this can be diff for diff encoder archs
     def gen_empty_tokens(self, special_tokens, length):

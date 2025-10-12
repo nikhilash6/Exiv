@@ -38,10 +38,10 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     - safetensor support
     - URL download support
     '''
-    def __init__(self, device: str = None, quantizer: Quantizer = None):
+    def __init__(self, device: str = None, quantizer: Quantizer = None, model_path: str = None):
         super().__init__()
         self.gpu_device = device or DEFAULT_DEVICE
-        self.model_path = None
+        self.model_path = model_path
         self._patched = False
         self._fully_loaded = False
         
@@ -75,13 +75,14 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     # TODO: support GGUF loading
     def load_model(
         self,
-        model_path,                     # path or url
+        model_path = None,              # path or url   (passing this in the init as well for flexibility)
         device = None,                  # device to load this on
         torch_dtype = "fp32",           # 'auto' or 'torch.dtype'
         force_download=False,           # re_download models
         download_path=None,             # defaults to folder util
         force_low_vram=False,
     ):
+        model_path = model_path or self.model_path
         assert model_path is not None, "model_path is required"
         
         self.gpu_device = device or self.gpu_device
