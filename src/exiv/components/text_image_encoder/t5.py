@@ -7,7 +7,7 @@ from typing import Optional
 
 from .activations import ACT2FN
 from ..attention import optimized_attention
-from .encoder_base import T5Config
+from .encoder_base import TextEncoderBase, T5Config, T5XXLConfig
 from ...utils.logging import app_logger
 
 # code adapted from Huggingface Transformers
@@ -283,6 +283,7 @@ class T5LayerSelfAttention(nn.Module):
 class T5LayerCrossAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
+        # relative distance has no meaning since we are calculating attn b/w separate sequences
         self.EncDecAttention = T5Attention(config, has_relative_attention_bias=False)
         self.layer_norm = T5LayerNorm(config.d_model, eps=config.layer_norm_epsilon)
 
@@ -388,8 +389,8 @@ class T5Stack(nn.Module):
         return x, intermediate
 
 
-class T5(nn.Model):
-    def __init__(self, config: T5Config):
+class T5(TextEncoderBase):
+    def __init__(self, config = T5Config()):
         super().__init__(config)
         self.shared = nn.Embedding(config.vocab_size, config.d_model)
         self.encoder = T5Stack(config, self.shared)
@@ -419,3 +420,9 @@ class T5(nn.Model):
         if self.dtype not in [torch.float32, torch.float16, torch.bfloat16]:
             x = torch.nan_to_num(x) #Fix for fp8 T5 base
         return self.encoder(x, attention_mask=attention_mask, **kwargs)
+
+
+class T5XXL(T5):
+    def __init__(self, config = T5XXLConfig()):
+        super().__init__(config)
+        

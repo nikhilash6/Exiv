@@ -1,7 +1,7 @@
 import functools
 from typing import List, Optional
 
-from .t5 import T5XXL
+from .t5 import T5, T5XXL
 from .text_tokenizer import UMTT5XXLTokenizer, WanT5Tokenizer
 from ..enum import TextEncoderType
 from ...utils.file import ensure_model_available
@@ -14,9 +14,7 @@ TE_TYPE_CLS_MAP = {
 }
 
 # NOTE: not inheriting from ModelMixin, model is loaded all at once (for now)
-# primary reason rn is that we infer the TE type after loading it, this can
-# be made better by *maybe* loading partial layers, infering the type and then
-# doing memory optimized loading as present in ModelMixin
+# primary reason rn is that we infer the TE type after loading it
 class TextEncoder:
     def __init__(self, path: str):
         self.path = path
@@ -72,17 +70,23 @@ class TextEncoder:
             return TextEncoderType.LLAMA3_8
         return None
 
-# these include the respective tokenizer as well
-class ModelTextEncoder:
+class ModelEncoder:
+    # model specific text encoder base
+    # these include the respective tokenizer as well
     pass
 
-class WanTextEncoder(ModelTextEncoder):
+class WanEncoder(ModelEncoder):
     def __init__(self, t5_xxl: TextEncoder):
         self.t5_xxl = t5_xxl
         self.tokenizer = UMTT5XXLTokenizer()
     
-    def load_encoder_dict(self):
+    def load_model(self):
         self.t5_xxl.load_model()
         assert self.t5_xxl.te_type == TextEncoderType.T5_XXL, f"expected T5_XXL but found {self.t5_xxl.te_type}"
         
-        # TODO: wip
+    def encode(self, text):
+        tokens = self.tokenize(text)
+        return None     # TODO: complete this 
+    
+    def tokenize(self, text, return_word_ids=False):
+        return self.tokenizer.tokenize_with_weights(text, return_word_ids)
