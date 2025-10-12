@@ -6,9 +6,10 @@ from ...model_utils.model_mixin import ModelMixin
 
 # this is the base of all the encoder models like T5 and CLIP
 class TextEncoder(ModelMixin):
-    def __init__(self, model_path, config):
+    def __init__(self, model_path, config, te_type):
         self.model_path = model_path
         self.config = config
+        self.te_type = te_type
         super().__init__(ProcDevice.CUDA.value, None, model_path)
     
     # TODO: check if this can be diff for diff encoder archs

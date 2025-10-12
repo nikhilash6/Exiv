@@ -4,7 +4,7 @@ from torch import Tensor, nn
 import math
 from collections import OrderedDict
 
-from ...utils.logging import app_logger
+from ..utils.logging import app_logger
 
 
 # this code is directly taken from the HuggingFace Transformers library

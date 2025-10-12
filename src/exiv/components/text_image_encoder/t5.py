@@ -5,9 +5,10 @@ import math
 import copy
 from typing import Optional
 
-from .activations import ACT2FN
-from ..attention import optimized_attention
+from ..activations import ACT2FN
 from .encoder_base import TextEncoder, T5Config, T5XXLConfig
+from ..enum import TextEncoderType
+from ..attention import optimized_attention
 from ...utils.logging import app_logger
 
 # code adapted from Huggingface Transformers
@@ -391,7 +392,7 @@ class T5Stack(nn.Module):
 
 class T5(TextEncoder):
     def __init__(self, model_path, config = T5Config()):
-        super().__init__(model_path, config)
+        super().__init__(model_path, config, TextEncoderType.T5_BASE.value)
         self.shared = nn.Embedding(config.vocab_size, config.d_model)
         self.encoder = T5Stack(config, self.shared)
 
@@ -423,6 +424,6 @@ class T5(TextEncoder):
 
 
 class T5XXL(T5):
-    def __init__(self, config = T5XXLConfig()):
-        super().__init__(config)
+    def __init__(self, model_path, config = T5XXLConfig()):
+        super().__init__(model_path, config, TextEncoderType.T5_XXL.value)
         

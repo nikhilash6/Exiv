@@ -71,7 +71,7 @@ class WanEncoder(ModelEncoder):
     
     def load_model(self):
         self.t5_xxl.load_model()
-        assert self.t5_xxl.te_type == TextEncoderType.T5_XXL, f"expected T5_XXL but found {self.t5_xxl.te_type}"
+        assert self.t5_xxl.te_type == TextEncoderType.T5_XXL.value, f"expected T5_XXL but found {self.t5_xxl.te_type}"
         
     def encode(self, text):
         tokens = self.tokenize(text)

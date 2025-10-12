@@ -90,3 +90,6 @@ class TextEncoderType(ExtendedEnum):
 class Model(ExtendedEnum):
     WAN = "wan"
     QWEN_IMAGE = "qwen_image"
+    
+class VAEType(ExtendedEnum):
+    WAN = "wan"
