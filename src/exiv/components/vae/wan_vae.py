@@ -1,10 +1,13 @@
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
+from torch import Tensor
 
-from typing import Union, Tuple, Optional
+from typing import Union, Tuple, Optional, List
 
+from .base import DiagonalGaussianDistribution, VAEBase
 from ..activations import get_activation
+
 
 CACHE_T = 2
 
@@ -196,6 +199,7 @@ class ResidualBlock(nn.Module):
         return x + h
 
 
+# this is shape preserving and can be dropped in diff attn. scales
 class AttentionBlock(nn.Module):
     def __init__(self, dim):
         super().__init__()
@@ -239,7 +243,6 @@ class MidBlock(nn.Module):
         super().__init__()
         self.dim = dim
 
-        # Create the components
         resnets = [ResidualBlock(dim, dim, dropout, non_linearity)]
         attentions = []
         for _ in range(num_layers):
@@ -505,5 +508,86 @@ class Decoder3d(nn.Module):
             x = self.conv_out(x)
         return x
 
-class WanVAE:
-    pass
+class WanVAE(VAEBase):
+    def __init__(
+        self,
+        base_dim: int = 96,                     # rgb (3) -> base_dim
+        z_dim: int = 16,                        # num. of channels in the latent
+        dim_mult: Tuple[int] = [1, 2, 4, 4],
+        num_res_blocks: int = 2,
+        attn_scales: List[float] = [],
+        temporal_downsample: List[bool] = [False, True, True],
+        use_tiling: bool = True,
+        max_batch_size: Union[int, None] = 4,
+        # pre calculated stats, used by other models using this VAE
+        latents_mean: List[float] = [
+            -0.7571, -0.7089, -0.9113, 0.1075, -0.1745, 0.9653, -0.1517, 1.5508,
+            0.4134, -0.0715, 0.5517, -0.3632, -0.1922, -0.9497, 0.2503, -0.2921,
+        ],
+        latents_std: List[float] = [
+            2.8184, 1.4541, 2.3275, 2.6558, 1.2196, 1.7708, 2.6052, 2.0743,
+            3.2687, 2.1526, 2.8652, 1.5579, 1.6382, 1.1253, 2.8251, 1.9160,
+        ],
+    ):
+        super().__init__()
+        
+        self.z_dim = z_dim
+        self.temporal_downsample = temporal_downsample
+        self.temperal_upsample = temporal_downsample[::-1]
+        
+        self.encoder = Encoder3d(
+            base_dim,
+            z_dim * 2,
+            dim_mult,
+            num_res_blocks,
+            attn_scales,
+            self.temporal_downsample,
+        )
+        
+        self.conv1 = CausalConv3d(z_dim * 2, z_dim * 2, 1)
+        self.conv2 = CausalConv3d(z_dim, z_dim, 1)
+        
+        self.decoder = Decoder3d(
+            base_dim, 
+            z_dim, 
+            dim_mult, 
+            num_res_blocks,
+            attn_scales, 
+            self.temperal_upsample, 
+        )
+        
+        # every downsample layer does spatial compression
+        self.spatial_compression_ratio = 2 ** len(self.temperal_downsample)
+        
+        # slicing config
+        self.use_slicing = max_batch_size != None and max_batch_size >= 1
+        self.slice_batch_size = max(max_batch_size, 1)
+        
+        # tiling config
+        self.use_tiling = use_tiling
+    
+        # number of causal convolution layers
+        self._cached_conv_counts = {
+            "decoder": sum(isinstance(m, CausalConv3d) for m in self.decoder.modules()) if self.decoder is not None else 0,
+            "encoder": sum(isinstance(m, CausalConv3d) for m in self.encoder.modules()) if self.encoder is not None else 0,
+        }
+        
+    def clear_cache(self):
+        # TODO: complete this
+        super().clear_cache()
+        
+    def _encode(self, x: Tensor) -> Tensor:
+        _, _, num_frame, height, width = x.shape
+        
+        # TODO: complete this
+        
+    def encode(self, x: Tensor):
+        if self.use_slicing and x.shape[0] > self.slice_batch_size:
+            encoded_slices = [self._encode(x_slice) for x_slice in x.split(self.slice_batch_size)]
+            h = torch.cat(encoded_slices)
+        else:
+            h = self._encode(x)
+
+        posterior = DiagonalGaussianDistribution(h)
+
+        return posterior.sample(), posterior.mode()

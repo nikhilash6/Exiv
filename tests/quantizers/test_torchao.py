@@ -48,12 +48,12 @@ class TorchAORunTest(unittest.TestCase):
             
         # probably not needed since tests are being run in isolation
         # but keeping them just to be safe
+        model.clear_cache()
         del model
         del quantizer
         del out
         del x
         del quant_config
-        ModelMixin.clear_caches()
         MemoryManager.clear_memory()
         
     # torchao plus offloading

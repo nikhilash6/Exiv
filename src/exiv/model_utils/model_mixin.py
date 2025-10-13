@@ -46,9 +46,13 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         self._fully_loaded = False
         
         self.quantizer = quantizer
+    
+    def clear_cache(self):
+        # add other cleanup in future
+        self.__class__.clear_cls_cache()
 
     @classmethod
-    def clear_caches(cls):
+    def clear_cls_cache(cls):
         cls._module_size.cache_clear()
         cls.is_leaf_module.cache_clear()
     
