@@ -590,4 +590,4 @@ class WanVAE(VAEBase):
 
         posterior = DiagonalGaussianDistribution(h)
 
-        return posterior.sample(), posterior.mode()
+        return posterior.sample()

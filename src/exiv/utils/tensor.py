@@ -2,8 +2,12 @@ import torch
 
 import math
 import numpy as np
+from typing import Union, Tuple, List, Optional
 
 from PIL import Image
+
+from ..model_utils.model_wrapper import ModelWrapper
+from ..utils.logging import app_logger
 
 # many of these methods have been borrowed from ComfyUI
 
@@ -22,24 +26,75 @@ def fix_empty_latent_channels(model_wrapper: ModelWrapper, latent_image: torch.T
         latent_image = repeat_to_batch_size(latent_image, latent_channels, dim=1)
     return latent_image
 
-def prepare_noise(latent_image: torch.Tensor, seed: int, noise_inds=None):
+def prepare_noise(latent_image: torch.Tensor, seed: int, noise_inds: Optional[np.ndarray] = None):
     """
-    creates random noise given a latent image and a seed.
-    optional arg skip can be used to skip and discard x number of noise generations for a given seed
+    Creates random noise tensors based on a latent image's shape, dtype, and layout are used
+    e.g. usage, noise_inds = [0, 0, 1, 1] -> first two will share the same noise + the last two will as well
     """
-    generator = torch.manual_seed(seed)
-    if noise_inds is None:
-        return torch.randn(latent_image.size(), dtype=latent_image.dtype, layout=latent_image.layout, generator=generator, device="cpu")
     
+    generator = torch.Generator(device="cpu").manual_seed(seed)
+
+    if noise_inds is None:
+        return random_tensor(
+            shape=latent_image.size(),
+            generator=generator,
+            device=latent_image.device,
+            dtype=latent_image.dtype,
+            layout=latent_image.layout,
+        )
+
     unique_inds, inverse = np.unique(noise_inds, return_inverse=True)
     noises = []
-    for i in range(unique_inds[-1]+1):
-        noise = torch.randn([1] + list(latent_image.size())[1:], dtype=latent_image.dtype, layout=latent_image.layout, generator=generator, device="cpu")
+
+    for i in range(unique_inds[-1] + 1):
+        noise = random_tensor(
+            shape=(1,) + tuple(latent_image.shape[1:]),
+            generator=generator,
+            device=latent_image.device,
+            dtype=latent_image.dtype,
+            layout=latent_image.layout,
+        )
         if i in unique_inds:
             noises.append(noise)
+
     noises = [noises[i] for i in inverse]
-    noises = torch.cat(noises, axis=0)
+    noises = torch.cat(noises, dim=0)
     return noises
+
+def random_tensor(
+    shape: Union[Tuple[int], List[int]],
+    generator: Optional[torch.Generator] = None,
+    device: Optional[Union[str, torch.device]] = None,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+):
+    if isinstance(device, str):
+        device = torch.device(device)
+    device = device or torch.device("cpu")
+    layout = layout or torch.strided        # standard dense format
+    rand_device = device
+
+    if generator is not None:
+        gen_device_type = (
+            generator[0].device.type if isinstance(generator, list) else generator.device.type
+        )
+
+        # cpu generator -> tensor (cpu) -> gpu
+        if gen_device_type != device.type and gen_device_type == "cpu":
+            rand_device = torch.device("cpu")
+
+        # gpu generator -> tensor (gpu) -> cpu (movement to cpu not allowed)
+        elif gen_device_type != device.type and gen_device_type == "cuda":
+            raise ValueError(
+                f"Cannot create a {device.type} tensor using a CUDA generator."
+            )
+
+    latents = torch.randn(
+            shape, generator=generator, device=rand_device, dtype=dtype, layout=layout
+        ).to(device)
+
+    return latents
+
 
 def append_dims(x, target_dims):
     """Appends dimensions to the end of a tensor until it has target_dims dimensions."""

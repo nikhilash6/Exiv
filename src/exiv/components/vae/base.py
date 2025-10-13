@@ -6,6 +6,7 @@ from typing import Optional, Tuple
 
 from .wan_vae import WanVAE
 from ..enum import VAEType
+from ...utils.tensor import random_tensor
 from ...model_utils.model_mixin import ModelMixin
 
 class VAEBase(ModelMixin):
@@ -26,22 +27,23 @@ def get_vae(vae_type: VAEType) -> VAEBase:
     raise Exception(f"{vae_type} vae not supported")
 
 
-class DiagonalGaussianDistribution(object):
+class DiagonalGaussianDistribution:
     def __init__(self, parameters: torch.Tensor, deterministic: bool = False):
         self.parameters = parameters
+        # incase of wan vae, the encoder output has z_dim * 2 as dim 1
         self.mean, self.logvar = torch.chunk(parameters, 2, dim=1)
         self.logvar = torch.clamp(self.logvar, -30.0, 20.0)
         self.deterministic = deterministic
-        self.std = torch.exp(0.5 * self.logvar)
+        self.std = torch.exp(0.5 * self.logvar)     # resolves to sqrt(var)
         self.var = torch.exp(self.logvar)
         if self.deterministic:
+            # zero variance
             self.var = self.std = torch.zeros_like(
                 self.mean, device=self.parameters.device, dtype=self.parameters.dtype
             )
 
-    # TODO: add randn_tensor and remove device movement
     def sample(self, generator: Optional[torch.Generator] = None) -> torch.Tensor:
-        sample = randn_tensor(
+        sample = random_tensor(
             self.mean.shape,
             generator=generator,
             device=self.parameters.device,
@@ -50,6 +52,9 @@ class DiagonalGaussianDistribution(object):
         x = self.mean + self.std * sample
         return x
 
+    def mode(self) -> torch.Tensor:
+        return self.mean
+    
     # these methods are not needed in inference
     def kl(self, other: "DiagonalGaussianDistribution" = None) -> torch.Tensor:
         if self.deterministic:
@@ -78,7 +83,3 @@ class DiagonalGaussianDistribution(object):
             logtwopi + self.logvar + torch.pow(sample - self.mean, 2) / self.var,
             dim=dims,
         )
-
-    def mode(self) -> torch.Tensor:
-        return self.mean
-
