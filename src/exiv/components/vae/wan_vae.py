@@ -1,3 +1,4 @@
+from functools import partial
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
@@ -572,22 +573,51 @@ class WanVAE(VAEBase):
             "encoder": sum(isinstance(m, CausalConv3d) for m in self.encoder.modules()) if self.encoder is not None else 0,
         }
         
-    def clear_cache(self):
-        # TODO: complete this
-        super().clear_cache()
-        
-    def _encode(self, x: Tensor) -> Tensor:
-        _, _, num_frame, height, width = x.shape
-        
-        # TODO: complete this
-        
+    def reset_causal_cache(self):
+        self._conv_num = self._cached_conv_counts["decoder"]
+        self._conv_idx = [0]
+        self._feat_map = [None] * self._conv_num
+
+        self._enc_conv_num = self._cached_conv_counts["encoder"]
+        self._enc_conv_idx = [0]
+        self._enc_feat_map = [None] * self._enc_conv_num
+
     def encode(self, x: Tensor):
+        tile_width, tile_height, tile_temporal, overlap_width, overlap_height = self.get_tiling_config(input_shape=x.shape)
+        encode_fn = partial(
+            self.tiled_encode_3d, 
+            tile_width=tile_width, 
+            tile_height=tile_height, 
+            tile_temporal=tile_temporal, 
+            overlap_width=overlap_width, 
+            overlap_height=overlap_height
+        )   # since can be written in a much shorter way, but writing like this for readability 
+        
         if self.use_slicing and x.shape[0] > self.slice_batch_size:
-            encoded_slices = [self._encode(x_slice) for x_slice in x.split(self.slice_batch_size)]
+            encoded_slices = [encode_fn(x_slice) for x_slice in x.split(self.slice_batch_size)]
             h = torch.cat(encoded_slices)
         else:
-            h = self._encode(x)
+            h = encode_fn(x)
 
         posterior = DiagonalGaussianDistribution(h)
 
         return posterior.sample()
+    
+    def decode(self, z: Tensor, input_shape: Tuple):
+        tile_width, tile_height, tile_temporal, overlap_width, overlap_height = self.get_tiling_config(input_shape=input_shape)
+        decode_fn = partial(
+            self.tiled_decode_3d, 
+            tile_width=tile_width, 
+            tile_height=tile_height, 
+            tile_temporal=tile_temporal, 
+            overlap_width=overlap_width, 
+            overlap_height=overlap_height
+        )   # since can be written in a much shorter way, but writing like this for readability 
+        
+        if self.use_slicing and z.shape[0] > 1:
+            decoded_slices = [decode_fn(z_slice) for z_slice in z.split(1)]
+            decoded = torch.cat(decoded_slices)
+        else:
+            decoded = decode_fn(z)
+
+        return decoded
