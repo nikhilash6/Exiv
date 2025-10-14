@@ -42,13 +42,14 @@ class KSampler:
         self.denoise = denoise
         
         self.set_steps(steps, denoise)
-        
+    
+    # or calculate_schedule
     def calculate_sigmas(self):
         steps = self.steps
         if discard_penultimate:=(self.sampler_name in DISCARD_PENULTIMATE_SIGMA_SAMPLERS):
             steps += 1
         
-        sigmas = calculate_sigmas(self.wrapped_model.model_sampling, self.scheduler, steps)
+        sigmas = calculate_sigmas(self.wrapped_model.model_sampling, self.scheduler_name, steps)
         if discard_penultimate: sigmas = torch.cat([sigmas[:-2], sigmas[-1:]])
         return sigmas
     
@@ -111,7 +112,7 @@ def sample(
     callback,
     seed,
     denoise,
-):
+) -> Tensor:
     '''
     - processes the inputs, masks and conditionals 
     - constructs the model_sampling that is ultimately passed in the sampler's sample method

@@ -1,59 +1,39 @@
-import torch
+from exiv.components.enum import KSamplerType, ModelType, SchedulerType
+from exiv.components.models.wan.main import WanModel
+from exiv.components.samplers.model_sampling import KSampler
+from exiv.components.samplers.sampler_types import get_model_sampling
+from exiv.components.text_image_encoder.text_encoder import WanEncoder
+from exiv.components.vae.wan_vae import WanVAE
+from exiv.model_utils.model_wrapper import ModelWrapper
 
-from exiv.quantizers import TorchAOConfig, TorchAOQuantizer
-from exiv.components import latent_noise_generator
 
-# TODO: WIP
-denoising_step_list = [1000, 750, 500, 250]
 def main():
-    text_encoder = WanTextEncoder()
-    vae_decoder = VAEDecoder()
+    positive_prompt = "a dog running in the park"
+    negative_prompt = "blurry, bad quality"
+    wan_encoder = WanEncoder()
+    pos_embed = wan_encoder.encode(positive_prompt)
+    neg_embed = wan_encoder.encode(negative_prompt)
     
-    quant_config = TorchAOConfig(quant_type=quant_type)
-    quantizer = TorchAOQuantizer(quantization_config=quant_config)
+    wan_vae = WanVAE()
+    wan_dit_model = WanModel()
+    model_sampling = get_model_sampling(ModelType.EDM)
+    model_wrapper = ModelWrapper(
+        model=wan_dit_model,
+        model_sampling=model_sampling
+    )
     
-    wan_model = Wan2_2(quantizer=quantizer, is_causal=True)
-    noise = latent_noise_generator(1, 21, 16, 60, 104)
+    main_sampler = KSampler(
+        wrapped_model=model_wrapper,
+        seed=123,
+        steps=50,
+        cfg=7.0,
+        sampler_name=KSamplerType.EULER.value,
+        scheduler_name=SchedulerType.SIMPLE.value,
+        positive=pos_embed,
+        negative=neg_embed,
+    )
     
-    num_blocks = 7
-    total_frames = 10 * num_blocks
-    generation_active = True
+    out = main_sampler.run_sampling()
+    out = wan_vae.decode(out)
     
-    for idx, current_num_frames in enumerate(total_frames):
-        if not generation_active: break
-        
-        s = current_start_frame - num_input_frames
-        e = current_start_frame + current_num_frames - num_input_frames
-        noisy_input = noise[:, s:e]
     
-        # denoising loop
-        for index, current_timestep in enumerate(denoising_step_list):
-            if not generation_active: break
-            
-            timestep = torch.ones([1, current_num_frames], device=noise.device,
-                                      dtype=torch.int64) * current_timestep
-            
-            if index < len(pipeline.denoising_step_list) - 1:
-                _, denoised_pred = wan_model(
-                    noisy_image_or_video=noisy_input,
-                    conditional_dict=conditional_dict,
-                    timestep=timestep,
-                    kv_cache=pipeline.kv_cache1,
-                    crossattn_cache=pipeline.crossattn_cache,
-                    current_start=current_start_frame * pipeline.frame_seq_length
-                )
-                next_timestep = pipeline.denoising_step_list[index + 1]
-                noisy_input = pipeline.scheduler.add_noise(
-                    denoised_pred.flatten(0, 1),
-                    torch.randn_like(denoised_pred.flatten(0, 1)),
-                    next_timestep * torch.ones([1 * current_num_frames], device=noise.device, dtype=torch.long)
-                ).unflatten(0, denoised_pred.shape[:2])
-            else:
-                _, denoised_pred = wan_model(
-                    noisy_image_or_video=noisy_input,
-                    conditional_dict=conditional_dict,
-                    timestep=timestep,
-                    kv_cache=pipeline.kv_cache1,
-                    crossattn_cache=pipeline.crossattn_cache,
-                    current_start=current_start_frame * pipeline.frame_seq_length
-                )

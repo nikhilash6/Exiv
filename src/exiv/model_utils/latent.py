@@ -1,2 +1,12 @@
+import torch
+from torch import Tensor
+
+from typing import List
+
+from dataclasses import dataclass
+
+@dataclass
 class Latent:
-    pass
+    samples: List[Tensor]
+    batch_index: List[int]
+    noise_mask: List[Tensor]

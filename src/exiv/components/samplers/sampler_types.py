@@ -275,7 +275,15 @@ MODEL_REGISTRY = {
     ModelType.FLUX: (ModelSamplingFlux, CONST),
 }
 
-def model_sampling(model_config, model_type):
+def get_model_sampling(model_type, model_config={}):
+    '''
+    the returned instance will have the following methods
+    - calculate_input, calculate_denoised, noise_scaling (from the scaling class)
+    - sigma, timestep methods to interchangebly convert between them (from the sampling class)
+    
+    one thing to note is that this relates to how the model was trained, and thus its
+    respective mapping of sigmas and the scaling for the edm framework
+    '''
     sampling_class, scaling_class = MODEL_REGISTRY.get(model_type)
     if not sampling_class:
         raise ValueError(f"Unknown model_type: {model_type}")

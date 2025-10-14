@@ -1,3 +1,8 @@
+import torch
+from torch import Tensor
+
+from typing import List
+
 from ..utils.enum import ExtendedEnum
 
 
@@ -14,3 +19,9 @@ class ModelWrapper:
         
         self.model_options[key] = self.model_options.get(key, []) + [value]
         return self.model_options
+    
+    def process_latent_in(self, latent_image: Tensor) -> Tensor:
+        pass
+    
+    def process_latent_out(self, samples: List[Tensor]) -> List[Tensor]:
+        pass
