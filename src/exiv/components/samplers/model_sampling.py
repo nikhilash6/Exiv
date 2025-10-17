@@ -19,7 +19,7 @@ class KSampler:
         wrapped_model: ModelWrapper,
         seed: int,
         steps: int,
-        cfg: int,
+        cfg: float,
         sampler_name: str,
         scheduler_name: str,
         positive: torch.Tensor,

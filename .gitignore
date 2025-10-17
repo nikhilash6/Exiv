@@ -36,6 +36,7 @@ env/
 venv/
 note.md
 temp.py
+apps/wani2v/assets/
 
 # Test files
 .pytest_cache

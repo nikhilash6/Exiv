@@ -1,8 +1,12 @@
+import torch
+import numpy as np
+
 import os
 import re
 import glob
 import urllib.parse
 import requests
+from typing import List
 
 from .logging import app_logger
 
@@ -58,3 +62,22 @@ def ensure_model_available(model_path: str, download_path: str = None, force_dow
             raise FileNotFoundError(f"Model file not found at {abs_path}")
         return abs_path
 
+class ImageProcessor:
+    @staticmethod
+    def load_image_list(image_path_list: List[str]):
+        from PIL import Image
+        
+        # loads in the torch tensor format
+        res = []
+        for img_path in image_path_list:
+            try:
+                pil_img = Image.open(img_path)
+            except Exception as e:
+                app_logger.warning(str(e))
+                continue
+            
+            np_img = np.array(pil_img).astype(np.float32) / 255.0
+            pt_img = torch.from_numpy(np_img.transpose(0, 3, 1, 2))
+            res.append(pt_img)
+        
+        return res
