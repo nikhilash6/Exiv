@@ -1,8 +1,7 @@
 import torch
+from torch import Tensor
 
 from dataclasses import dataclass
-
-from PIL import Image
 
 from ...utils.device import ProcDevice
 from ...model_utils.model_mixin import ModelMixin
@@ -95,13 +94,13 @@ class TextEncoder(ModelMixin):
         return r
         
 
-class ImageEncoder(ModelMixin):
+class VisionEncoder(ModelMixin):
     def __init__(self, model_path, config):
         self.model_path = model_path
         self.config = config
         super().__init__(ProcDevice.CUDA.value, None, model_path)
         
-    def encode(self, img: Image):
+    def encode_image(self, img: Tensor):
         pass
 
 

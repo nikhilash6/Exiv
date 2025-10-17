@@ -3,7 +3,7 @@ from typing import List, Optional
 
 from exiv.components.text_image_encoder.encoder_base import TextEncoderBase
 
-from .t5 import T5XXL
+from .te_t5 import T5XXL
 from .encoder_base import TextEncoder
 from .text_tokenizer import UMTT5XXLTokenizer
 from ..enum import TextEncoderType
