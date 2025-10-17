@@ -11,6 +11,7 @@ from ..conditionals import can_concat_cond, cond_cat
 from ...utils.tensor import fix_empty_latent_channels, prepare_noise
 from ...model_utils.model_wrapper import ModelWrapper
 from ...model_utils.latent import Latent
+from ...utils.device import ProcDevice
 
 class KSampler:
     def __init__(
@@ -24,7 +25,7 @@ class KSampler:
         positive: torch.Tensor,
         negative: torch.Tensor,
         latent_image: Latent,
-        denoise: int = 1.0,
+        denoise: float = 1.0,
     ):
         assert sampler_name in KSamplerType.value_list() + SamplerType.value_list(), f"sampler {sampler_name} not supported"
         assert scheduler_name in SchedulerType.value_list(), f"scheduler {scheduler_name} not supported"
@@ -72,7 +73,7 @@ class KSampler:
         
         # decides between random noise or zero noise tensors
         if disable_noise:
-            noise = torch.zeros(latent_image.size(), dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
+            noise = torch.zeros(latent_image.size(), dtype=latent_image.dtype, layout=latent_image.layout, device=ProcDevice.CPU.value)
         else:
             batch_inds = self.latent_image.batch_index
             noise = prepare_noise(latent_image, self.seed, batch_inds)
@@ -94,7 +95,6 @@ class KSampler:
             denoise_mask=self.latent_image.noise_mask,
             callback=lambda *args, **kwargs: None,      # TODO: pass a null fn from the top
             seed=self.seed,
-            denoise=self.denoise,
         )
 
 
@@ -111,7 +111,6 @@ def sample(
     denoise_mask,
     callback,
     seed,
-    denoise,
 ) -> Tensor:
     '''
     - processes the inputs, masks and conditionals 

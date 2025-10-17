@@ -1,9 +1,10 @@
 from exiv.components.enum import KSamplerType, ModelType, SchedulerType
-from exiv.components.models.wan.main import WanModel
+from exiv.components.models.wan.main import WanModel, WanModelArchConfig
 from exiv.components.samplers.model_sampling import KSampler
 from exiv.components.samplers.sampler_types import get_model_sampling
 from exiv.components.text_image_encoder.text_encoder import WanEncoder
 from exiv.components.vae.wan_vae import WanVAE
+from exiv.model_utils.latent import Latent
 from exiv.model_utils.model_wrapper import ModelWrapper
 
 
@@ -19,7 +20,16 @@ def main():
     model_sampling = get_model_sampling(ModelType.EDM)
     model_wrapper = ModelWrapper(
         model=wan_dit_model,
-        model_sampling=model_sampling
+        model_sampling=model_sampling,
+        model_arch_config=WanModelArchConfig()
+    )
+    
+    empty_latent = Latent(
+        batch_size=1,
+        channels=16,
+        frame_count=81,
+        height=512,
+        width=512
     )
     
     main_sampler = KSampler(
@@ -31,6 +41,7 @@ def main():
         scheduler_name=SchedulerType.SIMPLE.value,
         positive=pos_embed,
         negative=neg_embed,
+        latent_image=empty_latent
     )
     
     out = main_sampler.run_sampling()
