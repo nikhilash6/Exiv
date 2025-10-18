@@ -1,4 +1,3 @@
-import logging
 import math
 
 import torch
@@ -6,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as T
 
+from .encoder_base import VisionEncoder
 from ..attention import optimized_attention
 
 
@@ -326,3 +326,21 @@ class CLIPModel:
         with torch.amp.autocast(dtype=self.dtype):
             out = self.vit(videos_normalized, use_31_block=True)
             return out
+
+
+# TODO: implement this
+class CLIPVisionModelWithProjection(VisionEncoder):
+    """
+    -   Identified by: Layer count (e.g., "layers.22" for L, "layers.30" for H, "layers.47" for G).
+    -   Trained by Original ViT-L by OpenAI. ViT-H and ViT-G by LAION (OpenCLIP project).
+    -   Contrastive Language-Image Pre-training (CLIP). Trained on billions
+        of (image, text) pairs to learn the relationship between visual concepts and text.
+    -   Good At: Excellent for text-to-image similarity and zero-shot image classification.
+    -   Architectural Differences:
+        * ViT-L (Large): 24 layers.
+        * ViT-H (Huge): 32 layers.
+        * ViT-G (Giant): 48 layers.
+        * "...336.json" variants are trained on higher-res 336x336 images.
+        * "...llava.json" is a variant for the LLaVA multimodal chatbot.
+    """
+    pass

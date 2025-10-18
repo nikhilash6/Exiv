@@ -87,6 +87,20 @@ class TextEncoderType(ExtendedEnum):
     QWEN25_7B = "qwen25_7b"
     LLAMA3_8 = "llama3_8"
 
+class VisionEncoderType(ExtendedEnum):
+    CLIP_G = "clip_g"
+    CLIP_H = "clip_h"
+    CLIP_L = "clip_l"
+    CLIP_L_336 = "clip_l_336"
+    CLIP_L_LLAVA = "clip_l_llava"
+    
+    SIGLIP_384 = "siglip_384"
+    SIGLIP_512 = "signlip_512"
+    
+    DINO2_L = "dino2_l"
+    DINO2_G = "dino2_g"
+    
+
 class Model(ExtendedEnum):
     WAN = "wan"
     QWEN_IMAGE = "qwen_image"
