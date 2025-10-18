@@ -15,11 +15,23 @@ from .model_patcher import ModelPatcher
 # bypassing weight creation at model init
 class ModuleMeta(type(nn.Module)):
     def __call__(cls, *args, **kwargs):
-        # zero init weight load
-        with torch.device("meta"):
-            instance = super().__call__(*args, **kwargs)
-            if isinstance(instance, ModelMixin):    # mainly for safety
-                ModelPatcher.patch_forward_pass(instance)
+        model_dtype = kwargs.pop("dtype", torch.float32)
+        original_dtype = torch.get_default_dtype()
+        
+        try:
+            torch.set_default_dtype(model_dtype)
+            
+            # zero init weight load
+            with torch.device("meta"):
+                instance = super().__call__(*args, **kwargs)
+                if isinstance(instance, ModelMixin):    # mainly for safety
+                    ModelPatcher.patch_forward_pass(instance)
+                    if not hasattr(instance, 'dtype'):
+                        instance.dtype = model_dtype
+                        
+        finally:
+            torch.set_default_dtype(original_dtype)
+        
         return instance
 
 
@@ -38,7 +50,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     - safetensor support
     - URL download support
     '''
-    def __init__(self, device: str = None, quantizer: Quantizer = None, model_path: str = None):
+    def __init__(self, device: str = None, quantizer: Quantizer = None, model_path: str = None, dtype = torch.float32):
         super().__init__()
         self.gpu_device = device or DEFAULT_DEVICE
         self.model_path = model_path
@@ -81,10 +93,8 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         self,
         model_path = None,              # path or url   (passing this in the init as well for flexibility)
         device = None,                  # device to load this on
-        torch_dtype = "fp32",           # 'auto' or 'torch.dtype'
         force_download=False,           # re_download models
         download_path=None,             # defaults to folder util
-        force_low_vram=False,
     ):
         model_path = model_path or self.model_path
         assert model_path is not None, "model_path is required"
