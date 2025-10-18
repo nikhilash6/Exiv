@@ -1,13 +1,14 @@
 from .utils import convert_sd_to_hf_format
 from .encoder_base import VisionEncoder
-from .ve_clip import CLIPVisionModelWithProjection
+from .ve_clip import CLIPViTL, CLIPVitLlava
 from ..enum import VisionEncoderType
 from ...model_utils.model_mixin import ModelMixin
 from ...utils.device import DEFAULT_DEVICE
 
 
 VE_TYPE_CLS_MAP = {
-    VisionEncoderType.CILP_L: CLIPVisionModelWithProjection
+    VisionEncoderType.CLIP_L: CLIPViTL,
+    VisionEncoderType.CLIP_L_LLAVA: CLIPVitLlava,
 }
 
 def ve_type(sd):
@@ -29,8 +30,6 @@ def ve_type(sd):
                 return VisionEncoderType.CLIP_L_336
         else:
             return VisionEncoderType.CLIP_L
-
-    # Dinov2
     elif 'encoder.layer.39.layer_scale2.lambda1' in sd:
         return VisionEncoderType.DINO2_G
     elif 'encoder.layer.23.layer_scale2.lambda1' in sd:
