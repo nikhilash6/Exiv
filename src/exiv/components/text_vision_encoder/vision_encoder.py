@@ -1,6 +1,6 @@
 from .utils import convert_sd_to_hf_format
 from .encoder_base import VisionEncoder
-from .ve_clip import CLIPViTL, CLIPVitLlava
+from .ve_clip import CLIPViTH, CLIPViTL, CLIPVitLlava
 from ..enum import VisionEncoderType
 from ...model_utils.model_mixin import ModelMixin
 from ...utils.device import DEFAULT_DEVICE
@@ -8,6 +8,7 @@ from ...utils.device import DEFAULT_DEVICE
 
 VE_TYPE_CLS_MAP = {
     VisionEncoderType.CLIP_L: CLIPViTL,
+    VisionEncoderType.CLIP_H: CLIPViTH,
     VisionEncoderType.CLIP_L_LLAVA: CLIPVitLlava,
 }
 
@@ -36,7 +37,7 @@ def ve_type(sd):
         return VisionEncoderType.DINO2_L
     else:
         return None
-    
+
 
 def create_vision_encoder(model_path) -> VisionEncoder:
     state_dict = ModelMixin.get_state_dict(model_path, DEFAULT_DEVICE)

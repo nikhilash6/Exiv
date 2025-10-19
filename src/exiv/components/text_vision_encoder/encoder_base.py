@@ -95,13 +95,60 @@ class TextEncoder(ModelMixin):
         
 
 class VisionEncoder(ModelMixin):
-    def __init__(self, model_path, config):
-        self.model_path = model_path
-        self.config = config
-        super().__init__(ProcDevice.CUDA.value, None, model_path)
+    def __init__(self, model_path):
+        super().__init__(ProcDevice.CUDA.value, None, model_path)   # TODO: will fix all this init stuff later
+    
+    # common preprocessor for current vision encoders
+    def clip_preprocess(self, image: Tensor, crop=True):
+        assert self.config is not None, "Vision encoder config not set, unable to proceed"
         
-    def encode_image(self, img: Tensor):
-        pass
+        # setting defaults
+        size = self.config.get("image_size", 224)
+        mean = self.config.get("image_mean", [0.48145466, 0.4578275, 0.40821073])
+        std = self.config.get("image_std", [0.26862954, 0.26130258, 0.27577711])
+        
+        # normalizing
+        image = image[:, :, :, :3] if image.shape[3] > 3 else image
+        mean = torch.tensor(mean, device=image.device, dtype=image.dtype)
+        std = torch.tensor(std, device=image.device, dtype=image.dtype)
+        image = image.movedim(-1, 1)
+        if not (image.shape[2] == size and image.shape[3] == size):
+            if crop:
+                scale = (size / min(image.shape[2], image.shape[3]))
+                scale_size = (round(scale * image.shape[2]), round(scale * image.shape[3]))
+            else:
+                scale_size = (size, size)
+
+            image = torch.nn.functional.interpolate(image, size=scale_size, mode="bicubic", antialias=True)
+            h = (image.shape[2] - size)//2
+            w = (image.shape[3] - size)//2
+            image = image[:,:,h:h+size,w:w+size]
+        image = torch.clip((255. * image), 0, 255).round() / 255.0
+        return (image - mean.view([3,1,1])) / std.view([3,1,1])
+        
+    def encode_image(self, image: Tensor, crop=True):
+        pixel_values = self.clip_preprocess(image.to(self.load_device), crop=crop).float()
+        out = self(pixel_values=pixel_values, intermediate_output='all' if self.return_all_hidden_states else -2)
+
+        '''
+        image_embeds - final output, designed to match text embeds
+        penultimate_hidden_states - richer spatial details, preferred choice for adaptors (controlnets, IPAs)
+        mm_projected - llava embedding
+        all_hidden_states - full data dump
+        '''
+        outputs = {}
+        outputs["last_hidden_state"] = out[0]
+        outputs["image_embeds"] = out[2]
+        
+        if self.return_all_hidden_states:
+            all_hs = out[1]
+            outputs["penultimate_hidden_states"] = all_hs[:, -2]
+            outputs["all_hidden_states"] = all_hs
+        else:
+            outputs["penultimate_hidden_states"] = out[1]
+
+        outputs["mm_projected"] = out[3]
+        return outputs
 
 
 @dataclass

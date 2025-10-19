@@ -4,9 +4,9 @@ from exiv.components.enum import KSamplerType, ModelType, SchedulerType
 from exiv.components.models.wan.main import WanModel, WanModelArchConfig
 from exiv.components.samplers.model_sampling import KSampler
 from exiv.components.samplers.sampler_types import get_model_sampling
-from exiv.components.text_image_encoder.clip import CLIPVisionModelWithProjection
-from exiv.components.text_image_encoder.t5 import T5XXL
-from exiv.components.text_image_encoder.text_encoder import WanEncoder
+from exiv.components.text_vision_encoder.te_t5 import T5XXL
+from exiv.components.text_vision_encoder.text_encoder import WanEncoder
+from exiv.components.text_vision_encoder.vision_encoder import create_vision_encoder
 from exiv.components.vae.wan_vae import WanVAE
 from exiv.model_utils.latent import Latent
 from exiv.model_utils.model_wrapper import ModelWrapper
@@ -59,8 +59,9 @@ def main():
     neg_embed = wan_encoder.encode(negative_prompt)
     
     # generate img embeddings
-    clip_model = CLIPVisionModelWithProjection()
-    clip_embed = clip_model.encode(input_img)
+    clip_vision_model_path = "temp"
+    clip_model = create_vision_encoder(clip_vision_model_path)
+    clip_embed = clip_model.encode_image(input_img)
     
     # encoded image latent
     wan_vae = WanVAE()
