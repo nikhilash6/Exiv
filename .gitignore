@@ -46,3 +46,4 @@ apps/wani2v/assets/
 *.pt
 *.pth
 *.sft
+*.npy

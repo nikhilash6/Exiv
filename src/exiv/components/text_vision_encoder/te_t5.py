@@ -342,10 +342,7 @@ class T5Block(nn.Module):
 # encoder / decoder stack
 class T5Stack(nn.Module):
     def __init__(self, config):
-        super().__init__(config)
-
-        # embeds not needed as not using the decoder
-        # self.embed_tokens = embed_tokens
+        super().__init__()
         self.is_decoder = config.is_decoder     # always false
 
         self.block = nn.ModuleList(
@@ -391,10 +388,10 @@ class T5Stack(nn.Module):
 
 
 class T5(TextEncoder):
-    def __init__(self, model_path, config = T5Config()):
-        super().__init__(model_path, config, TextEncoderType.T5_BASE.value)
+    def __init__(self, model_path: str, config = T5Config(), te_type = TextEncoderType.T5_BASE.value):
+        super().__init__(model_path, config, te_type)
         self.shared = nn.Embedding(config.vocab_size, config.d_model)
-        self.encoder = T5Stack(config, self.shared)
+        self.encoder = T5Stack(config)
 
     def get_input_embeddings(self):
         return self.shared

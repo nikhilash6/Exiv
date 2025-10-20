@@ -50,7 +50,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     - safetensor support
     - URL download support
     '''
-    def __init__(self, device: str = None, quantizer: Quantizer = None, model_path: str = None, dtype = torch.float32):
+    def __init__(self, device: str = None, quantizer: Quantizer = None, model_path: str = None, dtype = torch.float32):     # dtype is used by the meta class
         super().__init__()
         self.gpu_device = device or DEFAULT_DEVICE
         self.model_path = model_path
