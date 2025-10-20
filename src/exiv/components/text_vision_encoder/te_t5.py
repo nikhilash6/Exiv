@@ -354,7 +354,7 @@ class T5Stack(nn.Module):
         self.final_layer_norm = T5LayerNorm(config.d_model, eps=config.layer_norm_epsilon)
 
     # removing the decoder and head masking stuff (i believe that is for experimental purposes)
-    # also removing embeding lookup inside this (trick copied from comfyui)
+    # also removing embedding lookup inside this
     def forward(
         self, 
         x,                                      # input embeddings (bs, seq_len, embed_dim)

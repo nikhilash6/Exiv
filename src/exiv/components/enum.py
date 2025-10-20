@@ -102,7 +102,8 @@ class VisionEncoderType(ExtendedEnum):
     
 
 class Model(ExtendedEnum):
-    WAN = "wan"
+    WANT2V = "want2v"
+    WANTI2V = "wani2v"
     QWEN_IMAGE = "qwen_image"
     
 class VAEType(ExtendedEnum):
