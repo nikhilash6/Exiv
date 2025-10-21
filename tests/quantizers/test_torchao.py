@@ -5,7 +5,7 @@ from unittest.mock import patch
 from parameterized import parameterized
 
 from tests.test_utils.common import LargeModel, SimpleModel, check_memory_usage, create_large_model_file
-from exiv.utils.device import MemoryManager, DEFAULT_DEVICE, is_cuda_available, CUDA_CC
+from exiv.utils.device import MemoryManager, VRAM_DEVICE, is_cuda_available, CUDA_CC
 from exiv.utils.logging import app_logger
 from exiv.model_utils.model_mixin import ModelMixin
 
@@ -34,7 +34,7 @@ class TorchAORunTest(unittest.TestCase):
         from exiv.quantizers.torchao.torchao import TorchAOQuantizer
         from exiv.quantizers.base import TorchAOConfig
         
-        with check_memory_usage(expected_mem=expected_mem, device=DEFAULT_DEVICE):
+        with check_memory_usage(expected_mem=expected_mem, device=VRAM_DEVICE):
             app_logger.info(f"quantizing: {quant_type}")
             quant_config = TorchAOConfig(quant_type=quant_type)
             quantizer = TorchAOQuantizer(quantization_config=quant_config)
@@ -44,7 +44,7 @@ class TorchAORunTest(unittest.TestCase):
             out = model(x)
             self.assertEqual(out.shape, (1, 4096))
             self.assertTrue(out[0, 0].item(), 16384)
-            self.assertEqual(next(model.parameters()).device.type, DEFAULT_DEVICE)
+            self.assertEqual(next(model.parameters()).device.type, VRAM_DEVICE)
             
         # probably not needed since tests are being run in isolation
         # but keeping them just to be safe
@@ -57,7 +57,7 @@ class TorchAORunTest(unittest.TestCase):
         MemoryManager.clear_memory()
         
     # torchao plus offloading
-    @check_memory_usage(expected_mem=550, device=DEFAULT_DEVICE)
+    @check_memory_usage(expected_mem=550, device=VRAM_DEVICE)
     def test_torchao_low_mem_run(self):
         from exiv.quantizers.torchao.torchao import TorchAOQuantizer
         
@@ -74,4 +74,4 @@ class TorchAORunTest(unittest.TestCase):
             out = model(x)
             self.assertEqual(out.shape, (1, 4096))
             self.assertTrue(out[0, 0].item(), 16384)
-            self.assertEqual(next(model.parameters()).device.type, DEFAULT_DEVICE)
+            self.assertEqual(next(model.parameters()).device.type, VRAM_DEVICE)

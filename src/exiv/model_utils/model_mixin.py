@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import safetensors
 
-from ..utils.device import DEFAULT_DEVICE
+from ..utils.device import VRAM_DEVICE
 from ..utils.file import ensure_model_available
 from ..utils.logging import app_logger
 from ..constants import ALWAYS_SAFE_LOAD, DISABLE_MMAP, BYTES_IN_MB
@@ -52,7 +52,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     '''
     def __init__(self, device: str = None, quantizer: Quantizer = None, model_path: str = None, dtype = torch.float32):     # dtype is used by the meta class
         super().__init__()
-        self.gpu_device = device or DEFAULT_DEVICE
+        self.gpu_device = device or VRAM_DEVICE
         self.model_path = model_path
         self._patched = False
         self._fully_loaded = False

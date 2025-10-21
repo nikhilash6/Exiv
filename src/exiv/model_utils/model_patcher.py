@@ -67,7 +67,7 @@ class ModelPatcher:
         for m_name, m in model.named_modules():
             if m is model or not model.is_leaf_module(m):
                 continue
-            print("layer: ", m_name)
+            
             current += model._module_size(m)
             if model._module_size(m) >= available_mem:
                 raise RuntimeError(f"Single layer mem size of {model._module_size(m)} exceeds the total available memory of {available_mem}")

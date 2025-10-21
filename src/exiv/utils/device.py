@@ -31,19 +31,21 @@ try:
 except ImportError:
     pass
 
-DEFAULT_DEVICE = ProcDevice.CPU.value
+VRAM_DEVICE = ProcDevice.CPU.value
+OFFLOAD_DEVICE = ProcDevice.CPU.value
+
 if is_cuda_available:
-    DEFAULT_DEVICE = ProcDevice.CUDA.value
+    VRAM_DEVICE = ProcDevice.CUDA.value
 elif is_mps_available:
-    DEFAULT_DEVICE = ProcDevice.MPS.value
+    VRAM_DEVICE = ProcDevice.MPS.value
 elif is_xla_available:
-    DEFAULT_DEVICE = ProcDevice.XLA.value
+    VRAM_DEVICE = ProcDevice.XLA.value
 
 # ------------------ Memory availability
 # TODO: do somekind of ttl based caching to eliminate repeated calls
 class MemoryManager:
     @staticmethod
-    def available_memory(device=ProcDevice.CPU.value):
+    def available_memory(device=VRAM_DEVICE):
         device = torch.device(device)
 
         # cuda (nvidia/rocm)

@@ -4,7 +4,7 @@ import unittest
 from parameterized import parameterized
 
 from tests.test_utils.common import LargeModel, check_memory_usage, create_large_model_file
-from exiv.utils.device import MemoryManager, DEFAULT_DEVICE, is_cuda_available
+from exiv.utils.device import MemoryManager, VRAM_DEVICE, is_cuda_available
 from exiv.utils.logging import app_logger
 
 @unittest.skipIf(not is_cuda_available, "Only available for cuda devices")
@@ -27,7 +27,7 @@ class TorchBNBRunTest(unittest.TestCase):
         from exiv.quantizers.bnb.bnb import BNBQuantizer
         from exiv.quantizers.base import BNBQuantizerConfig
         
-        with check_memory_usage(expected_mem=expected_mem, device=DEFAULT_DEVICE):
+        with check_memory_usage(expected_mem=expected_mem, device=VRAM_DEVICE):
             kwargs_dict = {
                 "fp4": {'load_in_4bit': True},
                 "nf4": {'load_in_4bit': True, 'bnb_4bit_quant_type': "nf4"},
@@ -42,6 +42,6 @@ class TorchBNBRunTest(unittest.TestCase):
             out = model(x)
             self.assertEqual(out.shape, (1, 4096))
             self.assertTrue(out[0, 0].item(), 16384)
-            self.assertEqual(next(model.parameters()).device.type, DEFAULT_DEVICE)
+            self.assertEqual(next(model.parameters()).device.type, VRAM_DEVICE)
 
    

@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from tests.test_utils.common import LargeModel, SimpleModel, check_memory_usage, create_large_model_file
-from exiv.utils.device import MemoryManager, DEFAULT_DEVICE, print_mem_usage
+from exiv.utils.device import MemoryManager, VRAM_DEVICE, print_mem_usage
 
 
 class ModelRunTest(unittest.TestCase):
@@ -16,7 +16,7 @@ class ModelRunTest(unittest.TestCase):
         MemoryManager.clear_memory()
     
     # small model run
-    @check_memory_usage(expected_mem=12, device=DEFAULT_DEVICE)
+    @check_memory_usage(expected_mem=12, device=VRAM_DEVICE)
     def test_small_model_run(self):
         model = SimpleModel()
         model.load_model(SimpleModel.CKPT_PATH)
@@ -24,10 +24,10 @@ class ModelRunTest(unittest.TestCase):
         out = model(x)
         self.assertEqual(out.shape, (1, 512))
         self.assertTrue(out[0, 0].item(), 1024)
-        self.assertEqual(next(model.parameters()).device.type, DEFAULT_DEVICE)
+        self.assertEqual(next(model.parameters()).device.type, VRAM_DEVICE)
     
     # large model run
-    @check_memory_usage(expected_mem=4350, device=DEFAULT_DEVICE)
+    @check_memory_usage(expected_mem=4350, device=VRAM_DEVICE)
     def test_large_model_run(self):
         model = LargeModel()
         model.load_model(LargeModel.SAFETENSORS_PATH)
@@ -35,7 +35,7 @@ class ModelRunTest(unittest.TestCase):
         out = model(x)
         self.assertEqual(out.shape, (1, 4096))
         self.assertTrue(out[0, 0].item(), 16384)
-        self.assertEqual(next(model.parameters()).device.type, DEFAULT_DEVICE)
+        self.assertEqual(next(model.parameters()).device.type, VRAM_DEVICE)
     
     # small model low mem run
     def test_low_mem_run(self):

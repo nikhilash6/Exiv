@@ -3,7 +3,7 @@ import torch
 import unittest
 
 from tests.test_utils.common import LargeModel, SimpleModel, check_memory_usage, create_large_model_file
-from exiv.utils.device import MemoryManager, CUDA_CC, DEFAULT_DEVICE, is_cuda_available, is_mps_available, is_xla_available, is_mps_available
+from exiv.utils.device import MemoryManager, CUDA_CC, VRAM_DEVICE, is_cuda_available, is_mps_available, is_xla_available, is_mps_available
 
 class ModelLoadTest(unittest.TestCase):
     # clear mem / cache before n after each test
@@ -17,7 +17,7 @@ class ModelLoadTest(unittest.TestCase):
             
     # model should be init on 'meta'
     @check_memory_usage(expected_mem=0)                             # no mem usage on the cpu
-    @check_memory_usage(expected_mem=0, device=DEFAULT_DEVICE)      # no mem usage on the gpu
+    @check_memory_usage(expected_mem=0, device=VRAM_DEVICE)      # no mem usage on the gpu
     def test_model_init(self):
         model = SimpleModel()
         self.assertEqual(next(model.parameters()).device.type, "meta")
@@ -53,7 +53,7 @@ class ModelLoadTest(unittest.TestCase):
         quantizer = BNBQuantizer()
         model = SimpleModel()
         model.load_model(SimpleModel.CKPT_PATH)
-        self.assertEqual(next(model.parameters()).device.type, DEFAULT_DEVICE)
+        self.assertEqual(next(model.parameters()).device.type, VRAM_DEVICE)
     
     # testing torchao quantization
     @unittest.skipIf(CUDA_CC < 89, "Compute capability > 89 required")

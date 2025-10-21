@@ -1,6 +1,6 @@
 import torch
 
-from ...utils.device import DEFAULT_DEVICE
+from ...utils.device import VRAM_DEVICE
 
 
 def latent_noise_generator(
@@ -13,7 +13,7 @@ def latent_noise_generator(
     seed = None
 ):
     if not seed: seed = 123
-    device = device or DEFAULT_DEVICE
+    device = device or VRAM_DEVICE
     return torch.randn(
         batch_size,
         channels,

@@ -12,7 +12,7 @@ class TextEncoder(ModelMixin):
         self.model_path = model_path
         self.config = config
         self.te_type = te_type
-        super().__init__(model_path=model_path, device=ProcDevice.CUDA.value)
+        super().__init__(model_path=model_path)
     
     # TODO: check if this can be diff for diff encoder archs
     def gen_empty_tokens(self, special_tokens, length):
@@ -96,7 +96,7 @@ class TextEncoder(ModelMixin):
 
 class VisionEncoder(ModelMixin):
     def __init__(self, model_path):
-        super().__init__(ProcDevice.CUDA.value, None, model_path)   # TODO: will fix all this init stuff later
+        super().__init__(model_path=model_path)   # TODO: will fix all this init stuff later
     
     # common preprocessor for current vision encoders
     def clip_preprocess(self, image: Tensor, crop=True):
