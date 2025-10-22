@@ -3,7 +3,7 @@ from torch import Tensor
 
 from dataclasses import dataclass
 
-from ...utils.device import ProcDevice
+from ...utils.device import OFFLOAD_DEVICE, ProcDevice
 from ...model_utils.model_mixin import ModelMixin
 
 # this is the base of all the encoder models like T5 and CLIP
@@ -55,7 +55,7 @@ class TextEncoder(ModelMixin):
 
         # pooled only makes sense for clip models
         if pooled is not None:
-            first_pooled = pooled[0:1].to(ProcDevice.CPU.value)
+            first_pooled = pooled[0:1].to(OFFLOAD_DEVICE)
         else:
             # for T5 this would be intermediate_output (None)
             first_pooled = pooled
@@ -76,10 +76,10 @@ class TextEncoder(ModelMixin):
 
         if (len(output) == 0):
             # returning the empty neutral
-            r = (out[-1:].to(ProcDevice.CPU.value), first_pooled)
+            r = (out[-1:].to(OFFLOAD_DEVICE), first_pooled)
         else:
             # concatenating all the processed (and weighted) embeddings together
-            r = (torch.cat(output, dim=-2).to(ProcDevice.CPU.value), first_pooled)
+            r = (torch.cat(output, dim=-2).to(OFFLOAD_DEVICE), first_pooled)
 
         # extra data (like an attention mask), process and append it to the output
         if len(o) > 2:
@@ -87,7 +87,7 @@ class TextEncoder(ModelMixin):
             for k in o[2]:
                 v = o[2][k]
                 if k == "attention_mask":   # TODO: check this while running
-                    v = v[:batch_count].flatten().unsqueeze(dim=0).to(ProcDevice.CPU.value)
+                    v = v[:batch_count].flatten().unsqueeze(dim=0).to(OFFLOAD_DEVICE)
                 extra[k] = v
 
             r = r + (extra,)

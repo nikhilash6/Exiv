@@ -5,6 +5,7 @@ import unittest
 from tests.test_utils.common import LargeModel, SimpleModel, check_memory_usage, create_large_model_file
 from exiv.utils.device import MemoryManager, CUDA_CC, VRAM_DEVICE, is_cuda_available, is_mps_available, is_xla_available, is_mps_available
 
+
 class ModelLoadTest(unittest.TestCase):
     # clear mem / cache before n after each test
     # since we will also be measuring mem usage

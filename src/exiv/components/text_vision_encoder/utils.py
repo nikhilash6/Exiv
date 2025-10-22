@@ -6,7 +6,7 @@ import re
 import os
 import safetensors
 
-from ...utils.device import VRAM_DEVICE, ProcDevice
+from ...utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, ProcDevice
 from ...utils.file import ensure_model_available
 from ...utils.logging import app_logger
 
@@ -127,7 +127,7 @@ def load_embed(embedding_path: str, embed_key: str = None) -> Tensor | None:
     try:
         if found_path.suffix == ".safetensors":
             embed_dict = safetensors.torch.load_file(found_path, device=VRAM_DEVICE) if \
-                VRAM_DEVICE != ProcDevice.CPU.value else safetensors.torch.load_file(found_path)
+                VRAM_DEVICE != OFFLOAD_DEVICE else safetensors.torch.load_file(found_path)
         else:
             embed_dict = torch.load(found_path, map_location=VRAM_DEVICE, weights_only=True)
     except Exception as e:

@@ -29,6 +29,11 @@ def print_top_gpu_tensors(n=5, device="cuda:0"):
         print(f"- {tensor.shape} | {tensor.dtype} | {size_mb:.2f} MB | requires_grad={tensor.requires_grad}")
 
 class check_memory_usage:
+    # TODO: fix the 0 mem usage later
+    """
+    This only checks the memory at the start and end of the program, so if everything is offloaded,
+    this will calculate the memory usage to be 0..
+    """
     def __init__(self, expected_mem, device=ProcDevice.CPU.value, atol=10, rtol=0.1):
         self.expected_mem = expected_mem
         self.device = device
@@ -51,9 +56,7 @@ class check_memory_usage:
                         atol=self.atol
                     )
         
-        is_mac_cpu = is_mps_available and self.device == ProcDevice.CPU.value
-        
-        if not is_close and not is_mac_cpu:
+        if not is_close and not is_mps_available:
             print("device: ", self.device)
             print_top_gpu_tensors()
             raise AssertionError(

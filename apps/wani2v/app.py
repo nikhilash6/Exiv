@@ -10,7 +10,7 @@ from exiv.components.text_vision_encoder.vision_encoder import create_vision_enc
 from exiv.components.vae.wan_vae import WanVAE
 from exiv.model_utils.latent import Latent
 from exiv.model_utils.model_wrapper import ModelWrapper
-from exiv.utils.device import ProcDevice
+from exiv.utils.device import OFFLOAD_DEVICE, ProcDevice
 from exiv.utils.file import ImageProcessor
 from exiv.utils.tensor import common_upscale
 
@@ -20,7 +20,7 @@ def conditioning_set_values(embed, dict):
 
 def preprocess_wan_conditionals(pos_embed, neg_embed, clip_embed, wan_vae, input_img, height, width, frame_count, batch_size):
     # empty tensor
-    blank_latent = torch.zeros([batch_size, 16, ((frame_count - 1) // 4) + 1, height // 8, width // 8], device=ProcDevice.CPU.value)
+    blank_latent = torch.zeros([batch_size, 16, ((frame_count - 1) // 4) + 1, height // 8, width // 8], device=OFFLOAD_DEVICE)
     if input_img:
         # empty image latent
         image = torch.ones((frame_count, height, width, input_img.shape[-1]), device=input_img.device, dtype=input_img.dtype) * 0.5

@@ -26,6 +26,7 @@ if torch.cuda.is_available(): is_cuda_available = True
 CUDA_CC_VERSION = (0, 0) if not is_cuda_available \
     else torch.cuda.get_device_capability()
 CUDA_CC = CUDA_CC_VERSION[0] * 10 + CUDA_CC_VERSION[1]
+
 if hasattr(torch.backends, "mps") and torch.backends.mps.is_available(): is_mps_available = True
 try:
     import torch_xla.core.xla_model as xm

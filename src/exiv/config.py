@@ -2,12 +2,25 @@ import os
 import logging
 from typing import Any
 
+from exiv.utils.enum import ExtendedEnum
+
+
+class LOADING_MODE(ExtendedEnum):
+    NO_OOM = "no_oom"
+    LOW_VRAM = "low_vram"
+    NORMAL_LOAD = "normal_load"
+    
 class AppConfig:
     def __init__(self):
         # loading defaults from the env
         self.logging_level = self._get_logging_level(os.getenv("log_level", 0))
         
-        self.low_vram = self._get_bool_val(os.getenv("low_vram", "0"))
+        # by default going with low_vram, if all three are provided 
+        # then they will be prioritized in this order -> no_oom -> low_vram -> normal
+        self.no_oom = self._get_bool_val(os.getenv("low_vram", "0"))
+        self.low_vram = self._get_bool_val(os.getenv("low_vram", "1"))
+        self.normal_load = self._get_bool_val(os.getenv("normal_load", "0"))
+        
         self.disable_mmap = self._get_bool_val(os.getenv("disable_mmap", "0"))
         self.always_safe_load = self._get_bool_val(os.getenv("safe_load", "1"))
         
@@ -26,14 +39,21 @@ class AppConfig:
         return logging.CRITICAL
 
     def update_config(self, metadata: dict):
-        if "low_vram" in metadata:
-            self.low_vram = self._get_bool_val( metadata["low_vram"])
+        for flag in LOADING_MODE.value_list():
+            if flag in metadata:
+                setattr(self, flag, self._get_bool_val(metadata[flag]))
 
         if "log_level" in metadata:
             self.logging_level = self._get_logging_level(metadata["log_level"])
         
         if "disable_mmap" in metadata:
              self.disable_mmap =  self._get_bool_val(str(metadata["disable_mmap"]).lower())
+             
+    @property
+    def loading_mode(self):
+        if self.no_oom: return LOADING_MODE.NO_OOM.value
+        elif self.low_vram: return LOADING_MODE.LOW_VRAM.value
+        else: return LOADING_MODE.NORMAL_LOAD.value
 
 global_config = AppConfig()
 

@@ -11,7 +11,7 @@ from ..conditionals import can_concat_cond, cond_cat
 from ...utils.tensor import fix_empty_latent_channels, prepare_noise
 from ...model_utils.model_wrapper import ModelWrapper
 from ...model_utils.latent import Latent
-from ...utils.device import ProcDevice
+from ...utils.device import OFFLOAD_DEVICE, ProcDevice
 
 class KSampler:
     def __init__(
@@ -73,7 +73,7 @@ class KSampler:
         
         # decides between random noise or zero noise tensors
         if disable_noise:
-            noise = torch.zeros(latent_image.size(), dtype=latent_image.dtype, layout=latent_image.layout, device=ProcDevice.CPU.value)
+            noise = torch.zeros(latent_image.size(), dtype=latent_image.dtype, layout=latent_image.layout, device=OFFLOAD_DEVICE)
         else:
             batch_inds = self.latent_image.batch_index
             noise = prepare_noise(latent_image, self.seed, batch_inds)
