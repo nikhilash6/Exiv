@@ -5,7 +5,7 @@ import psutil
 
 from .enum import ExtendedEnum
 from .logging import app_logger
-from ..constants import BYTES_IN_MB
+from ..config import BYTES_IN_MB
 
 # ------------------ Device availability
 # processing device

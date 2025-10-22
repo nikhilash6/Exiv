@@ -2,7 +2,7 @@ from typing import Any, Dict
 import torch
 from einops import rearrange, repeat
 
-from ....constants import DEFAULT_T2I_PROMPT
+from ....config import DEFAULT_T2I_PROMPT
 from ....utils.k_math import nearest_multiple
 from .configs import configs
 from ...text_encoders import T5XXL, SD_ClipL

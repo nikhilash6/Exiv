@@ -1,6 +1,6 @@
 import torch
 
-from ...constants import shared_state
+from ...config import shared_state
 from ...utils.exceptions import ProcessInterrupted
 
 # TODO: complete this 

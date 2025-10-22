@@ -7,7 +7,7 @@ import safetensors
 from ..utils.device import VRAM_DEVICE
 from ..utils.file import ensure_model_available
 from ..utils.logging import app_logger
-from ..constants import ALWAYS_SAFE_LOAD, DISABLE_MMAP, BYTES_IN_MB
+from ..config import global_config, BYTES_IN_MB
 from ..quantizers.base import Quantizer
 from .model_patcher import ModelPatcher
 
@@ -117,7 +117,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
                     sd = {}
                     for k in f.keys():
                         tensor = f.get_tensor(k)    # loading one key at a time; low mem pressure
-                        if DISABLE_MMAP:
+                        if global_config.disable_mmap:
                             # moving to device (no zero copying)
                             tensor = tensor.to(device=device, copy=True)
                         sd[k] = tensor
@@ -127,8 +127,8 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         else:   # ckpt, pth, pt
             torch_args = {}
             # using simple flags rn, will fix later
-            if not DISABLE_MMAP: torch_args["mmap"] = True
-            if ALWAYS_SAFE_LOAD: torch_args["weights_only"] = True
+            if not global_config.disable_mmap: torch_args["mmap"] = True
+            if global_config.always_safe_load: torch_args["weights_only"] = True
             
             sd = torch.load(model_path, map_location=device, **torch_args)
             if "state_dict" in sd:  

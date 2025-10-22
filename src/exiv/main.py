@@ -3,6 +3,7 @@ import click
 from .server.server import run_server, start_worker
 from .server.task_manager import ScriptRequest, task_manager
 from .utils.logging import app_logger
+from .config import global_config
 
 @click.group()
 def cli():
@@ -28,6 +29,9 @@ def run(ctx, script_filename):
             else:
                 # treat it as a flag (e.g., --low_vram)
                 metadata[key] = True
+                
+    global_config.update_from_cli(metadata)
+    app_logger.set_level(global_config.logging_level)
 
     script_request = ScriptRequest(
         filename=script_filename,
