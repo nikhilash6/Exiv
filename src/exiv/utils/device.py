@@ -14,10 +14,12 @@ class ProcDevice(ExtendedEnum):
     CUDA = "cuda"
     MPS = "mps"
     XLA = "xla"     # more like a backend than a device
+    XPU = "xpu"
 
 is_mps_available = False
 is_cuda_available = False
 is_xla_available = False
+is_xpu_available = False
 is_cpu_available = True
 
 if torch.cuda.is_available(): is_cuda_available = True
@@ -30,6 +32,7 @@ try:
     if xm.xla_device(): is_xla_available = True
 except ImportError:
     pass
+if hasattr(torch, "xpu") and torch.xpu.is_available(): is_xpu_available = True
 
 VRAM_DEVICE = ProcDevice.CPU.value
 OFFLOAD_DEVICE = ProcDevice.CPU.value
@@ -40,6 +43,8 @@ elif is_mps_available:
     VRAM_DEVICE = ProcDevice.MPS.value
 elif is_xla_available:
     VRAM_DEVICE = ProcDevice.XLA.value
+elif is_xpu_available:
+    VRAM_DEVICE = ProcDevice.XPU.value
 
 # ------------------ Memory availability
 # TODO: do somekind of ttl based caching to eliminate repeated calls

@@ -6,9 +6,12 @@ class AppConfig:
     def __init__(self):
         # loading defaults from the env
         self.logging_level = self._get_logging_level(os.getenv("log_level", 0))
+        
         self.low_vram = self._get_bool_val(os.getenv("low_vram", "0"))
         self.disable_mmap = self._get_bool_val(os.getenv("disable_mmap", "0"))
         self.always_safe_load = self._get_bool_val(os.getenv("safe_load", "1"))
+        
+        self.use_multi_stream = self._get_bool_val(os.getenv("use_multi_stream", "1"))
         
         self.stop_generation = False
 
