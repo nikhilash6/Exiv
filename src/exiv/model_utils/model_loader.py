@@ -1,3 +1,4 @@
+from heapq import heapify
 import weakref
 import functools
 
@@ -5,6 +6,8 @@ from ..utils.logging import app_logger
 from ..utils.device import OFFLOAD_DEVICE, MemoryManager
 from ..config import LOADING_MODE, global_config
 
+
+RESERVED_MEM = 1024     # for activations, kv cache, temp tensors etc..
 
 class EfficientModelLoader:
     """
@@ -57,6 +60,47 @@ class EfficientModelLoader:
                 app_logger.debug(f"Moving back {module.__class__.__name__} to cpu")
                 module.to(OFFLOAD_DEVICE)
         return out
+    
+    @staticmethod
+    def split_model_for_loading(model: 'ModelMixin'):
+        # this determines which modules can be fully loaded permanently on the vram
+        # and which has to be dynamically loaded
+        full_load_modules = []
+        
+        current_mem_used = 0
+        available_mem = MemoryManager.available_memory(model.gpu_device) - RESERVED_MEM
+        
+        module_by_size = []     # contains modules sorted by size (asc)
+        for m_name, m in model.named_modules():
+            if m is model or not model.is_leaf_module(m):
+                continue
+            module_by_size.append((model._module_size(m), m_name, m))
+        
+        module_by_size.sort(key=lambda x: x[0])
+        
+        # calculating max_after, that gives the max element after the current element
+        # in the sorted module_by_size array
+        sizes = [s for s, _, _ in module_by_size]
+        max_after = [None] * len(sizes)
+        current_max = float('-inf')
+        for i in reversed(range(len(sizes))):
+            max_after[i] = current_max if i < len(sizes) - 1 else None
+            current_max = max(current_max, sizes[i])
+        
+        
+        for (m_size, m_name, m), max_next in zip(module_by_size, max_after):
+            if m_size >= available_mem:
+                raise RuntimeError(f"Single layer mem size of {m_size} exceeds the total available memory of {available_mem}")
+            
+            current_mem_used += m_size
+            if current_mem_used < available_mem and (max_next is None or max_next < (available_mem - current_mem_used)):
+                # if we can add this to the existing available mem limit + after adding this the next
+                # biggest module can be safely loaded / unloaded, then we fully load this
+                full_load_modules.append(m_name)
+            else:
+                break
+            
+        return full_load_modules
             
     @classmethod
     def patch_forward_pass(cls, model: 'ModelMixin'):
@@ -82,18 +126,13 @@ class EfficientModelLoader:
                             )
             
         elif loading_mode == LOADING_MODE.LOW_VRAM.value:
-            # full_load modules + dynamic modules
-            current_mem_used = 0
-            available_mem = MemoryManager.available_memory(model.gpu_device)
+            # full_load modules
+            full_load_modules = EfficientModelLoader.split_model_for_loading(model)
             for m_name, m in model.named_modules():
                 if m is model or not model.is_leaf_module(m):
                     continue
                 
-                current_mem_used += model._module_size(m)
-                if model._module_size(m) >= available_mem:
-                    raise RuntimeError(f"Single layer mem size of {model._module_size(m)} exceeds the total available memory of {available_mem}")
-                
-                if current_mem_used < available_mem:
+                if m_name in full_load_modules:
                     model.full_load.append((weakref.ref(m), m_name))
                 else:
                     og_forward = m.forward

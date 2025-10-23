@@ -4,11 +4,12 @@ import unittest
 from unittest.mock import patch
 from parameterized import parameterized
 
+from exiv.model_utils.model_loader import RESERVED_MEM
 from tests.test_utils.common import LargeModel, SimpleModel, check_memory_usage, create_large_model_file
 from exiv.utils.device import OFFLOAD_DEVICE, MemoryManager, VRAM_DEVICE, print_mem_usage
 from exiv.config import global_config
 
-
+# TODO: add tests to check the model split method
 class ModelRunTest(unittest.TestCase):
     def setUp(self):
         create_large_model_file()
@@ -66,8 +67,8 @@ class ModelRunTest(unittest.TestCase):
     def test_low_mem_run(self, load_mode, config, expected_mem, expected_device):
         with patch.multiple(
                     MemoryManager, 
-                    available_memory=lambda device='cpu': 50.0,
-                    total_memory=lambda device='cpu': 100.0):
+                    available_memory=lambda device='cpu': RESERVED_MEM + 50.0,
+                    total_memory=lambda device='cpu': RESERVED_MEM + 100.0):
             global_config.update_config(config)
             with check_memory_usage(expected_mem=expected_mem, device=VRAM_DEVICE):
                 print("current mode: ", global_config.loading_mode)
@@ -90,8 +91,8 @@ class ModelRunTest(unittest.TestCase):
     def test_low_mem_runtime_error(self, load_mode, config, expected_mem, expected_device):
         with patch.multiple(
                     MemoryManager, 
-                    available_memory=lambda device='cpu': 50.0,
-                    total_memory=lambda device='cpu': 100.0):
+                    available_memory=lambda device='cpu': RESERVED_MEM + 50.0,
+                    total_memory=lambda device='cpu': RESERVED_MEM + 100.0):
             global_config.update_config(config)
             
             # not even a single layer can fit in the memory

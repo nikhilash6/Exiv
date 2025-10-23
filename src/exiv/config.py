@@ -42,6 +42,8 @@ class AppConfig:
         for flag in LOADING_MODE.value_list():
             if flag in metadata:
                 setattr(self, flag, self._get_bool_val(metadata[flag]))
+            else:
+                setattr(self, flag, False)
 
         if "log_level" in metadata:
             self.logging_level = self._get_logging_level(metadata["log_level"])
