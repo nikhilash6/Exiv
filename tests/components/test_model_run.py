@@ -37,6 +37,7 @@ class ModelRunTest(unittest.TestCase):
             self.assertEqual(out.shape, (1, 512))
             self.assertEqual(out[0, 0].item(), 1024)
             self.assertEqual(next(model.parameters()).device.type, expected_device)
+            
             model.cpu()
             del x, out, model
     

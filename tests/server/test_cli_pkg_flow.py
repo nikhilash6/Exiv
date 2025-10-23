@@ -27,4 +27,4 @@ class CLITest(unittest.TestCase):
         
         print("---- result: ", result)
         self.assertEqual(result.returncode, 0, "Script should exit with code 0 on failure.")
-        self.assertIn("Exception occured:", result.stderr)
+        self.assertIn("Task Failed", result.stdout)

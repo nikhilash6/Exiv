@@ -30,7 +30,7 @@ def run(ctx, script_filename):
                 # treat it as a flag (e.g., --low_vram)
                 metadata[key] = True
                 
-    global_config.update_from_cli(metadata)
+    global_config.update_config(metadata)
     app_logger.set_level(global_config.logging_level)
 
     script_request = ScriptRequest(

@@ -9,12 +9,13 @@ from exiv.utils.device import MemoryManager, VRAM_DEVICE, is_cuda_available, CUD
 from exiv.utils.logging import app_logger
 from exiv.model_utils.model_mixin import ModelMixin
 from exiv.model_utils.model_loader import RESERVED_MEM
+from exiv.config import global_config
 
 @unittest.skipIf(not is_cuda_available or CUDA_CC < 89, "Only available for cuda devices")
 class TorchAORunTest(unittest.TestCase):
     def setUp(self):
         create_large_model_file()
-        MemoryManager.clear_memory()    
+        MemoryManager.clear_memory()
     
     def tearDown(self):
         MemoryManager.clear_memory()
@@ -60,6 +61,7 @@ class TorchAORunTest(unittest.TestCase):
     def test_torchao_low_mem_run(self):
         from exiv.quantizers.torchao.torchao import TorchAOQuantizer
         
+        global_config.update_config({"low_vram": True})
         # this offloading pattern only quantizes the full_load modules
         # that stay on the gpu, rest all are used and then offloaded
         with patch.multiple(

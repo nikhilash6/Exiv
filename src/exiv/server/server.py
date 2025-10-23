@@ -54,8 +54,10 @@ def process_task(task_id: str, script_request: ScriptRequest):
     except Exception as e:
         app_logger.error(f"Exception occured: {e}")
         _update_task(
-            ScriptStatus.FAILED.value, 0,
-            "Task Failed", output=None,
+            ScriptStatus.FAILED.value, 
+            0,
+            "Task Failed", 
+            output=None,
             data={"err_message": str(e)}
         )
 
