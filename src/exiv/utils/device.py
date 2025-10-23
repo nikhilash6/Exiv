@@ -58,13 +58,14 @@ class MemoryManager:
         if device.type == ProcDevice.CUDA.value:
             torch.cuda.synchronize(device)
             stats = torch.cuda.memory_stats(device)
-            mem_active = stats['active_bytes.all.current']
-            mem_reserved = stats['reserved_bytes.all.current']
-            mem_free_from_driver, _ = torch.cuda.mem_get_info(device)
-            mem_free_torch = mem_reserved - mem_active
+            mem_active = stats['active_bytes.all.current']                  # actively used by tensors
+            mem_reserved = stats['reserved_bytes.all.current']              # mem asked to be reserved by driver
+            mem_free_from_driver, _ = torch.cuda.mem_get_info(device)       # mem not yet reserved
+            mem_free_torch = mem_reserved - mem_active                      # mem reserved but not in use
             return (mem_free_from_driver + mem_free_torch) / BYTES_IN_MB
         # mps
         elif device.type == ProcDevice.MPS.value:
+            torch.mps.synchronize()
             total_mem = psutil.virtual_memory().total
             driver_alloc = torch.mps.current_allocated_memory()
             return max(total_mem - driver_alloc, 0) / BYTES_IN_MB

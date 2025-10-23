@@ -2,12 +2,21 @@ import torch
 from torch import nn
 
 import os, gc
+import psutil
 from functools import wraps
 
+from exiv.config import BYTES_IN_MB
 from exiv.utils.device import MemoryManager, ProcDevice, is_mps_available
 from exiv.model_utils.model_mixin import ModelMixin
 
+try:
+    import torch_xla.core.xla_model as xm
+    if xm.xla_device(): is_xla_available = True
+except ImportError:
+    pass
+
 script_dir = os.path.dirname(os.path.abspath(__file__))
+
 
 def print_top_gpu_tensors(n=5, device="cuda:0"):
     objs = gc.get_objects()
@@ -28,11 +37,11 @@ def print_top_gpu_tensors(n=5, device="cuda:0"):
         size_mb = size / (1024**2)
         print(f"- {tensor.shape} | {tensor.dtype} | {size_mb:.2f} MB | requires_grad={tensor.requires_grad}")
 
+
 class check_memory_usage:
-    # TODO: fix the 0 mem usage later
     """
     This only checks the memory at the start and end of the program, so if everything is offloaded,
-    this will calculate the memory usage to be 0..
+    this will calculate the memory usage to be 0.. Its a problem with MPS really
     """
     def __init__(self, expected_mem, device=ProcDevice.CPU.value, atol=10, rtol=0.1):
         self.expected_mem = expected_mem
@@ -42,12 +51,39 @@ class check_memory_usage:
         self.initial_mem_mb = 0
 
     def __enter__(self):
-        self.initial_mem_mb = MemoryManager.available_memory(self.device)
+        device = torch.device(self.device)
+        
+        if device.type == ProcDevice.CUDA.value:
+            torch.cuda.synchronize(device)
+            torch.cuda.reset_peak_memory_stats(device)
+        elif device.type == ProcDevice.XLA.value:
+            xm.reset_peak_memory_stats(device)
+        elif device.type == ProcDevice.MPS.value:
+            torch.mps.synchronize()
+            # MPS: No peak tracker. Measure delta
+            self.initial_mem_mb = torch.mps.current_allocated_memory() / (1024**2)
+        else:
+            # CPU: No VRAM
+            self.initial_mem_mb = 0
+
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        final_mem_mb = MemoryManager.available_memory(self.device)
-        mem_diff = self.initial_mem_mb - final_mem_mb
+        device = torch.device(self.device)
+        
+        if device.type == ProcDevice.CUDA.value:
+            torch.cuda.synchronize(device)
+            mem_diff = torch.cuda.max_memory_allocated(device) / (1024**2)
+        
+        elif device.type == ProcDevice.XLA.value:
+            mem_info = xm.get_memory_info(device)
+            mem_diff = mem_info['peak_usage_bytes'] / (1024**2)
+
+        elif device.type == ProcDevice.MPS.value:
+            torch.mps.synchronize()
+            # MPS: Report delta.
+            final_mem_mb = torch.mps.current_allocated_memory() / (1024**2)
+            mem_diff = final_mem_mb - self.initial_mem_mb
         
         is_close = torch.isclose(
                         torch.tensor(float(mem_diff)), 
