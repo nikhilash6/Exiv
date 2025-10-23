@@ -17,7 +17,7 @@ class ModelLoadTest(unittest.TestCase):
         MemoryManager.clear_memory()
             
     # model should be init on 'meta'
-    @check_memory_usage(expected_mem=0)                             # no mem usage on the cpu
+    @check_memory_usage(expected_mem=0)                          # no mem usage on the cpu
     @check_memory_usage(expected_mem=0, device=VRAM_DEVICE)      # no mem usage on the gpu
     def test_model_init(self):
         model = SimpleModel()

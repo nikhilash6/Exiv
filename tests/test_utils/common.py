@@ -70,6 +70,7 @@ class check_memory_usage:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         device = torch.device(self.device)
+        mem_diff = 0
         
         if device.type == ProcDevice.CUDA.value:
             torch.cuda.synchronize(device)

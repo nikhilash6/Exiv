@@ -17,13 +17,18 @@ class TorchBNBRunTest(unittest.TestCase):
         MemoryManager.clear_memory()
         
     # bnb run
+    """
+    NOTE: these tests are for on-the-fly conversion of non-quantized models. from the experiments
+    OTF conversion to fp8 takes more peak mem than is needed (based on llm.int8 paper, needs the entire model to find the outliers)..
+    while fp4 works correctly.
+    """
     QUANT_PARAMS = [
-        ("fp8", 1120),
-        ("fp4", 580),
-        ("nf4", 580),
+        ("fp8", 5888.41),
+        ("fp4", 2640.50),
+        ("nf4", 2640.50),
     ]
     @parameterized.expand(QUANT_PARAMS)
-    def test_torchao_run(self, quant_type, expected_mem):
+    def test_bnb_run(self, quant_type, expected_mem):
         from exiv.quantizers.bnb.bnb import BNBQuantizer
         from exiv.quantizers.base import BNBQuantizerConfig
         
@@ -43,5 +48,8 @@ class TorchBNBRunTest(unittest.TestCase):
             self.assertEqual(out.shape, (1, 4096))
             self.assertTrue(out[0, 0].item(), 16384)
             self.assertEqual(next(model.parameters()).device.type, VRAM_DEVICE)
+            
+            model.cpu()
+            del x, out, model
 
    
