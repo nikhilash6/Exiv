@@ -1,4 +1,5 @@
 import torch
+from torch import Tensor
 
 import math
 import numpy as np
@@ -233,3 +234,9 @@ def pad_to_patch_size(img, patch_size=(2, 2), padding_mode="circular"):
         pad = (0, (patch_size[i] - img.shape[i + 2] % patch_size[i]) % patch_size[i]) + pad
 
     return torch.nn.functional.pad(img, pad, mode=padding_mode)
+
+def tensor_to_parameter(x: Tensor):
+    if isinstance(x, torch.nn.Parameter):
+        return x
+    else:
+        return torch.nn.Parameter(x, requires_grad=False)

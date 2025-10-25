@@ -10,7 +10,7 @@ from ...utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, ProcDevice
 from ...utils.file import ensure_model_available
 from ...utils.logging import app_logger
 
-# code adapted from ForgeUI
+# code adapted from Forge
 
 def parse_prompt_attention(text):
     """

@@ -11,6 +11,8 @@ from exiv.model_utils.model_mixin import ModelMixin
 from exiv.model_utils.model_loader import RESERVED_MEM
 from exiv.config import global_config
 
+
+
 @unittest.skipIf(not is_cuda_available or CUDA_CC < 89, "Only available for cuda devices")
 class TorchAORunTest(unittest.TestCase):
     def setUp(self):

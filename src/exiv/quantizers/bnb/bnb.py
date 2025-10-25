@@ -8,6 +8,7 @@ from ..base import BNBQuantizerConfig, Quantizer
 from ...utils.device import is_cuda_available
 
 
+
 class BNBQuantizer(Quantizer):
     def __init__(self, quantization_config: BNBQuantizerConfig = None, **kwargs):
         if quantization_config is None: quantization_config = BNBQuantizerConfig()

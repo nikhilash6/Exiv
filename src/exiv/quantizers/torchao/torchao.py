@@ -8,6 +8,7 @@ from ..base import Quantizer, TorchAOConfig
 from ...utils.device import is_cuda_available, CUDA_CC
 from ...utils.logging import app_logger
 
+
 # sample usage - https://docs.pytorch.org/ao/main/quick_start.html
 class TorchAOQuantizer(Quantizer):
     def __init__(self, quantization_config: TorchAOConfig = None, **kwargs):

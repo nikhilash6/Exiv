@@ -5,7 +5,7 @@ import math
 from .utils import make_beta_schedule
 from ..enum import BetaSchedule, ModelType
 
-# code adapted from ForgeUI and ComfyUI
+# code adapted from Forge and ComfyUI
 
 # input, output and noise scaling to support k-diffusion based samplers
 # check the EDM paper (https://arxiv.org/pdf/2206.00364) Table 1 for input and output scaling

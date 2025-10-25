@@ -46,6 +46,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     - auto block swapping during low memory
     - (TODO) priority swapping
     - (TODO) cuda streams for offloading
+    - (TODO) support GGUF loading
     - quantization support
     - safetensor support
     - URL download support
@@ -87,8 +88,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
             new_args = tuple(a.to(self.gpu_device, non_blocking=True) if torch.is_tensor(a) else a for a in args)
             new_kwargs = {k: (v.to(self.gpu_device, non_blocking=True) if torch.is_tensor(v) else v) for k, v in kwargs.items()}
             return super().__call__(*new_args, **new_kwargs)
-    
-    # TODO: support GGUF loading
+
     def load_model(
         self,
         model_path = None,              # path or url   (passing this in the init as well for flexibility)
