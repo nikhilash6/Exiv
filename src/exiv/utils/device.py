@@ -48,6 +48,9 @@ elif is_xpu_available:
     VRAM_DEVICE = ProcDevice.XPU.value
 
 # ------------------ Memory availability
+
+RESERVED_MEM = 1024         # buffers, cache.. 
+
 # TODO: do somekind of ttl based caching to eliminate repeated calls
 class MemoryManager:
     @staticmethod

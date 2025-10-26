@@ -4,9 +4,8 @@ import unittest
 from unittest.mock import patch
 from parameterized import parameterized
 
-from exiv.model_utils.model_loader import RESERVED_MEM
 from tests.test_utils.common import LargeModel, SimpleModel, check_memory_usage, create_large_model_file
-from exiv.utils.device import OFFLOAD_DEVICE, MemoryManager, VRAM_DEVICE, is_mps_available
+from exiv.utils.device import OFFLOAD_DEVICE, MemoryManager, VRAM_DEVICE, RESERVED_MEM, is_mps_available
 from exiv.config import global_config
 
 # TODO: add tests to check the model split method

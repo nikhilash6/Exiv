@@ -9,7 +9,7 @@ from ..utils.file import ensure_model_available
 from ..utils.logging import app_logger
 from ..config import global_config, BYTES_IN_MB
 from ..quantizers.base import Quantizer
-from .model_loader import EfficientModelLoader
+from ..model_patching.efficient_loading_hook import enable_efficient_loading
 
 
 # bypassing weight creation at model init
@@ -25,7 +25,7 @@ class ModuleMeta(type(nn.Module)):
             with torch.device("meta"):
                 instance = super().__call__(*args, **kwargs)
                 if isinstance(instance, ModelMixin):    # mainly for safety
-                    EfficientModelLoader.patch_forward_pass(instance)   # optimizations for dynamic model loading
+                    enable_efficient_loading(instance)  # kinda default hook
                     if not hasattr(instance, 'dtype'):
                         instance.dtype = model_dtype
                         
