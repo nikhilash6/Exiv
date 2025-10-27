@@ -140,18 +140,19 @@ class QuantType(ExtendedEnum):
 
     
 def get_quantizer(quant_type: QuantType) -> Quantizer:
-    from .bnb.bnb import BNBQuantizer
+    from .bnb.bnb import BnB4BitQuantizer, BnB8BitQuantizer
     
     quantizer = None
+    if quant_type == None: return quantizer
     if quant_type in [QuantType.BNB_FP4, QuantType.BNB_FP8, QuantType.BNB_NF4]:
         quant_dict = {
-            "fp4": {'load_in_4bit': True},
-            "nf4": {'load_in_4bit': True, 'bnb_4bit_quant_type': "nf4"},
-            "fp8": {'load_in_8bit': True}
+            "fp4": (BnB4BitQuantizer, {'load_in_4bit': True}),
+            "nf4": (BnB4BitQuantizer, {'load_in_4bit': True, 'bnb_4bit_quant_type': "nf4"}),
+            "fp8": (BnB8BitQuantizer, {'load_in_8bit': True}),
         }
         
-        quant_config = BNBQuantizerConfig(**quant_dict[quant_type.value])
-        quantizer = BNBQuantizer(quantization_config=quant_config)
+        quant_cls, quant_config = quant_dict[quant_type.value]
+        quantizer = quant_cls(quantization_config=BNBQuantizerConfig(**quant_config))
         
     else:
         raise NotImplementedError(f"{quant_type.value} not implemented yet")
