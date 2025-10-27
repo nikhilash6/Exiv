@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from typing import Any, List, Dict
 from functools import partial
 
-from ..utils.enum import QuantizationMethod
+from ..utils.enum import ExtendedEnum, QuantizationMethod
 from ..utils.common import validate_type
 
 
@@ -29,6 +29,7 @@ class QuantizationConfig(ABC):
     def quantization_dtype(self):
         pass
 
+# NOTE: code for this is removed as of now, no longer in use
 @dataclass
 class TorchAOConfig(QuantizationConfig):
     kwargs: Dict[str, Any] = field(default_factory=dict)         # https://github.com/pytorch/ao/blob/main/torchao/quantization/quant_api.py
@@ -130,3 +131,29 @@ class Quantizer(ABC):
 
     def quantize(self, model, module, module_name):
         pass
+
+class QuantType(ExtendedEnum):
+    BNB_NF4 = "bnb_nf4"
+    BNB_FP4 = "bnb_fp4"
+    BNB_FP8 = "bnb_fp8"
+    GGUF    = "gguf"
+
+    
+def get_quantizer(quant_type: QuantType) -> Quantizer:
+    from .bnb.bnb import BNBQuantizer
+    
+    quantizer = None
+    if quant_type in [QuantType.BNB_FP4, QuantType.BNB_FP8, QuantType.BNB_NF4]:
+        quant_dict = {
+            "fp4": {'load_in_4bit': True},
+            "nf4": {'load_in_4bit': True, 'bnb_4bit_quant_type': "nf4"},
+            "fp8": {'load_in_8bit': True}
+        }
+        
+        quant_config = BNBQuantizerConfig(**quant_dict[quant_type.value])
+        quantizer = BNBQuantizer(quantization_config=quant_config)
+        
+    else:
+        raise NotImplementedError(f"{quant_type.value} not implemented yet")
+        
+    return quantizer

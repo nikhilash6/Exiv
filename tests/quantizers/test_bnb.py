@@ -3,6 +3,7 @@ import torch
 import unittest
 from parameterized import parameterized
 
+from exiv.quantizers.base import QuantType
 from tests.test_utils.common import LargeModel, check_memory_usage, create_large_model_file
 from exiv.utils.device import MemoryManager, VRAM_DEVICE, is_cuda_available
 from exiv.utils.logging import app_logger
@@ -23,25 +24,18 @@ class TorchBNBRunTest(unittest.TestCase):
     while fp4 works correctly.
     """
     QUANT_PARAMS = [
-        ("fp8", 5888.41),
-        ("fp4", 2640.50),
-        ("nf4", 2640.50),
+        (QuantType.BNB_FP8, 5888.41),
+        (QuantType.BNB_FP4, 2640.50),
+        (QuantType.BNB_NF4, 2640.50),
     ]
     @parameterized.expand(QUANT_PARAMS)
     def test_bnb_run(self, quant_type, expected_mem):
         from exiv.quantizers.bnb.bnb import BNBQuantizer
-        from exiv.quantizers.base import BNBQuantizerConfig
         
         with check_memory_usage(expected_mem=expected_mem, device=VRAM_DEVICE):
-            kwargs_dict = {
-                "fp4": {'load_in_4bit': True},
-                "nf4": {'load_in_4bit': True, 'bnb_4bit_quant_type': "nf4"},
-                "fp8": {'load_in_8bit': True}
-            }
-            app_logger.info(f"quantizing: {quant_type}")
-            quant_config = BNBQuantizerConfig(**kwargs_dict[quant_type])
-            quantizer = BNBQuantizer(quantization_config=quant_config)
-            model = LargeModel(quantizer=quantizer)
+            
+            app_logger.info(f"quantizing: {quant_type.value}")
+            model = LargeModel(quant_type=quant_type)
             model.load_model(LargeModel.SAFETENSORS_PATH)
             x = torch.ones(1, 16384)
             out = model(x)

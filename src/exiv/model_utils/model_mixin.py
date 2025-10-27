@@ -8,7 +8,7 @@ from ..utils.device import VRAM_DEVICE
 from ..utils.file import ensure_model_available
 from ..utils.logging import app_logger
 from ..config import global_config, BYTES_IN_MB
-from ..quantizers.base import Quantizer
+from ..quantizers.base import QuantType, Quantizer, get_quantizer
 from ..model_patching.efficient_loading_hook import enable_efficient_loading
 
 
@@ -51,12 +51,12 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     - safetensor support
     - URL download support
     '''
-    def __init__(self, device: str = None, quantizer: Quantizer = None, model_path: str = None, dtype = torch.float32):     # dtype is used by the meta class
+    def __init__(self, device: str = None, quant_type: QuantType = None, model_path: str = None, dtype = torch.float32):     # dtype is used by the meta class
         super().__init__()
         self.gpu_device = device or VRAM_DEVICE
         self.model_path = model_path
         
-        self.quantizer = quantizer
+        self.quantizer: Quantizer = get_quantizer(quant_type=quant_type)
     
     def clear_cache(self):
         # add other cleanup in future
