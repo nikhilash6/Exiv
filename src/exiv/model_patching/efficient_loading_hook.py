@@ -1,7 +1,7 @@
 import torch
 
 import weakref
-from typing import List, Any
+from typing import List, Any, Tuple
 
 from .hook_registry import HookRegistry, HookType, ModelHook
 from ..utils.logging import app_logger
@@ -35,26 +35,25 @@ class EfficientModelLoaderHook(ModelHook):
     this hook loads the initial set of full_load modules before the main model's forward call
     """
     
-    def __init__(self, full_load_module_list: List[str]):
+    def __init__(self, full_load: List[Tuple[weakref.ref, str]]):
         self.hook_type = HookType.EFFICIENT_MODEL_LOADER.value
-        self.full_load = full_load_module_list      # list of module names
+        self.full_load = full_load
     
     # module here is the main model
     def pre_forward(self, module, *args, **kwargs):
-        app_logger.debug(f"full load modules: {[m_name for _, m_name in self.full_load]}")
-        module._patched = True
+        app_logger.debug(f"full load modules: {[m_name for m_name in self.full_load]}")
+        self._full_load(module)
         return args, kwargs
     
-    def _full_load(model, *args, **kwargs):
-        if not model._patched or model._fully_loaded: return None
+    def _full_load(self, model):
+        if getattr(model, "_fully_loaded", False): return
         # load initial full_load modules
-        for m_ref, m_name in model.full_load:
+        for m_ref, m_name in self.full_load:
             m = m_ref()
             app_logger.debug(f"Loading via full load: {m_name}")
-            cls._load_module(model=model, module=m, module_name=m_name, quant_enabled=True)
-        
+            load_module(model=model, module=m, module_name=m_name, quant_enabled=True)
+
         model._fully_loaded = True
-        return None
     
 
 class EfficientModuleLoaderHook(ModelHook):
@@ -113,7 +112,7 @@ There are three modes for loading the model:
 def split_model_for_loading(model: 'ModelMixin'):
     # this determines which modules can be fully loaded permanently on the vram
     # and which has to be dynamically loaded
-    full_load_modules = []
+    full_load_modules: List[Tuple[weakref.ref, str]] = []
     
     current_mem_used = 0
     available_mem = MemoryManager.available_memory(model.gpu_device) - RESERVED_MEM
@@ -144,7 +143,7 @@ def split_model_for_loading(model: 'ModelMixin'):
         if current_mem_used < available_mem and (max_next is None or max_next < (available_mem - current_mem_used)):
             # if we can add this to the existing available mem limit + after adding this the next
             # biggest module can be safely loaded / unloaded, then we fully load this
-            full_load_modules.append(m_name)
+            full_load_modules.append((weakref.ref(m), m_name))
         else:
             break
         
@@ -155,7 +154,7 @@ def enable_efficient_loading(model: 'ModelMixin'):
     """
     This patches the forward pass of modules to dynamically load / unload them
     """
-    full_load = []
+    full_load: List[Tuple[weakref.ref, str]] = []
     loading_mode = global_config.loading_mode
     
     if loading_mode == LOADING_MODE.NO_OOM.value:
@@ -181,11 +180,11 @@ def enable_efficient_loading(model: 'ModelMixin'):
         module_hook = EfficientModuleLoaderHook(
             model_ref=model,
             module_name=m_name,
-            full_load_module=(m_name in full_load),
+            full_load_module=any(m_name == mn for _, mn in full_load),
         )
         HookRegistry.apply_hook_to_module(m, module_hook)
 
 
-    model_hook = EfficientModelLoaderHook(full_load_module_list=full_load)
+    model_hook = EfficientModelLoaderHook(full_load=full_load)
     HookRegistry.apply_hook_to_module(model, model_hook)
     

@@ -81,13 +81,16 @@ class HookRegistry:
         cur_forward = self._module_ref.forward
         cur_hook = self.head.next_hook
         
-        def new_forward(hook, og_forward, *args, **kwargs):
-            args, kwargs = hook.pre_forward(self._module_ref, *args, **kwargs)
-            output = og_forward(*args, **kwargs)
-            return hook.post_forward(self._module_ref, output)
+        def create_new_forward(hook, og_forward):
+            def new_forward(*args, **kwargs):
+                args, kwargs = hook.pre_forward(self._module_ref, *args, **kwargs)
+                output = og_forward(*args, **kwargs)
+                return hook.post_forward(self._module_ref, output)
+
+            return new_forward
         
         while cur_hook != self.tail:
-            cur_forward = functools.partial(new_forward, hook=cur_hook, og_forward=cur_forward)
+            cur_forward = create_new_forward(hook=cur_hook, og_forward=cur_forward)
             cur_hook = cur_hook.next_hook
         
         self._cached_forward = cur_forward
@@ -104,6 +107,7 @@ class HookRegistry:
     def apply_hook_to_module(module, hook):
         registry = HookRegistry.get_hook_registry(module)
         registry.register_hook(hook)
+        module.forward = registry.get_modified_forward()
 
     def get_hook(self, hook_type: str) -> Optional[ModelHook]:
         return self.hooks_lookup.get(hook_type, None)

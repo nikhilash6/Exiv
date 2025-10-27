@@ -55,8 +55,6 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         super().__init__()
         self.gpu_device = device or VRAM_DEVICE
         self.model_path = model_path
-        self._patched = False
-        self._fully_loaded = False
         
         self.quantizer = quantizer
     
@@ -85,6 +83,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     def __call__(self, *args, **kwargs):
         with torch.inference_mode():
             # moving the inputs to GPU
+            app_logger.debug(f"moving the inputs to {self.gpu_device}")
             new_args = tuple(a.to(self.gpu_device, non_blocking=True) if torch.is_tensor(a) else a for a in args)
             new_kwargs = {k: (v.to(self.gpu_device, non_blocking=True) if torch.is_tensor(v) else v) for k, v in kwargs.items()}
             return super().__call__(*new_args, **new_kwargs)
