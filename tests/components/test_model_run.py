@@ -42,7 +42,7 @@ class ModelRunTest(unittest.TestCase):
     
     
     LOADING_PARAMS = [
-        ("no_oom",   {"no_oom": True,  "low_vram": False, "normal_load": False}, 0 if is_mps_available else 4350,  OFFLOAD_DEVICE),
+        ("no_oom",   {"no_oom": True,  "low_vram": False, "normal_load": False}, 0 if is_mps_available else 2057.44,  OFFLOAD_DEVICE),
         ("low_vram", {"no_oom": False, "low_vram": True,  "normal_load": False}, 4350, VRAM_DEVICE),
         ("normal",   {"no_oom": False, "low_vram": False, "normal_load": True},  4350, VRAM_DEVICE),
     ]

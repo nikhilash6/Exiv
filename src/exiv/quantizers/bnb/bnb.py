@@ -131,10 +131,8 @@ class BnB4BitQuantizer(Quantizer):
         keep_in_fp32_modules: List[str] = [],
         **kwargs,
     ):
-    
-
-        load_in_8bit_fp32_cpu_offload = self.quantization_config.llm_int8_enable_fp32_cpu_offload
-
+        from .utils import replace_with_bnb_linear
+        
         # We may keep some modules such as the `proj_out` in their original dtype for numerical stability reasons
         self.modules_to_not_convert = self.quantization_config.llm_int8_skip_modules
 
@@ -152,7 +150,7 @@ class BnB4BitQuantizer(Quantizer):
         model = replace_with_bnb_linear(
             model, modules_to_not_convert=self.modules_to_not_convert, quantization_config=self.quantization_config
         )
-        model.config.quantization_config = self.quantization_config
+        
         model.is_loaded_in_4bit = True
 
     def _dequantize(self, model):
@@ -271,8 +269,6 @@ class BnB8BitQuantizer(Quantizer):
     ):
         from .utils import replace_with_bnb_linear
 
-        load_in_8bit_fp32_cpu_offload = self.quantization_config.llm_int8_enable_fp32_cpu_offload
-
         # We may keep some modules such as the `proj_out` in their original dtype for numerical stability reasons
         self.modules_to_not_convert = self.quantization_config.llm_int8_skip_modules
 
@@ -290,7 +286,7 @@ class BnB8BitQuantizer(Quantizer):
         model = replace_with_bnb_linear(
             model, modules_to_not_convert=self.modules_to_not_convert, quantization_config=self.quantization_config
         )
-        model.config.quantization_config = self.quantization_config
+        
         model.is_loaded_in_8bit = True
 
     def _dequantize(self, model):

@@ -37,7 +37,7 @@ def _replace_with_bnb_linear(
                 in_features = module.in_features
                 out_features = module.out_features
 
-                if quantization_config.quantization_method() == "llm_int8":
+                if quantization_config.quantization_method == "llm_int8":
                     model._modules[name] = bnb.nn.Linear8bitLt(
                         in_features,
                         out_features,

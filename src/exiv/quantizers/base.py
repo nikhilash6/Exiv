@@ -159,9 +159,9 @@ def get_quantizer(quant_type: QuantType) -> Quantizer:
     if quant_type == None: return quantizer
     if quant_type in [QuantType.BNB_FP4, QuantType.BNB_FP8, QuantType.BNB_NF4]:
         quant_dict = {
-            "fp4": (BnB4BitQuantizer, {'load_in_4bit': True}),
-            "nf4": (BnB4BitQuantizer, {'load_in_4bit': True, 'bnb_4bit_quant_type': "nf4"}),
-            "fp8": (BnB8BitQuantizer, {'load_in_8bit': True}),
+            "bnb_fp4": (BnB4BitQuantizer, {'load_in_4bit': True}),
+            "bnb_nf4": (BnB4BitQuantizer, {'load_in_4bit': True, 'bnb_4bit_quant_type': "nf4"}),
+            "bnb_fp8": (BnB8BitQuantizer, {'load_in_8bit': True}),
         }
         
         quant_cls, quant_config = quant_dict[quant_type.value]

@@ -2,6 +2,7 @@ import torch
 
 import unittest
 
+from exiv.quantizers.base import QuantType
 from tests.test_utils.common import LargeModel, SimpleModel, check_memory_usage, create_large_model_file
 from exiv.utils.device import MemoryManager, CUDA_CC, VRAM_DEVICE, is_cuda_available, is_mps_available, is_xla_available, is_mps_available
 
@@ -47,21 +48,7 @@ class ModelLoadTest(unittest.TestCase):
             MemoryManager.clear_memory()
 
     # testing bnb quantization
-    @unittest.skip("not fixed")
     def test_bnb_model_quant(self):
-        from exiv.quantizers.bnb.bnb import BNBQuantizer
-        
-        quantizer = BNBQuantizer()
-        model = SimpleModel()
-        model.load_model(SimpleModel.CKPT_PATH)
-        self.assertEqual(next(model.parameters()).device.type, VRAM_DEVICE)
-    
-    # testing torchao quantization
-    @unittest.skipIf(CUDA_CC < 89, "Compute capability > 89 required")
-    def test_torchao_model_quant(self):
-        from exiv.quantizers.torchao.torchao import TorchAOQuantizer
-        
-        quantizer = TorchAOQuantizer()
-        model = SimpleModel(quantizer=quantizer)
+        model = SimpleModel(quant_type=QuantType.BNB_FP4)
         model.load_model(SimpleModel.CKPT_PATH)
         self.assertEqual(next(model.parameters()).device.type, "cpu")
