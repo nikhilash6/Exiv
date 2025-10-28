@@ -1,3 +1,4 @@
+import importlib
 import torch
 import torch.nn.functional as F
 
@@ -15,11 +16,13 @@ class ProcDevice(ExtendedEnum):
     MPS = "mps"
     XLA = "xla"     # more like a backend than a device
     XPU = "xpu"
+    NPU = "npu"
 
 is_mps_available = False
 is_cuda_available = False
 is_xla_available = False
 is_xpu_available = False
+is_npu_available = False
 is_cpu_available = True
 
 if torch.cuda.is_available(): is_cuda_available = True
@@ -35,6 +38,29 @@ except ImportError:
     pass
 if hasattr(torch, "xpu") and torch.xpu.is_available(): is_xpu_available = True
 
+def npu_check(check_device=False):
+    "Checks if `torch_npu` is installed and potentially if a NPU is in the environment"
+    if importlib.util.find_spec("torch_npu") is None:
+        return False
+
+    # NOTE: importing torch_npu may raise error in some envs
+    # e.g. inside cpu-only container with torch_npu installed
+    try:
+        import torch_npu  # noqa: F401
+    except Exception:
+        return False
+
+    if check_device:
+        try:
+            # Will raise a RuntimeError if no NPU is found
+            _ = torch.npu.device_count()
+            return torch.npu.is_available()
+        except RuntimeError:
+            return False
+    return hasattr(torch, "npu") and torch.npu.is_available()
+
+is_npu_available = npu_check()
+
 VRAM_DEVICE = ProcDevice.CPU.value
 OFFLOAD_DEVICE = ProcDevice.CPU.value
 
@@ -42,10 +68,24 @@ if is_cuda_available:
     VRAM_DEVICE = ProcDevice.CUDA.value
 elif is_mps_available:
     VRAM_DEVICE = ProcDevice.MPS.value
+elif is_npu_available:
+    VRAM_DEVICE = ProcDevice.NPU.value
 elif is_xla_available:
     VRAM_DEVICE = ProcDevice.XLA.value
 elif is_xpu_available:
     VRAM_DEVICE = ProcDevice.XPU.value
+    
+def is_same_device(first_device, second_device):
+    if first_device.type != second_device.type:
+        return False
+
+    if first_device.type != "cpu" and first_device.index is None:
+        first_device = torch.device(first_device.type, index=0)
+
+    if second_device.type != "cpu" and second_device.index is None:
+        second_device = torch.device(second_device.type, index=0)
+
+    return first_device == second_device
 
 # ------------------ Memory availability
 
@@ -102,10 +142,14 @@ class MemoryManager:
     def clear_memory():
         import gc
         gc.collect()
-        if is_cuda_available:
-            torch.cuda.empty_cache()
-        if is_mps_available:
+        if is_xpu_available:
+            torch.xpu.empty_cache()
+        elif is_npu_available:
+            torch.npu.empty_cache()
+        elif is_mps_available:
             torch.mps.empty_cache()
+        elif is_cuda_available:
+            torch.cuda.empty_cache()
             
 
 def print_mem_usage(model, tag):

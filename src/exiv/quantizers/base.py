@@ -18,7 +18,8 @@ class QuantizationConfig(ABC):
             value = getattr(self, field_name)
             expected_type = field_def.type
             validate_type(value, expected_type, field_name)
-            
+
+    
     @property
     @abstractmethod
     def quantization_method(self):
@@ -130,6 +131,18 @@ class Quantizer(ABC):
         self.kwargs = kwargs
 
     def quantize(self, model, module, module_name):
+        pass
+    
+    def process_model_before_weight_loading(self, *args, **kwargs):
+        pass
+    
+    def create_quantized_param(self, *args, **kwargs):
+        pass
+    
+    def is_state_dict_quantized(self, state_dict):
+        pass
+    
+    def validate_environment(self, *args, **kwargs):
         pass
 
 class QuantType(ExtendedEnum):

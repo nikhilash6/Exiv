@@ -11,8 +11,6 @@ if is_bitsandbytes_available():
     import bitsandbytes as bnb
 
 
-# this code has been adapted from Huggingface Diffusers
-
 def _replace_with_bnb_linear(
     model,
     modules_to_not_convert=None,

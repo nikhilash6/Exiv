@@ -125,10 +125,9 @@ class BnB4BitQuantizer(Quantizer):
         else:
             return True
 
-    def _process_model_before_weight_loading(
+    def process_model_before_weight_loading(
         self,
         model: "ModelMixin",
-        device_map,
         keep_in_fp32_modules: List[str] = [],
         **kwargs,
     ):
@@ -264,10 +263,9 @@ class BnB8BitQuantizer(Quantizer):
         if fp16_weights_format is not None and unexpected_keys is not None:
             unexpected_keys.remove(fp16_weights_format_key)
 
-    def _process_model_before_weight_loading(
+    def process_model_before_weight_loading(
         self,
         model: "ModelMixin",
-        device_map,
         keep_in_fp32_modules: List[str] = [],
         **kwargs,
     ):
@@ -294,7 +292,6 @@ class BnB8BitQuantizer(Quantizer):
         )
         model.config.quantization_config = self.quantization_config
         model.is_loaded_in_8bit = True
-
 
     def _dequantize(self, model):
         from .utils import dequantize_and_replace

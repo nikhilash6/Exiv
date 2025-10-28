@@ -1,10 +1,12 @@
-import os
-import functools
 import torch
 import torch.nn as nn
-import safetensors
 
-from ..utils.device import VRAM_DEVICE
+import os
+import functools
+import safetensors
+from typing import Optional, Union
+
+from ..utils.device import VRAM_DEVICE, MemoryManager, ProcDevice, is_same_device
 from ..utils.file import ensure_model_available
 from ..utils.logging import app_logger
 from ..config import global_config, BYTES_IN_MB
@@ -16,6 +18,7 @@ from ..model_patching.efficient_loading_hook import enable_efficient_loading
 class ModuleMeta(type(nn.Module)):
     def __call__(cls, *args, **kwargs):
         model_dtype = kwargs.pop("dtype", torch.float32)
+        quant_type = kwargs.get("quant_type", None)
         original_dtype = torch.get_default_dtype()
         
         try:
@@ -24,6 +27,12 @@ class ModuleMeta(type(nn.Module)):
             # zero init weight load
             with torch.device("meta"):
                 instance = super().__call__(*args, **kwargs)
+                quantizer: Quantizer = get_quantizer(quant_type=quant_type)
+                instance.quantizer = quantizer
+                if quantizer is not None:
+                    quantizer.validate_environment()
+                    quantizer.process_model_before_weight_loading(model=instance)
+                
                 if isinstance(instance, ModelMixin):    # mainly for safety
                     enable_efficient_loading(instance)  # kinda default hook
                     if not hasattr(instance, 'dtype'):
@@ -43,6 +52,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     - (TODO) better / modular patch system
     - zero init loading
     - (TODO) multi gpu sharding
+    - (TODO) implement low cpu mem usage feature
     - auto block swapping during low memory
     - (TODO) priority swapping
     - (TODO) cuda streams for offloading
@@ -51,12 +61,10 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     - safetensor support
     - URL download support
     '''
-    def __init__(self, device: str = None, quant_type: QuantType = None, model_path: str = None, dtype = torch.float32):     # dtype is used by the meta class
+    def __init__(self, device: str = None, quant_type: QuantType = None, model_path: str = None, dtype = torch.float32):     # quant_type, dtype is used by the meta class
         super().__init__()
         self.gpu_device = device or VRAM_DEVICE
         self.model_path = model_path
-        
-        self.quantizer: Quantizer = get_quantizer(quant_type=quant_type)
     
     def clear_cache(self):
         # add other cleanup in future
@@ -88,20 +96,77 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
             new_kwargs = {k: (v.to(self.gpu_device, non_blocking=True) if torch.is_tensor(v) else v) for k, v in kwargs.items()}
             return super().__call__(*new_args, **new_kwargs)
 
+    # code adapted from Huggingface Diffusers
     def load_model(
         self,
         model_path = None,              # path or url   (passing this in the init as well for flexibility)
-        device = None,                  # device to load this on
         force_download=False,           # re_download models
         download_path=None,             # defaults to folder util
+        dtype=None                      # TODO: hardware specific dtype
     ):
         model_path = model_path or self.model_path
         assert model_path is not None, "model_path is required"
+
+        # loading everything on the CPU, then modularly offloading to the GPU
+        device = ProcDevice.CPU.value
+        self.dtype = dtype or self.dtype
         
-        self.gpu_device = device or self.gpu_device
         model_path = ensure_model_available(model_path, download_path, force_download)
-        self.load_state_dict(ModelMixin.get_state_dict(model_path), assign=True)
-    
+        state_dict = ModelMixin.get_state_dict(model_path)
+        model_state_dict = self.state_dict()
+        
+        for param_name, param in state_dict.items():
+            if param_name not in model_state_dict: continue
+            
+            if self.dtype is not None:
+                if self.quantizer is not None:
+                    pass    # not overiding dtype of quantized models
+                else:
+                    param = param.to(self.dtype)
+            
+            # For compatibility with PyTorch load_state_dict which converts state dict dtype to existing dtype in model, and which
+            # uses `param.copy_(input_param)` that preserves the contiguity of the parameter in the model
+            # Reference: https://github.com/pytorch/pytorch/blob/db79ceb110f6646523019a59bbd7b838f43d4a86/torch/nn/modules/module.py#L2040C29-L2040C29
+            old_param = self
+            splits = param_name.split(".")
+            for split in splits:
+                # recursively drill down: model.down_blocks[0].attentions[0].proj_in.weight
+                old_param = getattr(old_param, split)
+            
+            # param_name might be for a buffer or something not loadable, skip it
+            if not isinstance(old_param, (torch.nn.Parameter, torch.Tensor)):
+                old_param = None
+                
+            if old_param is not None:
+                if self.dtype is None:
+                    param = param.to(old_param.dtype)
+                    
+                if old_param.is_contiguous():
+                    param = param.contiguous()
+            
+            # bnb params are flattened.
+            # gguf quants have a different shape based on the type of quantization applied
+            if model_state_dict[param_name].shape != param.shape:
+                if self.quantizer is not None:
+                    self.quantizer.check_quantized_param_shape(param_name, model_state_dict[param_name], param)
+                else:
+                    raise ValueError(
+                        f"Cannot load {model_path} because {param_name} expected shape {model_state_dict[param_name].shape}, but got {param.shape}."
+                    )
+            
+            # final assignment
+            if self.quantizer is not None:
+                self.quantizer.create_quantized_param(
+                    self,
+                    param,
+                    param_name,
+                    device,
+                    state_dict,
+                    dtype=dtype
+                )
+            else:
+                set_module_tensor_to_device(self, param_name, device, value=param, dtype=dtype)
+
     # code adapted from ComfyUI
     @staticmethod
     def get_state_dict(model_path, device=torch.device("cpu")):
@@ -137,3 +202,132 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
                 sd = val if isinstance(val, dict) else sd
                 
         return sd
+
+# lots of checks that can be skipped
+def set_module_tensor_to_device(
+    module: nn.Module,
+    tensor_name: str,
+    device: Union[int, str, torch.device],
+    value: Optional[torch.Tensor] = None,
+    dtype: Optional[Union[str, torch.dtype]] = None,
+    non_blocking: bool = False,
+):
+    # traverse the nested modules using the '.' in the tensor name (e.g., 'encoder.layer.0.weight')
+    if "." in tensor_name:
+        splits = tensor_name.split(".")
+        for split in splits[:-1]:
+            new_module = getattr(module, split)
+            if new_module is None:
+                raise ValueError(f"{module} has no attribute {split}.")
+            module = new_module
+        tensor_name = splits[-1]
+
+    # ensure the tensor name corresponds to an existing parameter or buffer
+    if tensor_name not in module._parameters and tensor_name not in module._buffers:
+        raise ValueError(f"{module} does not have a parameter or a buffer named {tensor_name}.")
+    is_buffer = tensor_name in module._buffers
+    old_value = getattr(module, tensor_name)
+
+    if old_value.device == torch.device("meta") and device not in ["meta", torch.device("meta")] and value is None:
+        raise ValueError(f"{tensor_name} is on the meta device, we need a `value` to put in on {device}.")
+
+    param = module._parameters[tensor_name] if tensor_name in module._parameters else None
+    param_cls = type(param)
+    
+    if value is not None:
+        if dtype is None:
+            # For compatibility with PyTorch load_state_dict which converts state dict dtype to existing dtype in model
+            value = value.to(old_value.dtype, non_blocking=non_blocking)
+        elif not str(value.dtype).startswith(("torch.uint", "torch.int", "torch.bool")):
+            value = value.to(dtype, non_blocking=non_blocking)
+
+    device_quantization = None
+    with torch.no_grad():
+        # temporarily set the device to 'cpu' to handle quantization correctly before the final move.
+        # if it's currently not on gpu then it needs to processed first before moving to gpu (if its the target)
+        if (
+            param is not None
+            and param.device.type not in ("cuda", "xpu")
+            and torch.device(device).type in ("cuda", "xpu")
+            and param_cls.__name__ in ["Int8Params", "FP4Params", "Params4bit"]
+        ):
+            device_quantization = device 
+            device = "cpu"
+
+        if isinstance(value, torch.Tensor):
+            new_value = value.to(device, non_blocking=non_blocking)
+        else:
+            new_value = torch.tensor(value, device=device)
+
+        # revert the target device to the original GPU
+        if device_quantization is not None:
+            device = device_quantization
+
+        # --- final assignment
+        # simple assignment for the buffer
+        if is_buffer:
+            module._buffers[tensor_name] = new_value
+        
+        # update if a new value was provided OR if the device actually changed.
+        elif value is not None or not is_same_device(torch.device(device), module._parameters[tensor_name].device):
+            param_cls = type(module._parameters[tensor_name])
+            kwargs = module._parameters[tensor_name].__dict__
+            
+            # special handling for low-precision/quantized parameter classes (e.g., bitsandbytes)
+            if param_cls.__name__ in ["Int8Params", "FP4Params", "Params4bit"]:
+                # cast to fp16 for 8-bit serialization/compatibility if needed
+                if param_cls.__name__ == "Int8Params" and new_value.dtype == torch.float32:
+                    new_value = new_value.to(torch.float16, non_blocking=non_blocking)
+                
+                # quantize the weights on CPU first
+                if device == "cpu" and param_cls.__name__ == "Int8Params":
+                    new_value = param_cls(new_value, requires_grad=old_value.requires_grad, **kwargs).to(0).to("cpu")
+                    new_value.CB = new_value.CB.to("cpu")
+                    new_value.SCB = new_value.SCB.to("cpu")
+                else:
+                    # re-wrap the tensor using its specialized class and move to the final device
+                    new_value = param_cls(new_value, requires_grad=old_value.requires_grad, **kwargs).to(
+                        device, non_blocking=non_blocking
+                    )
+            
+            # other known quantized tensor types (affine one is from torchao)
+            elif param_cls.__name__ in ["QTensor", "QBitsTensor", "AffineQuantizedTensor"]:
+                new_value = torch.nn.Parameter(new_value, requires_grad=old_value.requires_grad).to(
+                    device, non_blocking=non_blocking
+                )
+            
+            # default
+            else:
+                new_value = param_cls(new_value, requires_grad=old_value.requires_grad).to(
+                    device, non_blocking=non_blocking
+                )
+
+            module._parameters[tensor_name] = new_value
+
+            # # final check and initialization of 8-bit Linear layers (bitsandbytes-specific)
+            # if (
+            #     module.__class__.__name__ == "Linear8bitLt"
+            #     and getattr(module.weight, "SCB", None) is None
+            #     and str(module.weight.device) != "meta"
+            # ):
+            #     device_index = torch.device(device).index if torch.device(device).type == "cuda" else None
+            #     if not getattr(module.weight, "SCB", None) and device_index is not None:
+            #         # Initialize 8-bit quantization logic by moving the module to CUDA (triggers necessary setup)
+            #         if module.bias is not None and module.bias.device.type != "meta":
+            #             module = module.cuda(device_index)
+            #         elif module.bias is None:
+            #             module = module.cuda(device_index)
+            # # final check and initialization of 4-bit Linear layers (bitsandbytes-specific)
+            # elif (
+            #     module.__class__.__name__ == "Linear4bit"
+            #     and getattr(module.weight, "quant_state", None) is None
+            #     and str(module.weight.device) != "meta"
+            # ):
+            #     device_index = torch.device(device).index if torch.device(device).type == "cuda" else None
+            #     if not getattr(module.weight, "quant_state", None) and device_index is not None:
+            #         # Initialize 4-bit quantization logic
+            #         module.weight = module.weight.cuda(device_index)
+
+    # freeing old_value (safety check)
+    MemoryManager.clear_memory()
+
