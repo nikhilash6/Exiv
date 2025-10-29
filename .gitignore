@@ -4,6 +4,7 @@
 .vscode
 .idea
 .DS_store
+.ipynb_checkpoints/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -37,6 +38,7 @@ venv/
 note.md
 temp.py
 apps/wani2v/assets/
+keygen.sh
 
 # Test files
 .pytest_cache

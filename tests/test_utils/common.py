@@ -18,24 +18,47 @@ except ImportError:
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
 
-def print_top_gpu_tensors(n=5, device="cuda:0"):
+def print_top_gpu_tensors(n=5, device="cuda:0", print_refs=False):
+    # --- Find all GPU tensors ---
     objs = gc.get_objects()
     gpu_tensors = []
     visited_ids = set()
+    
     for obj in objs:
         try:
-            if torch.is_tensor(obj) and obj.is_cuda and obj.device == torch.device(device) and id(obj) not in visited_ids:
+            if (torch.is_tensor(obj) and 
+                obj.is_cuda and 
+                obj.device == torch.device(device) and 
+                id(obj) not in visited_ids):
+                
                 gpu_tensors.append((obj.element_size() * obj.nelement(), obj))
                 visited_ids.add(id(obj))
         except Exception:
             pass
     
-    # NOTE: the size here is theoretical, it could have been freed by gc or some other mechanism
     gpu_tensors = sorted(gpu_tensors, key=lambda x: x[0], reverse=True)
-    print(f"\n Top {n} GPU tensors on {device}:")
+    print(f"\n Top {len(gpu_tensors[:n])} GPU tensors on {device}:")
     for size, tensor in gpu_tensors[:n]:
         size_mb = size / (1024**2)
-        print(f"- {tensor.shape} | {tensor.dtype} | {size_mb:.2f} MB | requires_grad={tensor.requires_grad}")
+        print("---" * 10)
+        print(f"- Tensor: {tensor.shape} | {tensor.dtype} | {size_mb:.2f} MB")
+        
+        if print_refs:
+            try:
+                referrers = gc.get_referrers(tensor)
+                print(f"  Referrers (what is holding it):")
+                if not referrers:
+                    print("    None found (might be complex internal state).")
+                    
+                for i, ref in enumerate(referrers[:5]): # print top 5 referrers
+                    print(f"    {i+1}. ID: {id(ref)} Type: {type(ref)}")
+                    # printing the ref itself can be noisy, so we limit its length
+                    print(f"       Value (truncated): {str(ref)[:150]}...")
+            except Exception as e:
+                print(f"  Could not get referrers: {e}")
+
+    print("---" * 10)
+    print(torch.cuda.memory_summary(device=device))
 
 
 class check_memory_usage:
@@ -85,14 +108,15 @@ class check_memory_usage:
             # MPS: Report delta.
             final_mem_mb = torch.mps.current_allocated_memory() / (1024**2)
             mem_diff = final_mem_mb - self.initial_mem_mb
-        
+
+        print("total mem diff: ", mem_diff)
         is_close = torch.isclose(
                         torch.tensor(float(mem_diff)), 
                         torch.tensor(float(self.expected_mem)), 
                         rtol=self.rtol,
                         atol=self.atol
                     )
-        
+
         if not is_close and not is_mps_available:
             print("device: ", self.device)
             print_top_gpu_tensors()
@@ -135,6 +159,7 @@ class LargeModel(ModelMixin):
         self.output_layer = nn.Linear(16384, 4096)
 
     def forward(self, x):
+        print(f"Input 'x' device: {x.device}")
         x = self.input_layer(x)
         x = self.hidden_layer(x)
         return self.output_layer(x)

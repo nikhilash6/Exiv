@@ -37,7 +37,7 @@ def _replace_with_bnb_linear(
                 in_features = module.in_features
                 out_features = module.out_features
 
-                if quantization_config.quantization_method == "llm_int8":
+                if quantization_config.quantization_dtype == "llm_int8":
                     model._modules[name] = bnb.nn.Linear8bitLt(
                         in_features,
                         out_features,
@@ -155,7 +155,7 @@ def _dequantize_and_replace(
 
     Returns the converted model and a boolean that indicates if the conversion has been successful or not.
     """
-    quant_method = quantization_config.quantization_method()
+    quant_method = quantization_config.quantization_dtype
 
     target_cls = bnb.nn.Linear8bitLt if quant_method == "llm_int8" else bnb.nn.Linear4bit
 

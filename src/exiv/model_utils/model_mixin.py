@@ -92,8 +92,9 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         with torch.inference_mode():
             # moving the inputs to GPU
             app_logger.debug(f"moving the inputs to {self.gpu_device}")
-            new_args = tuple(a.to(self.gpu_device, non_blocking=True) if torch.is_tensor(a) else a for a in args)
-            new_kwargs = {k: (v.to(self.gpu_device, non_blocking=True) if torch.is_tensor(v) else v) for k, v in kwargs.items()}
+            new_args = tuple(a.to(self.gpu_device, non_blocking=False) if torch.is_tensor(a) else a for a in args)
+            new_kwargs = {k: (v.to(self.gpu_device, non_blocking=False) if torch.is_tensor(v) else v) for k, v in kwargs.items()}
+
             return super().__call__(*new_args, **new_kwargs)
 
     # code adapted from Huggingface Diffusers
@@ -106,7 +107,6 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     ):
         model_path = model_path or self.model_path
         assert model_path is not None, "model_path is required"
-
         # loading everything on the CPU, then modularly offloading to the GPU
         device = ProcDevice.CPU.value
         self.dtype = dtype or self.dtype
@@ -155,7 +155,9 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
                     )
             
             # final assignment
-            if self.quantizer is not None:
+            if self.quantizer is not None and self.quantizer.check_if_quantized_param(
+                self, param, param_name, state_dict, dtype=dtype
+            ):
                 self.quantizer.create_quantized_param(
                     self,
                     param,
@@ -203,6 +205,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
                 
         return sd
 
+
 # lots of checks that can be skipped
 def set_module_tensor_to_device(
     module: nn.Module,
@@ -233,6 +236,7 @@ def set_module_tensor_to_device(
 
     param = module._parameters[tensor_name] if tensor_name in module._parameters else None
     param_cls = type(param)
+
     
     if value is not None:
         if dtype is None:
@@ -279,7 +283,7 @@ def set_module_tensor_to_device(
                 if param_cls.__name__ == "Int8Params" and new_value.dtype == torch.float32:
                     new_value = new_value.to(torch.float16, non_blocking=non_blocking)
                 
-                # quantize the weights on CPU first
+                # quantize the weights on the GPU first then move to the CPU
                 if device == "cpu" and param_cls.__name__ == "Int8Params":
                     new_value = param_cls(new_value, requires_grad=old_value.requires_grad, **kwargs).to(0).to("cpu")
                     new_value.CB = new_value.CB.to("cpu")
@@ -289,7 +293,7 @@ def set_module_tensor_to_device(
                     new_value = param_cls(new_value, requires_grad=old_value.requires_grad, **kwargs).to(
                         device, non_blocking=non_blocking
                     )
-            
+
             # other known quantized tensor types (affine one is from torchao)
             elif param_cls.__name__ in ["QTensor", "QBitsTensor", "AffineQuantizedTensor"]:
                 new_value = torch.nn.Parameter(new_value, requires_grad=old_value.requires_grad).to(

@@ -107,8 +107,8 @@ class BNBQuantizerConfig(QuantizationConfig):
                                                 # this also quantizes scale, offset
                                                 # which are normally in higher precision
     bnb_4bit_quant_storage: Any = torch.uint8   # naturally computers store 1 byte = 8 bits at 
-                                                                    # minimum, so setting it to torch.uint4 will pack
-                                                                    # stored weights tightly in a single byte
+                                                # minimum, so setting it to torch.uint4 will pack
+                                                # stored weights tightly in a single byte
     
     @property
     def quantization_method(self):

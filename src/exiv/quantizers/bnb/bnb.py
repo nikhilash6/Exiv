@@ -2,11 +2,13 @@ import torch
 from torch import nn
 from transformers import is_bitsandbytes_available
 
+import psutil
 from typing import Dict, List, Any, Optional
 
 from ..base import Quantizer
 from ...utils.common import get_module_from_name
 from ...utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, is_cuda_available, is_xpu_available
+from ...utils.logging import app_logger
 
 # this code has been adapted from Huggingface Diffusers
 
@@ -46,6 +48,27 @@ class BnB4BitQuantizer(Quantizer):
                 
         self.is_prequantized = False
         return self.is_prequantized
+    
+    def check_if_quantized_param(
+        self,
+        model: "ModelMixin",
+        param_value: "torch.Tensor",
+        param_name: str,
+        state_dict: Dict[str, Any],
+        **kwargs,
+    ) -> bool:
+        import bitsandbytes as bnb
+
+        module, tensor_name = get_module_from_name(model, param_name)
+        if isinstance(module._parameters.get(tensor_name, None), bnb.nn.Params4bit):
+            # Add here check for loaded components' dtypes once serialization is implemented
+            return True
+        elif isinstance(module, bnb.nn.Linear4bit) and tensor_name == "bias":
+            # bias could be loaded by regular set_module_tensor_to_device() from accelerate,
+            # but it would wrongly use uninitialized weight there.
+            return True
+        else:
+            return False
 
     def create_quantized_param(
         self,
@@ -60,7 +83,6 @@ class BnB4BitQuantizer(Quantizer):
         import bitsandbytes as bnb
 
         module, tensor_name = get_module_from_name(model, param_name)
-
         if tensor_name not in module._parameters:
             raise ValueError(f"{module} does not have a parameter or a buffer named {tensor_name}.")
 
@@ -105,9 +127,14 @@ class BnB4BitQuantizer(Quantizer):
                 device=target_device,
             )
         else:
-            new_value = param_value.to(OFFLOAD_DEVICE)
             kwargs = old_value.__dict__
-            new_value = bnb.nn.Params4bit(new_value, requires_grad=False, **kwargs).to(target_device)
+            new_value = param_value.to("cpu")
+            try:
+                new_value = bnb.nn.Params4bit(new_value, requires_grad=False, **kwargs)
+                new_value = new_value.to("cuda").to(target_device)
+            except Exception as e:
+                app_logger.error("---- error occured ", str(e))
+            # self.log_mem()
 
         module._parameters[tensor_name] = new_value
 
@@ -210,6 +237,29 @@ class BnB8BitQuantizer(Quantizer):
 
         self.is_prequantized = False
         return False
+    
+    def check_if_quantized_param(
+        self,
+        model: "ModelMixin",
+        param_value: "torch.Tensor",
+        param_name: str,
+        state_dict: Dict[str, Any],
+        **kwargs,
+    ):
+        import bitsandbytes as bnb
+
+        module, tensor_name = get_module_from_name(model, param_name)
+        if isinstance(module._parameters.get(tensor_name, None), bnb.nn.Int8Params):
+            if self.is_state_dict_quantized(state_dict):
+                if param_name.replace("weight", "SCB") not in state_dict.keys():
+                    raise ValueError("Missing quantization component `SCB`")
+                if param_value.dtype != torch.int8:
+                    raise ValueError(
+                        f"Incompatible dtype `{param_value.dtype}` when loading 8-bit prequantized weight. Expected `torch.int8`."
+                    )
+            return True
+        else:
+            return False
 
     def create_quantized_param(
         self,
