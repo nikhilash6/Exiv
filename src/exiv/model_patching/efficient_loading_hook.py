@@ -8,39 +8,6 @@ from ..utils.logging import app_logger
 from ..utils.device import OFFLOAD_DEVICE, RESERVED_MEM, MemoryManager
 from ..config import LOADING_MODE, global_config
 
-# move module to the gpu_device
-def load_module(model, module, module_name, quant_enabled=False):
-    if module is None: return   # m_ref can turn out to be None
-    
-    app_logger.debug(f"Moving {module.__class__.__name__} to {model.gpu_device}")
-    
-    module_class_name = module.__class__.__name__
-    is_bnb_module = module_class_name in ["Linear8bitLt", "Linear4bit"]
-
-    if any(p.device.type == "meta" for p in module.parameters(recurse=False)):
-        module.to_empty(device=model.gpu_device)
-    
-    elif is_bnb_module:
-        device_index = torch.device(model.gpu_device).index
-        if device_index is None:
-             device_index = torch.cuda.current_device() # Get default index if "cuda"
-        
-        # .cuda(device_index) is overridden by bnb
-        module.cuda(device_index)
-        if hasattr(module.weight, "CB"):
-            module.weight.CB = module.weight.CB.cuda(device_index)
-            
-        if hasattr(module.weight, "SCB"):
-            module.weight.SCB = module.weight.SCB.cuda(device_index)
-    
-    else:
-        # standard .to() for all other regular modules
-        module.to(device=model.gpu_device)
-
-    app_logger.debug(f"modules rn: {[m.__class__.__name__ for mn, m in model.named_modules() if m != model]}")
-    
-    MemoryManager.clear_memory()
-
 
 class EfficientModelLoaderHook(ModelHook):
     """
@@ -58,12 +25,14 @@ class EfficientModelLoaderHook(ModelHook):
         return args, kwargs
     
     def _full_load(self, model):
+        from ..model_utils.model_mixin import move_module
+        
         if getattr(model, "_fully_loaded", False): return
         # load initial full_load modules
         for m_ref, m_name in self.full_load:
             m = m_ref()
             app_logger.debug(f"Loading via full load: {m_name}")
-            load_module(model=model, module=m, module_name=m_name, quant_enabled=True)
+            move_module(model=model, module=m, module_name=m_name)
 
         model._fully_loaded = True
     
@@ -84,13 +53,15 @@ class EfficientModuleLoaderHook(ModelHook):
         self.full_load_module = full_load_module
 
     def pre_forward(self, module: torch.nn.Module, *args, **kwargs):
+        from ..model_utils.model_mixin import move_module
+        
         model = self.model_ref()
         if model is None:
             return args, kwargs
 
         if not self.full_load_module:
             app_logger.debug(f"Loading via hook: {module.__class__.__name__}")
-            load_module(
+            move_module(
                 model=model,
                 module=module,
                 module_name=self.module_name
@@ -99,13 +70,15 @@ class EfficientModuleLoaderHook(ModelHook):
         return args, kwargs
 
     def post_forward(self, module: torch.nn.Module, output: Any):
+        from ..model_utils.model_mixin import move_module
+        
         model = self.model_ref()
         if model is None: 
             return output
         
         if not self.full_load_module:
             app_logger.debug(f"Moving back {module.__class__.__name__} to cpu via hook")
-            module.to(OFFLOAD_DEVICE)
+            move_module(model, module, module_name=self.module_name)
             MemoryManager.clear_memory()
             
         return output

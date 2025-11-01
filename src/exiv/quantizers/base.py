@@ -148,7 +148,7 @@ class Quantizer(ABC):
 class QuantType(ExtendedEnum):
     BNB_NF4 = "bnb_nf4"
     BNB_FP4 = "bnb_fp4"
-    BNB_FP8 = "bnb_fp8"
+    BNB_INT8 = "bnb_int8"
     GGUF    = "gguf"
 
     
@@ -157,11 +157,11 @@ def get_quantizer(quant_type: QuantType) -> Quantizer:
     
     quantizer = None
     if quant_type == None: return quantizer
-    if quant_type in [QuantType.BNB_FP4, QuantType.BNB_FP8, QuantType.BNB_NF4]:
+    if quant_type in [QuantType.BNB_FP4, QuantType.BNB_INT8, QuantType.BNB_NF4]:
         quant_dict = {
-            "bnb_fp4": (BnB4BitQuantizer, {'load_in_4bit': True}),
-            "bnb_nf4": (BnB4BitQuantizer, {'load_in_4bit': True, 'bnb_4bit_quant_type': "nf4"}),
-            "bnb_fp8": (BnB8BitQuantizer, {'load_in_8bit': True}),
+            QuantType.BNB_FP4.value: (BnB4BitQuantizer, {'load_in_4bit': True}),
+            QuantType.BNB_NF4.value: (BnB4BitQuantizer, {'load_in_4bit': True, 'bnb_4bit_quant_type': "nf4"}),
+            QuantType.BNB_INT8.value: (BnB8BitQuantizer, {'load_in_8bit': True}),
         }
         
         quant_cls, quant_config = quant_dict[quant_type.value]

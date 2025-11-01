@@ -205,6 +205,65 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
                 
         return sd
 
+def move_model(model, device):
+    # handling device movement through our custom logic
+    for name, module in model.named_modules():
+        move_module(
+            model,
+            module,
+            name, 
+            target_device=device,
+        )
+
+    return model
+
+# TODO: dtype and non_blocking params are not handled as of now
+def move_module(model, module, module_name, target_device=None):
+    """
+    This contains the centralized logic for moving different module types 
+    between devices
+    """
+    if module is None: return   # m_ref can turn out to be None
+    
+    target_device = target_device or model.gpu_device
+    app_logger.debug(f"Moving {module.__class__.__name__} to {target_device}")
+    
+    module_class_name = module.__class__.__name__
+    is_bnb_module = module_class_name in ["Linear8bitLt", "Linear4bit"]
+
+    if any(p.device.type == "meta" for p in module.parameters(recurse=False)):
+        module.to_empty(device=target_device)
+    
+    elif is_bnb_module:
+        device_index = torch.device(target_device).index
+        if device_index is None:
+             device_index = torch.cuda.current_device() # Get default index if "cuda"
+        
+        # .cuda(device_index) / to is overridden by bnb
+        module.to(target_device)
+        
+        # handling the movement of linear8bit
+        # after the first forward, quant weights are stored in the state
+        if hasattr(module, "weight") and getattr(module.weight, "CB", None) is not None:
+            module.weight.CB = module.weight.CB.to(target_device)
+            
+        if hasattr(module, "weight") and getattr(module.weight, "SCB", None) is not None:
+            module.weight.SCB = module.weight.SCB.to(target_device)
+        
+        if hasattr(module, "state") and getattr(module.state, "CB", None) is not None:
+            module.state.CB = module.state.CB.to(target_device)
+            
+        if hasattr(module, "state") and getattr(module.state, "SCB", None) is not None:
+            module.state.SCB = module.state.SCB.to(target_device)
+
+        
+    else:
+        # standard .to() for all other regular modules
+        module.to(device=target_device)
+
+    app_logger.debug(f"modules rn: {[m.__class__.__name__ for mn, m in model.named_modules() if m != model]}")
+    MemoryManager.clear_memory()
+
 
 # lots of checks that can be skipped
 def set_module_tensor_to_device(
@@ -307,30 +366,6 @@ def set_module_tensor_to_device(
                 )
 
             module._parameters[tensor_name] = new_value
-
-            # # final check and initialization of 8-bit Linear layers (bitsandbytes-specific)
-            # if (
-            #     module.__class__.__name__ == "Linear8bitLt"
-            #     and getattr(module.weight, "SCB", None) is None
-            #     and str(module.weight.device) != "meta"
-            # ):
-            #     device_index = torch.device(device).index if torch.device(device).type == "cuda" else None
-            #     if not getattr(module.weight, "SCB", None) and device_index is not None:
-            #         # Initialize 8-bit quantization logic by moving the module to CUDA (triggers necessary setup)
-            #         if module.bias is not None and module.bias.device.type != "meta":
-            #             module = module.cuda(device_index)
-            #         elif module.bias is None:
-            #             module = module.cuda(device_index)
-            # # final check and initialization of 4-bit Linear layers (bitsandbytes-specific)
-            # elif (
-            #     module.__class__.__name__ == "Linear4bit"
-            #     and getattr(module.weight, "quant_state", None) is None
-            #     and str(module.weight.device) != "meta"
-            # ):
-            #     device_index = torch.device(device).index if torch.device(device).type == "cuda" else None
-            #     if not getattr(module.weight, "quant_state", None) and device_index is not None:
-            #         # Initialize 4-bit quantization logic
-            #         module.weight = module.weight.cuda(device_index)
 
     # freeing old_value (safety check)
     MemoryManager.clear_memory()
