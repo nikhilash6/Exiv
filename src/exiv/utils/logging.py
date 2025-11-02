@@ -38,4 +38,4 @@ class AppLogger(logging.Logger):
         for handler in self.handlers:
             handler.setLevel(log_level)
 
-app_logger = AppLogger(global_config.logging_level)
+app_logger = AppLogger(log_level=global_config.logging_level)

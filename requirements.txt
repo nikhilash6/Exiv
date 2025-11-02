@@ -4,7 +4,6 @@ numpy
 scipy
 sentencepiece
 packaging
-transformers==4.56.1
 einops
 psutil
 colorlog
@@ -17,3 +16,6 @@ fastapi
 pydantic
 uvicorn[standard]
 click
+# hf ecosystem
+hf_transfer
+transformers==4.56.1

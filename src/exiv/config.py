@@ -13,8 +13,8 @@ class LOADING_MODE(ExtendedEnum):
 class AppConfig:
     def __init__(self):
         # loading defaults from the env
-        self.logging_level = self._get_logging_level(os.getenv("log_level", 0))
-        
+        self.logging_level = self._get_logging_level(os.getenv("log_level", 3))
+
         # by default going with low_vram, if all three are provided 
         # then they will be prioritized in this order -> no_oom -> low_vram -> normal
         self.no_oom = self._get_bool_val(os.getenv("low_vram", "0"))
@@ -32,10 +32,10 @@ class AppConfig:
         return val.lower() in ("1", "true", "yes") if isinstance(val, str) else bool(val)
 
     def _get_logging_level(self, level_flag) -> int:
-        if level_flag in [1, "1"]: return logging.ERROR
-        if level_flag in [2, "2"]: return logging.WARNING
-        if level_flag in [3, "3"]: return logging.INFO
-        if level_flag in [4, "4"]: return logging.DEBUG
+        if level_flag in [1, "1"]: return logging.ERROR         # error + warning
+        if level_flag in [2, "2"]: return logging.WARNING       
+        if level_flag in [3, "3"]: return logging.INFO          # info + warning + error + critical
+        if level_flag in [4, "4"]: return logging.DEBUG         # all logs
         return logging.CRITICAL
 
     def update_config(self, metadata: dict):

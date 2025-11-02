@@ -20,6 +20,7 @@ class EfficientModelLoaderHook(ModelHook):
     
     # module here is the main model
     def pre_forward(self, module, *args, **kwargs):
+        app_logger.info(f"Loading {module.__class__.__name__}")
         app_logger.debug(f"full load modules: {[m_name for m_name in self.full_load]}")
         self._full_load(module)
         return args, kwargs
