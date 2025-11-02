@@ -3,6 +3,8 @@ from torch import Tensor
 
 from dataclasses import dataclass
 
+from ...utils.dev import print_memory_usage
+
 from ...utils.device import OFFLOAD_DEVICE, ProcDevice
 from ...model_utils.model_mixin import ModelMixin
 
@@ -47,8 +49,14 @@ class TextEncoder(ModelMixin):
             # batch_count == 0 : empty token list
             to_encode.append(self.gen_empty_tokens(self.special_tokens, max_token_len))
 
+        print_memory_usage("Started the model's forward")
+        
         # main encoding
-        o = self.forward(to_encode)
+        to_encode_tensor = torch.tensor(to_encode, dtype=torch.long)
+        o = self(to_encode_tensor)
+        
+        print_memory_usage("Finished the model's forward")
+        
         # `out` contains the embeddings for each token.
         # `pooled` is a single summary embedding for the whole sequence (e.g., from a [CLS] token).
         out, pooled = o[:2]
@@ -200,3 +208,7 @@ class T5XXLConfig:
     relative_attention_max_distance = 128
     tie_word_embeddings = False
     vocab_size = 3212
+
+@dataclass
+class UMT5XXLConfig(T5XXLConfig):
+    vocab_size = 256384
