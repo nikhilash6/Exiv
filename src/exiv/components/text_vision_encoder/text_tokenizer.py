@@ -145,7 +145,7 @@ class UMTT5XXLTokenizer(SDTokenizer):
     def __init__(self, embedding_directory=None):
         super().__init__(
             "google/umt5-xxl",
-            max_length=99999999, 
+            max_length=512, 
             pad_with_end=True, 
             embedding_directory=embedding_directory, 
             embedding_size=4096, 

@@ -16,11 +16,8 @@ class TextEncoder(ModelMixin):
         self.te_type = te_type
         super().__init__(model_path=model_path)
     
-    # TODO: check if this can be diff for diff encoder archs
-    def gen_empty_tokens(self, special_tokens, length):
-        start_token = special_tokens.get("start", None)
-        end_token = special_tokens.get("end", None)
-        pad_token = special_tokens.get("pad")
+    def gen_empty_tokens(self, length, pad_token, start_token=None, end_token=None):
+        assert pad_token is not None, "pad token can't be None"
         output = []
         if start_token is not None:
             output.append(start_token)
@@ -29,10 +26,12 @@ class TextEncoder(ModelMixin):
         output += [pad_token] * (length - len(output))
         return output
     
-    def encode_token_weights(self, token_weight_pairs):
+    def encode_token_weights(self, token_weight_pairs, special_tokens):
         to_encode = list()
         max_token_len = 0
         has_weights = False
+        
+        start_token, end_token, pad_token = special_tokens
         
         for batch in token_weight_pairs:
             # batch - list of (token, weight) pairs
@@ -47,13 +46,12 @@ class TextEncoder(ModelMixin):
         if has_weights or batch_count == 0:
             # has_weights == True : need a neutral ref point -> empty tokens
             # batch_count == 0 : empty token list
-            to_encode.append(self.gen_empty_tokens(self.special_tokens, max_token_len))
+            to_encode.append(self.gen_empty_tokens(max_token_len, pad_token, start_token, end_token))
 
         print_memory_usage("Started the model's forward")
         
         # main encoding
-        to_encode_tensor = torch.tensor(to_encode, dtype=torch.long)
-        o = self(to_encode_tensor)
+        o = self(to_encode)
         
         print_memory_usage("Finished the model's forward")
         
