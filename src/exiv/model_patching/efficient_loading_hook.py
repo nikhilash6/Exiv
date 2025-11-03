@@ -159,6 +159,7 @@ def enable_efficient_loading(model: 'ModelMixin'):
             
             full_load.append((weakref.ref(m), m_name))
     
+    total_modules = 0
     for m_name, m in model.named_modules():
         if m is model or not model.is_leaf_module(m):
             continue
@@ -169,7 +170,10 @@ def enable_efficient_loading(model: 'ModelMixin'):
             full_load_module=any(m_name == mn for _, mn in full_load),
         )
         HookRegistry.apply_hook_to_module(m, module_hook)
+        
+        total_modules += 1
 
+    app_logger.debug(f"Total modules found: {total_modules}")
 
     model_hook = EfficientModelLoaderHook(full_load=full_load)
     HookRegistry.apply_hook_to_module(model, model_hook)

@@ -6,7 +6,7 @@ import copy
 from typing import Optional
 
 from ..activations import ACT2FN
-from .encoder_base import TextEncoder, T5Config, T5XXLConfig
+from .encoder_base import TextEncoder, T5Config, T5XXLConfig, UMT5XXLConfig
 from ..enum import TextEncoderType
 from ..attention import optimized_attention
 from ...utils.logging import app_logger
@@ -413,7 +413,7 @@ class T5(TextEncoder):
         if input_ids is None: 
             x = inputs_embeds
         else: 
-            x = self.shared(input_ids, out_dtype=kwargs.get("dtype", torch.float32))
+            x = self.shared(input_ids)
         
         if self.dtype not in [torch.float32, torch.float16, torch.bfloat16]:
             x = torch.nan_to_num(x) #Fix for fp8 T5 base
@@ -422,5 +422,10 @@ class T5(TextEncoder):
 
 class T5XXL(T5):
     def __init__(self, model_path, config = T5XXLConfig()):
+        super().__init__(model_path, config, TextEncoderType.T5_XXL.value)
+
+  
+class UMT5XXL(T5):
+    def __init__(self, model_path, config = UMT5XXLConfig()):
         super().__init__(model_path, config, TextEncoderType.T5_XXL.value)
         

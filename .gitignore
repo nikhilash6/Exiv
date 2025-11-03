@@ -43,6 +43,7 @@ keygen.sh
 # Test files
 .pytest_cache
 .coverage
+*.lprof
 *.safetensors
 *.ckpt
 *.pt

@@ -6,6 +6,8 @@ import functools
 import safetensors
 from typing import Optional, Union
 
+from ..utils.dev import print_memory_usage
+
 from ..utils.device import VRAM_DEVICE, MemoryManager, ProcDevice, is_same_device
 from ..utils.file import ensure_model_available
 from ..utils.logging import app_logger
@@ -112,8 +114,12 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         self.dtype = dtype or self.dtype
         
         model_path = ensure_model_available(model_path, download_path, force_download)
+        print_memory_usage("State dict load started")
+        
         state_dict = ModelMixin.get_state_dict(model_path)
         model_state_dict = self.state_dict()
+        
+        print_memory_usage("State dict loaded in the variable")
         
         for param_name, param in state_dict.items():
             if param_name not in model_state_dict: continue
@@ -168,6 +174,8 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
                 )
             else:
                 set_module_tensor_to_device(self, param_name, device, value=param, dtype=dtype)
+                
+        print_memory_usage("State dict loaded in the model dict")
 
     # code adapted from ComfyUI
     @staticmethod
@@ -217,6 +225,7 @@ def move_model(model, device):
 
     return model
 
+c = 0
 # TODO: dtype and non_blocking params are not handled as of now
 def move_module(model, module, module_name, target_device=None):
     """
@@ -224,6 +233,10 @@ def move_module(model, module, module_name, target_device=None):
     between devices
     """
     if module is None: return   # m_ref can turn out to be None
+    
+    global c
+    app_logger.info(f"Loading the current module: {c}")
+    c += 1
     
     target_device = target_device or model.gpu_device
     app_logger.debug(f"Moving {module.__class__.__name__} to {target_device}")
@@ -261,8 +274,8 @@ def move_module(model, module, module_name, target_device=None):
         # standard .to() for all other regular modules
         module.to(device=target_device)
 
-    app_logger.debug(f"modules rn: {[m.__class__.__name__ for mn, m in model.named_modules() if m != model]}")
-    MemoryManager.clear_memory()
+    # app_logger.debug(f"modules rn: {[m.__class__.__name__ for mn, m in model.named_modules() if m != model]}")
+    # MemoryManager.clear_memory()
 
 
 # lots of checks that can be skipped
@@ -368,5 +381,5 @@ def set_module_tensor_to_device(
             module._parameters[tensor_name] = new_value
 
     # freeing old_value (safety check)
-    MemoryManager.clear_memory()
+    # MemoryManager.clear_memory()
 

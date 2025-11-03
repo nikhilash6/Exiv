@@ -30,4 +30,34 @@ from exiv.utils.device import MemoryManager
         
 #         print('embed shape: ', embeds.shape)
         
-        
+'''
+
+
+# this will test both the encoder and the tokenizer
+from exiv.components.text_vision_encoder.te_t5 import UMT5XXL
+from exiv.components.text_vision_encoder.text_tokenizer import UMTT5XXLTokenizer
+
+
+prompt_list = [
+    "a photo of a white dog and a blue bird",
+    "a photo of a (white:2) (dog:1) and a ((blue)) (bird:3)"
+]
+
+res_tokens = []
+full_code = True
+
+if full_code:
+    tokenizer = UMTT5XXLTokenizer()
+    for p in prompt_list:
+        tokens = tokenizer.tokenize_with_weights(p)
+        res_tokens.append(tokens)
+    del tokenizer
+
+path = "./umt5_xxl_fp16.safetensors"
+t5_xxl = UMT5XXL(model_path=path)
+t5_xxl.load_model()
+
+if full_code:
+    embeds = t5_xxl.encode_token_weights(res_tokens[0])
+    print('embed shape: ', embeds.shape)
+'''
