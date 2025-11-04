@@ -5,19 +5,28 @@ from dataclasses import dataclass
 
 from ...utils.dev import print_memory_usage
 
-from ...utils.device import OFFLOAD_DEVICE, ProcDevice
+from ...utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, ProcDevice
 from ...model_utils.model_mixin import ModelMixin
+from ...utils.logging import app_logger
 
 # this is the base of all the encoder models like T5 and CLIP
 class TextEncoder(ModelMixin):
-    def __init__(self, model_path, config, te_type):
+    def __init__(self, model_path, config, te_type, **kwargs):
         self.model_path = model_path
         self.config = config
         self.te_type = te_type
+        
+        # not all TEs use attn mask
+        self.enable_attention_masks = kwargs.get("enable_attention_masks", False)
+        self.layer = kwargs.get("layer", "last")        # ['last', 'hidden']
+        self.layer_idx = kwargs.get("layer_idx", -2)
+        self.zero_out_masked = kwargs.get("zero_out_masked", False)     # zero out padding / eos stuff
         super().__init__(model_path=model_path)
     
-    def gen_empty_tokens(self, length, pad_token, start_token=None, end_token=None):
+    def gen_empty_tokens(self, length, special_tokens: tuple):
+        start_token, end_token, pad_token = special_tokens
         assert pad_token is not None, "pad token can't be None"
+        
         output = []
         if start_token is not None:
             output.append(start_token)
@@ -26,13 +35,136 @@ class TextEncoder(ModelMixin):
         output += [pad_token] * (length - len(output))
         return output
     
-    def encode_token_weights(self, token_weight_pairs, special_tokens):
+    def process_tokens(self, tokens: list[list[int]], special_tokens: tuple, device):
+        # tokens = [[123, 1234, 12, ...], [1, 1, 1, ..]]
+        start_token, end_token, pad_token = special_tokens
+        cmp_token = end_token or pad_token      # to determine where the 'real' sequence ends
+                                                # triggers eos flag
+
+        embeds_out = []
+        attention_masks = []
+        num_tokens = []
+
+        for seq in tokens:
+            attention_mask = []
+            tokens_temp = []
+            custom_embeds = []
+            eos = False         # eos flag
+            index = 0
+            
+            # ------ separating normal and custom tokens/embeds
+            for idx, token_id in enumerate(seq):
+                if isinstance(token_id, int):
+                    # int token_id
+                    
+                    # 0 -> masked out, 1 -> left in the seq
+                    # if we are *past* the end token, mask this token out
+                    if eos:
+                        attention_mask.append(0)
+                    else:
+                        attention_mask.append(1)
+
+                    tokens_temp += [token_id]
+                    if not eos and token_id == cmp_token:
+                        if end_token is None:
+                            attention_mask[-1] = 0
+                        eos = True
+                else:
+                    # custom embed from text embedding
+                    custom_embeds.append((idx, token_id))
+
+            
+            # ------ creating embeddings
+            tokens_embed = torch.tensor([tokens_temp], device=device, dtype=torch.long)
+            # 'tokens_embed' is now a 3D tensor: (1, num_tokens_temp, embed_dim)
+            # TODO: handle dtype - out_dtype=torch.float32
+            input_embedding = self.get_input_embeddings()
+            input_embedding.to(tokens_embed.device)
+            tokens_embed = input_embedding(tokens_embed)
+
+            
+            # ------ inject in custom embeddings
+            index = 0
+            pad_extra = 0       # counter for padding needed due to *mismatched* embeds
+            embeds_info = []    # Info about injected embeddings (for this sequence)
+            
+            for custom_embed_tuple in custom_embeds:
+                emb = custom_embed_tuple[1]
+                if torch.is_tensor(emb):
+                    emb = {"type": "embedding", "data": emb}
+
+                extra = None
+                emb_type = emb.get("type", None)
+                
+                # handling diff embed types
+                if emb_type == "embedding":
+                    emb = emb.get("data", None)     # simple text embed
+                else:
+                    # TODO: see what different types need to be supported
+                    emb = None
+
+                if emb is None:
+                    # adjust index to account for the removed item
+                    index += -1
+                    continue
+
+                ind = index + custom_embed_tuple[0]
+                # ensure embedding is (1, seq_len, embed_dim) and on the correct device/dtype
+                emb = emb.view(1, -1, emb.shape[-1]).to(device=device, dtype=torch.float32)
+                emb_shape = emb.shape[1]
+                
+                # --- final injection
+                if emb.shape[-1] == tokens_embed.shape[-1]:
+                    tokens_embed = torch.cat(
+                        [tokens_embed[:, :ind],
+                        emb,
+                        tokens_embed[:, ind:]],
+                        dim=1
+                    )
+                    
+                    # add '1's for the new embed's length
+                    attention_mask = attention_mask[:ind] + [1] * emb_shape + attention_mask[ind:]
+                    index += emb_shape - 1
+                    embeds_info.append({"type": emb_type, "index": ind, "size": emb_shape, "extra": extra})
+                else:
+                    # Shape mismatch. Cannot inject.
+                    index += -1
+                    pad_extra += emb_shape
+                    app_logger.warning(f"WARNING: shape mismatch, embedding ignored {emb.shape[-1]} != {tokens_embed.shape[-1]}")
+
+            
+            if pad_extra > 0:
+                # Get embeddings for 'pad' tokens
+                padd_embed = self.transformer.get_input_embeddings()(
+                    torch.tensor(
+                        [[self.special_tokens["pad"]] * pad_extra], 
+                        device=device, 
+                        dtype=torch.long
+                    ), 
+                    out_dtype=torch.float32,
+                )
+                tokens_embed = torch.cat([tokens_embed, padd_embed], dim=1)
+                # don't pay attn to these pads, adding 0
+                attention_mask = attention_mask + [0] * pad_extra
+
+            embeds_out.append(tokens_embed)
+            attention_masks.append(attention_mask)
+            num_tokens.append(sum(attention_mask)) # true, unmasked length
+
+        
+        return (
+            torch.cat(embeds_out),                                          # (batch_size, max_seq_len, embed_dim)
+            torch.tensor(attention_masks, device=device, dtype=torch.long), # (batch_size, max_seq_len)
+            num_tokens,
+            embeds_info     # TODO: likely a bug, overwritten every loop
+        )
+
+    def encode_token_weights(self, token_weight_pairs, special_tokens: tuple):
         to_encode = list()
         max_token_len = 0
         has_weights = False
         
-        start_token, end_token, pad_token = special_tokens
-        
+        # --------- prepare tokens --------------
         for batch in token_weight_pairs:
             # batch - list of (token, weight) pairs
             tokens = list(map(lambda a: a[0], batch))
@@ -44,36 +176,74 @@ class TextEncoder(ModelMixin):
         batch_count = len(token_weight_pairs)   # total num. of batches
 
         if has_weights or batch_count == 0:
-            # has_weights == True : need a neutral ref point -> empty tokens
-            # batch_count == 0 : empty token list
-            to_encode.append(self.gen_empty_tokens(max_token_len, pad_token, start_token, end_token))
+            # Case 1: has_weights == True
+            # If any batch had custom weights (e.g., for CFG), a neutral reference point
+            # (an empty prompt) is required to calculate the guidance.
+            
+            # Case 2: batch_count == 0
+            # If the input was empty, we still need to encode something (the empty sequence)
+            # to avoid errors downstream.
+            to_encode.append(self.gen_empty_tokens(max_token_len, special_tokens))
 
+        # ---------------- create token embeds -------------
+        embeds, attention_mask, num_tokens, embeds_info = self.process_tokens(to_encode, special_tokens, device=VRAM_DEVICE)
+
+        attention_mask_copy = None
+        if self.enable_attention_masks:
+            attention_mask_copy = attention_mask
+
+        if self.layer == "last":
+            intermediate_output_layer_idx = -1
+        else:
+            intermediate_output_layer_idx = self.layer_idx
+        
+        # ---------------- main encoding ----------------
         print_memory_usage("Started the model's forward")
         
-        # main encoding
-        o = self(to_encode)
+        # TODO: handle dtype fp32
+        outputs = self(
+            input_ids=None, 
+            attention_mask=attention_mask_copy, 
+            input_embeds=embeds, 
+            num_tokens=num_tokens, 
+            intermediate_output_layer_idx=intermediate_output_layer_idx,
+            embeds_info=embeds_info
+        )
         
         print_memory_usage("Finished the model's forward")
         
-        # `out` contains the embeddings for each token.
-        # `pooled` is a single summary embedding for the whole sequence (e.g., from a [CLS] token).
-        out, pooled = o[:2]
+        if self.layer == "last":
+            final_output = outputs[0].float()
+        else:
+            final_output = outputs[1].float()
 
-        # pooled only makes sense for clip models
-        if pooled is not None:
-            first_pooled = pooled[0:1].to(OFFLOAD_DEVICE)
+        if self.zero_out_masked:
+            # any token embedding where the mask was 0.0 is multiplied by 0.0
+            final_output *= attention_mask.unsqueeze(-1).float()
+
+        pooled_output = None
+        if len(outputs) >= 3:
+            # output: (final, intermediate, projected_pooled, raw_pooled)
+            if not self.return_projected_pooled and len(outputs) >= 4 and outputs[3] is not None:
+                pooled_output = outputs[3].float()
+            elif outputs[2] is not None:
+                pooled_output = outputs[2].float()
+
+        if pooled_output is not None:
+            # grabbing the first pooled (from the batch)
+            first_pooled = pooled_output[0:1].to(OFFLOAD_DEVICE)
         else:
             # for T5 this would be intermediate_output (None)
-            first_pooled = pooled
+            first_pooled = pooled_output
 
-        # apply weights
+        # ---------------- apply weights ----------------
         # current out: [batch_size + 1, seq_len, embed_dim] , extra dim for the empty ref
         output = []
         for k in range(0, batch_count):
-            z = out[k:k+1]          # [1, seq_len, embed_dim]
+            z = final_output[k:k+1]          # [1, seq_len, embed_dim]
             
             if has_weights:
-                z_empty = out[-1]   # empty embed added above
+                z_empty = final_output[-1]   # empty embed added above
                 for j in range(len(z[0])):      # seq_len
                     weight = token_weight_pairs[k][j][1]
                     if weight != 1.0:
@@ -82,16 +252,16 @@ class TextEncoder(ModelMixin):
 
         if (len(output) == 0):
             # returning the empty neutral
-            r = (out[-1:].to(OFFLOAD_DEVICE), first_pooled)
+            r = (final_output[-1:].to(OFFLOAD_DEVICE), first_pooled)
         else:
             # concatenating all the processed (and weighted) embeddings together
             r = (torch.cat(output, dim=-2).to(OFFLOAD_DEVICE), first_pooled)
 
         # extra data (like an attention mask), process and append it to the output
-        if len(o) > 2:
+        if len(outputs) > 2:
             extra = {}
-            for k in o[2]:
-                v = o[2][k]
+            for k in outputs[2]:
+                v = outputs[2][k]
                 if k == "attention_mask":   # TODO: check this while running
                     v = v[:batch_count].flatten().unsqueeze(dim=0).to(OFFLOAD_DEVICE)
                 extra[k] = v

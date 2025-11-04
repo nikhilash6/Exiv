@@ -216,7 +216,7 @@ class T5Attention(nn.Module):
         batch_size, seq_length = hidden_states.shape[:2]
 
         query_states = self.q(hidden_states)
-        query_states = query_states.view(batch_size, -1, self.n_heads, self.key_value_proj_dim).transpose(1, 2)
+        # query_states = query_states.view(batch_size, -1, self.n_heads, self.key_value_proj_dim).transpose(1, 2)
 
         is_cross_attention = key_value_states is not None
         source_states = key_value_states if is_cross_attention else hidden_states   # i know this looks llm generated but its not
@@ -225,8 +225,8 @@ class T5Attention(nn.Module):
         value_states = self.v(source_states)
         # self.key_value_proj_dim is basically dim_head that we normally use
         # (batch_size, seq_length, hidden_dim) → (batch_size, seq_length, n_heads, key_value_proj_dim)
-        key_states = key_states.view(batch_size, -1, self.n_heads, self.key_value_proj_dim).transpose(1, 2)
-        value_states = value_states.view(batch_size, -1, self.n_heads, self.key_value_proj_dim).transpose(1, 2)
+        # key_states = key_states.view(batch_size, -1, self.n_heads, self.key_value_proj_dim).transpose(1, 2)
+        # value_states = value_states.view(batch_size, -1, self.n_heads, self.key_value_proj_dim).transpose(1, 2)
 
         # compute or use position bias
         if position_bias is None:
@@ -358,6 +358,7 @@ class T5Stack(nn.Module):
         attention_mask=None,                    # padding mask (bs, seq_len)
         intermediate_out_layer_idex=None,       # intermediate layer idx whose output is needed (if not final)
         final_layer_norm_intermediate=True,
+        **kwargs
     ):
         mask = None
         if attention_mask is not None:
@@ -366,7 +367,6 @@ class T5Stack(nn.Module):
             mask = mask.masked_fill(mask.to(torch.bool), -torch.finfo(x.dtype).max)
 
         intermediate = None
-        optimized_attention = optimized_attention(x.device, mask=attention_mask is not None, small_input=True)
         past_bias = None
         
         if intermediate_out_layer_idex is not None:
@@ -375,7 +375,7 @@ class T5Stack(nn.Module):
                 intermediate_out_layer_idex = len(self.block) + intermediate_out_layer_idex
 
         for i, l in enumerate(self.block):
-            x, past_bias = l(x, mask, past_bias, optimized_attention)
+            x, past_bias = l(x, mask, past_bias)
             if i == intermediate_out_layer_idex:
                 intermediate = x.clone()
         
@@ -388,14 +388,20 @@ class T5Stack(nn.Module):
 
 
 class T5(TextEncoder):
-    def __init__(self, model_path: str, config = T5Config(), te_type = TextEncoderType.T5_BASE.value):
-        super().__init__(model_path, config, te_type)
+    def __init__(self, model_path: str, config = T5Config(), te_type = TextEncoderType.T5_BASE.value, **kwargs):
+        kwargs["enable_attention_mask"] = True
+        kwargs["zero_out_masked"] = True
+        kwargs["layer"] = kwargs.get("layer", "last")
+        kwargs["layer_idx"] = kwargs.get("layer_idx", -2)
+        super().__init__(model_path, config, te_type, **kwargs)
+        
         self.shared = nn.Embedding(config.vocab_size, config.d_model)
         self.encoder = T5Stack(config)
 
     def get_input_embeddings(self):
         return self.shared
 
+    # TODO: looks redundant
     def set_input_embeddings(self, new_embeddings):
         self.shared = new_embeddings
 
@@ -405,13 +411,13 @@ class T5(TextEncoder):
         self,
         input_ids,
         attention_mask: Optional[torch.FloatTensor] = None,
-        inputs_embeds: Optional[torch.Tensor] = None,
+        input_embeds: Optional[torch.Tensor] = None,
         **kwargs
     ) :
-        assert input_ids is not None or inputs_embeds is not None, "need either input IDs or the embeds to encode"
+        assert input_ids is not None or input_embeds is not None, "need either input IDs or the embeds to encode"
         
         if input_ids is None: 
-            x = inputs_embeds
+            x = input_embeds
         else: 
             x = self.shared(input_ids)
         

@@ -2,13 +2,16 @@
 # TODO: delete these before making the final release
 
 import torch
+
 import psutil
 import gc
 import sys
 import time
 import warnings
+import logging
 
 from .logging import app_logger
+from ..config import global_config
 
 class MemoryMonitor:
     """Holds the checkpoint time for the memory usage printer."""
@@ -25,6 +28,8 @@ def format_bytes(size_bytes):
     return f"{size_bytes:.2f}{units[i]}"
 
 def print_memory_usage(tag, n=5):
+    if global_config.logging_level != logging.DEBUG: return
+    
     app_logger.info(f"----------------------------- START: {tag} ----------------------------")
     
     # --- Timestamp ---

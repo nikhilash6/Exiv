@@ -66,6 +66,8 @@ def optimized_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, heads
             app_logger.warning(" > No accelerated attention backend found. Using standard attention.")
             optimized_attention.impl = standard_attention
 
+    assert all(len(x.shape) == 3 for x in [q, k, v]), "shape mismatch, requires 3D tensors (bs, seq_len, dim)"
+    
     b, seq_len, dim = q.shape
     assert dim % heads == 0, "dim mismatch in attn, not divisible by heads"
     dim_head = dim // heads
@@ -77,7 +79,14 @@ def optimized_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, heads
     if optimized_attention.impl is F.scaled_dot_product_attention or optimized_attention.impl is standard_attention:
         # SDPA expects a boolean mask
         if mask is not None:
-             mask = mask.view(b, 1, 1, -1).expand(-1, heads, q.size(2), -1).bool()
+            if mask.ndim == 4:
+                # T5 style bias mask
+                pass
+            elif mask.ndim == 2:
+                # normal padding mask
+                mask = mask.view(b, 1, 1, -1).expand(-1, heads, q.size(2), -1).bool()
+            else:
+                raise ValueError(f"unsupported mask shape: {mask.shape}")
         
         out = optimized_attention.impl(q, k, v, attn_mask=mask)
         return out.transpose(1, 2).reshape(b, -1, dim)  # (bs, seq_len, dim)
@@ -89,7 +98,15 @@ def optimized_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, heads
         # xFormers uses an attention bias instead of a boolean mask.
         attn_bias = None
         if mask is not None:
-            attn_bias = torch.zeros_like(mask, dtype=q.dtype).masked_fill_(mask.bool() == False, -torch.inf)
+            if mask.ndim == 4:
+                # 4D T5-style bias [1, 64, 512, 512]
+                attn_bias = mask
+            elif mask.ndim == 2:
+                # 2D padding mask. Create 4D bias.
+                attn_bias = torch.zeros((b, heads, q.size(1), k.size(1)), dtype=q.dtype, device=q.device)
+                attn_bias.masked_fill_(mask.view(b, 1, 1, -1).bool() == False, -torch.inf)
+            else:
+                raise ValueError(f"Unsupported mask shape: {mask.shape}")
 
         out = optimized_attention.impl(q, k, v, attn_bias=attn_bias)
         return out.view(b, -1, dim)

@@ -130,7 +130,7 @@ class SDTokenizer:
         if not return_word_ids:
             batched_tokens = [[(t, w) for t, w, _ in batch] for batch in batched_tokens]
             
-        return batched_tokens
+        return batched_tokens, (self.start_token, self.end_token, self.pad_token)
 
     def decode_tokens(self, token_weight_pair):
         if not token_weight_pair or not token_weight_pair[0]:
