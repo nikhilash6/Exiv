@@ -61,7 +61,7 @@ class EfficientModuleLoaderHook(ModelHook):
             return args, kwargs
 
         if not self.full_load_module:
-            app_logger.debug(f"Loading via hook: {module.__class__.__name__}")
+            app_logger.debug(f"Loading via hook: {self.module_name}")
             move_module(
                 model=model,
                 module=module,
@@ -78,8 +78,8 @@ class EfficientModuleLoaderHook(ModelHook):
             return output
         
         if not self.full_load_module:
-            app_logger.debug(f"Moving back {module.__class__.__name__} to cpu via hook")
-            move_module(model, module, module_name=self.module_name)
+            app_logger.debug(f"Moving back {self.module_name} to cpu via hook")
+            move_module(model, module, module_name=self.module_name, target_device=OFFLOAD_DEVICE)
             MemoryManager.clear_memory()
             
         return output

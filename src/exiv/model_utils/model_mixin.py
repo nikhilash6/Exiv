@@ -239,7 +239,7 @@ def move_module(model, module, module_name, target_device=None):
     c += 1
     
     target_device = target_device or model.gpu_device
-    app_logger.debug(f"Moving {module.__class__.__name__} to {target_device}")
+    app_logger.debug(f"Moving {module_name} to {target_device}")
     
     module_class_name = module.__class__.__name__
     is_bnb_module = module_class_name in ["Linear8bitLt", "Linear4bit"]
