@@ -8,7 +8,7 @@ import urllib.parse
 import requests
 from typing import List
 
-import tqdm
+from tqdm import tqdm
 
 from .logging import app_logger
 
@@ -37,7 +37,7 @@ def ensure_model_available(model_path: str, download_url: str = None, force_down
     """
     
     if download_url:  # It's a URL
-        parsed = urllib.parse.urlparse(model_path)
+        parsed = urllib.parse.urlparse(download_url)
         assert parsed.scheme in ("http", "https"), "invalid download link"
     
     # TODO: fix this, have proper model paths defined
@@ -50,7 +50,7 @@ def ensure_model_available(model_path: str, download_url: str = None, force_down
         model_path = os.path.join(cache_dir, os.path.basename(parsed.path))
 
     if download_url and (force_download or not os.path.exists(model_path)):
-        print(f"Downloading model from {download_url} to {model_path} ...")
+        app_logger.info(f"Downloading model from {download_url} to {model_path} ...")
         response = requests.get(download_url, stream=True)
         response.raise_for_status()
         total_size = int(response.headers.get('content-length', 0))
