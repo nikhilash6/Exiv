@@ -190,7 +190,7 @@ def lanczos(samples, width, height):
     result = torch.stack(images)
     return result.to(samples.device, samples.dtype)
 
-def common_upscale(samples, width, height, upscale_method, crop):
+def common_upscale(samples, width, height, upscale_method = "lanczos", crop = "center"):
         orig_shape = tuple(samples.shape)
         if len(orig_shape) > 4:
             samples = samples.reshape(samples.shape[0], samples.shape[1], -1, samples.shape[-2], samples.shape[-1])

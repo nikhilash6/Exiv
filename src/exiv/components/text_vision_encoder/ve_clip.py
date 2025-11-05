@@ -52,8 +52,8 @@ class CLIPLayer(torch.nn.Module):
         self.layer_norm2 = nn.LayerNorm(embed_dim)
         self.mlp = CLIPMLP(embed_dim, intermediate_size, intermediate_activation)
 
-    def forward(self, x, mask=None, optimized_attention=None):
-        x += self.self_attn(self.layer_norm1(x), mask, optimized_attention)
+    def forward(self, x, mask=None):
+        x += self.self_attn(self.layer_norm1(x), mask)
         x += self.mlp(self.layer_norm2(x))
         return x
 
@@ -63,8 +63,6 @@ class CLIPEncoder(torch.nn.Module):
         self.layers = torch.nn.ModuleList([CLIPLayer(embed_dim, heads, intermediate_size, intermediate_activation) for i in range(num_layers)])
 
     def forward(self, x, mask=None, intermediate_output=None):
-        optimized_attention = optimized_attention(x.device, mask=mask is not None, small_input=True)
-
         all_intermediate = None
         if intermediate_output is not None:
             if intermediate_output == "all":
@@ -75,7 +73,7 @@ class CLIPEncoder(torch.nn.Module):
 
         intermediate = None
         for i, l in enumerate(self.layers):
-            x = l(x, mask, optimized_attention)
+            x = l(x, mask)
             if i == intermediate_output:
                 intermediate = x.clone()
             if all_intermediate is not None:
@@ -177,12 +175,12 @@ class CLIPViTL(VisionEncoder):
         * "...336.json" variants are trained on higher-res 336x336 images.
         * "...llava.json" is a variant for the LLaVA multimodal chatbot.
     """
-    def __init__(self, dtype, device):
-        super().__init__(dtype, device)
+    def __init__(self, model_path, dtype=None, device=None):
+        super().__init__(model_path=model_path, dtype=dtype, device=device)
         
         self.config = self._get_config()
         
-        self.vision_model = CLIPVision(self.config, dtype, device)
+        self.vision_model = CLIPVision(self.config)
         self.visual_projection = nn.Linear(self.config["hidden_size"], self.config["projection_dim"], bias=False)
         self.multi_modal_projector = None
         self.return_all_hidden_states = False
@@ -219,12 +217,12 @@ class CLIPViTL(VisionEncoder):
     
 
 class CLIPViTH(VisionEncoder):
-    def __init__(self, dtype, device):
-        super().__init__(dtype, device)
+    def __init__(self, model_path, dtype=None, device=None):
+        super().__init__(model_path, dtype=dtype, device=device)
         
         self.config = self._get_config()
         
-        self.vision_model = CLIPVision(self.config, dtype, device)
+        self.vision_model = CLIPVision(self.config)
         self.visual_projection = nn.Linear(self.config["hidden_size"], self.config["projection_dim"], bias=False)
         self.multi_modal_projector = None
         self.return_all_hidden_states = False
@@ -248,11 +246,20 @@ class CLIPViTH(VisionEncoder):
             "projection_dim": 1024,
             "torch_dtype": "float32"
         }
+        
+    def forward(self, *args, **kwargs):
+        x = self.vision_model(*args, **kwargs)
+        out = self.visual_projection(x[2])
+        projected = None
+        if self.multi_modal_projector is not None:
+            projected = self.multi_modal_projector(x[1])
+
+        return (x[0], x[1], out, projected)
     
 
 class CLIPVitLlava(CLIPViTL):
-    def __init__(self, dtype, device):
-        super().__init__(dtype, device)
+    def __init__(self, model_path, dtype=None, device=None):
+        super().__init__(model_path, dtype=dtype, device=device)
         
         self.config = self._get_config()
         
@@ -281,3 +288,12 @@ class CLIPVitLlava(CLIPViTL):
             "projector_type": "llava3",
             "torch_dtype": "float32"
         }
+        
+    def forward(self, *args, **kwargs):
+        x = self.vision_model(*args, **kwargs)
+        out = self.visual_projection(x[2])
+        projected = None
+        if self.multi_modal_projector is not None:
+            projected = self.multi_modal_projector(x[1])
+
+        return (x[0], x[1], out, projected)

@@ -7,7 +7,7 @@ import safetensors
 from typing import Optional, Union
 
 from ..utils.dev import print_memory_usage
-
+from ..utils.dtype import cast_to
 from ..utils.device import VRAM_DEVICE, MemoryManager, ProcDevice, is_same_device
 from ..utils.file import ensure_model_available
 from ..utils.logging import app_logger
@@ -37,7 +37,7 @@ class ModuleMeta(type(nn.Module)):
                 
                 if isinstance(instance, ModelMixin):    # mainly for safety
                     enable_efficient_loading(instance)  # kinda default hook
-                    if not hasattr(instance, 'dtype'):
+                    if not getattr(instance, 'dtype', None):
                         instance.dtype = model_dtype
                         
         finally:
@@ -80,6 +80,13 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     @staticmethod
     @functools.lru_cache(maxsize=None)
     def is_leaf_module(module: nn.Module) -> bool:
+        # TODO: this needs major fixing. Rn we are considering any module with
+        # a parameter as the leaf module, so we don't have to load the parameters separately,
+        # but this means that modules with multiple sub modules and even just one parameter
+        # count as leaf (and will be significantly heavy than a leaf), thus increasing the min mem required
+        if len(list(module.parameters(recurse=False))) > 0:
+            return True
+        
         return len(list(module.children())) == 0
 
     @staticmethod
@@ -94,8 +101,10 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         with torch.inference_mode():
             # moving the inputs to GPU
             app_logger.debug(f"moving the inputs to {self.gpu_device}")
-            new_args = tuple(a.to(self.gpu_device, non_blocking=False) if torch.is_tensor(a) else a for a in args)
-            new_kwargs = {k: (v.to(self.gpu_device, non_blocking=False) if torch.is_tensor(v) else v) for k, v in kwargs.items()}
+            # new_args = tuple(a.to(self.gpu_device, non_blocking=False) if torch.is_tensor(a) else a for a in args)
+            # new_kwargs = {k: (v.to(self.gpu_device, non_blocking=False) if torch.is_tensor(v) else v) for k, v in kwargs.items()}
+            new_args = tuple(cast_to(a, device=self.gpu_device, dtype=self.dtype) if torch.is_tensor(a) else a for a in args)
+            new_kwargs = {k: (cast_to(v, device=self.gpu_device, dtype=self.dtype) if torch.is_tensor(v) else v) for k, v in kwargs.items()}
 
             return super().__call__(*new_args, **new_kwargs)
 
@@ -122,7 +131,9 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         print_memory_usage("State dict loaded in the variable")
         
         for param_name, param in state_dict.items():
-            if param_name not in model_state_dict: continue
+            if param_name not in model_state_dict: 
+                app_logger.warning(f"skipping the param {param_name} as its not present in the model definition")
+                continue
             
             if self.dtype is not None:
                 if self.quantizer is not None:
@@ -180,6 +191,9 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     # code adapted from ComfyUI
     @staticmethod
     def get_state_dict(model_path, device=torch.device("cpu")):
+        if isinstance(device, str):
+            device = torch.device(device)
+        
         file_extension = os.path.basename(model_path).split(".")[-1]
         if file_extension in ["safetensors", "sft"]:
             try:

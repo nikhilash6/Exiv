@@ -42,7 +42,7 @@ class TextEncoderTest(unittest.TestCase):
                 res_tokens.append(tokens)
             del tokenizer
 
-            path = "../../test_utils/assets/models/umt5_xxl_fp16.safetensors"
+            path = "./tests/test_utils/assets/models/umt5_xxl_fp16.safetensors"
             t5_xxl = UMT5XXL(
                 model_path=path, 
                 dtype=torch.float16

@@ -74,17 +74,27 @@ class ImageProcessor:
     def load_image_list(image_path_list: List[str]):
         from PIL import Image
         
-        # loads in the torch tensor format
+        if isinstance(image_path_list, str):
+            image_path_list = [image_path_list]
+
         res = []
         for img_path in image_path_list:
             try:
-                pil_img = Image.open(img_path)
+                pil_img = Image.open(img_path).convert("RGB")
             except Exception as e:
                 app_logger.warning(str(e))
                 continue
             
+            # Converts H x W x C (0-255) to H x W x C (0.0-1.0)
             np_img = np.array(pil_img).astype(np.float32) / 255.0
-            pt_img = torch.from_numpy(np_img.transpose(0, 3, 1, 2))
+
+            # Transposes H x W x C -> C x H x W
+            # (3, 0, 1) is wrong for 3D array; use (2, 0, 1)
+            pt_img = torch.from_numpy(np_img.transpose(2, 0, 1)) 
             res.append(pt_img)
         
-        return res
+        if not res:
+            # returning empty tensor for now, (needs changing?)
+            return torch.empty(0) 
+        
+        return torch.stack(res, dim=0)

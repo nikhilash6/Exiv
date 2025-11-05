@@ -271,8 +271,8 @@ class TextEncoder(ModelMixin):
         
 
 class VisionEncoder(ModelMixin):
-    def __init__(self, model_path):
-        super().__init__(model_path=model_path)   # TODO: will fix all this init stuff later
+    def __init__(self, model_path, dtype=None, device=None):
+        super().__init__(model_path=model_path, dtype=dtype, device=device)
     
     # common preprocessor for current vision encoders
     def clip_preprocess(self, image: Tensor, crop=True):
@@ -303,7 +303,7 @@ class VisionEncoder(ModelMixin):
         return (image - mean.view([3,1,1])) / std.view([3,1,1])
         
     def encode_image(self, image: Tensor, crop=True):
-        pixel_values = self.clip_preprocess(image.to(self.load_device), crop=crop).float()
+        pixel_values = self.clip_preprocess(image.to(self.gpu_device), crop=crop).float()
         out = self(pixel_values=pixel_values, intermediate_output='all' if self.return_all_hidden_states else -2)
 
         '''

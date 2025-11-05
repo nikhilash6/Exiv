@@ -354,9 +354,9 @@ class T5Stack(nn.Module):
     # also removing embedding lookup inside this
     def forward(
         self, 
-        x,                                      # input embeddings (bs, seq_len, embed_dim)
-        attention_mask=None,                    # padding mask (bs, seq_len)
-        intermediate_out_layer_idex=None,       # intermediate layer idx whose output is needed (if not final)
+        x,                                          # input embeddings (bs, seq_len, embed_dim)
+        attention_mask=None,                        # padding mask (bs, seq_len)
+        intermediate_output_layer_idx=None,         # intermediate layer idx whose output is needed (if not final)
         final_layer_norm_intermediate=True,
         **kwargs
     ):
@@ -369,14 +369,13 @@ class T5Stack(nn.Module):
         intermediate = None
         past_bias = None
         
-        if intermediate_out_layer_idex is not None:
-            # wrapping neg idx from the end, pythonic way
-            if intermediate_out_layer_idex < 0:
-                intermediate_out_layer_idex = len(self.block) + intermediate_out_layer_idex
+        # wrapping neg idx from the end, pythonic way
+        if intermediate_output_layer_idx is not None and intermediate_output_layer_idx < 0:
+            intermediate_output_layer_idx = len(self.block) + intermediate_output_layer_idx
 
         for i, l in enumerate(self.block):
             x, past_bias = l(x, mask, past_bias)
-            if i == intermediate_out_layer_idex:
+            if i == intermediate_output_layer_idx:
                 intermediate = x.clone()
         
         x = self.final_layer_norm(x)
