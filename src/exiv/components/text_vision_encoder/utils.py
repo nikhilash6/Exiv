@@ -117,7 +117,7 @@ def parse_prompt_attention(text):
 
 def load_embed(embedding_path: str, embed_key: str = None) -> Tensor | None:
     # loads the textual inversion file
-    found_path = ensure_model_available(embedding_path)
+    found_path = ensure_model_available(model_path=embedding_path)
     embedding_name = os.path.basename(embedding_path)
     
     if not found_path:

@@ -102,9 +102,9 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
     # code adapted from Huggingface Diffusers
     def load_model(
         self,
-        model_path = None,              # path or url   (passing this in the init as well for flexibility)
+        model_path = None,              # model file path (override for flexibility)
         force_download=False,           # re_download models
-        download_path=None,             # defaults to folder util
+        download_url=None,              # file url (optional)
         dtype=None                      # TODO: hardware specific dtype
     ):
         model_path = model_path or self.model_path
@@ -113,7 +113,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         device = ProcDevice.CPU.value
         self.dtype = dtype or self.dtype
         
-        model_path = ensure_model_available(model_path, download_path, force_download)
+        model_path = ensure_model_available(model_path, download_url, force_download)
         print_memory_usage("State dict load started")
         
         state_dict = ModelMixin.get_state_dict(model_path)

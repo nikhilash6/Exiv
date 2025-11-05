@@ -8,6 +8,8 @@ import urllib.parse
 import requests
 from typing import List
 
+import tqdm
+
 from .logging import app_logger
 
 def create_sanitized_path(file_path):
@@ -27,40 +29,45 @@ def create_sanitized_path(file_path):
 
     return os.path.join(file_path, f"img_{idx}.jpg")
 
-
-def ensure_model_available(model_path: str, download_path: str = None, force_download: bool = False) -> str:
+def ensure_model_available(model_path: str, download_url: str = None, force_download: bool = False) -> str:
     """
     - Downloads model if a URL is provided, else verifies the local path.
     - Works with absolute paths (internally converts relative to absolute)
     - Store stuff in .cache if download path is not provided
     """
-    parsed = urllib.parse.urlparse(model_path)
+    
+    if download_url:  # It's a URL
+        parsed = urllib.parse.urlparse(model_path)
+        assert parsed.scheme in ("http", "https"), "invalid download link"
+    
+    # TODO: fix this, have proper model paths defined
+    if model_path is None:
+        if not download_url:
+            raise ValueError("Must provide either a local 'model_path' or a 'download_url'.")
+        # default download path: same filename under ~/.cache/my_package/
+        cache_dir = os.path.expanduser("~/.cache/my_package")
+        os.makedirs(cache_dir, exist_ok=True)
+        model_path = os.path.join(cache_dir, os.path.basename(parsed.path))
 
-    if parsed.scheme in ("http", "https"):  # It's a URL
-        if download_path is None:
-            # default download path: same filename under ~/.cache/my_package/
-            cache_dir = os.path.expanduser("~/.cache/my_package")
-            os.makedirs(cache_dir, exist_ok=True)
-            download_path = os.path.join(cache_dir, os.path.basename(parsed.path))
-
-        if force_download or not os.path.exists(download_path):
-            print(f"Downloading model from {model_path} to {download_path} ...")
-            response = requests.get(model_path, stream=True)
-            response.raise_for_status()
-            os.makedirs(os.path.dirname(download_path), exist_ok=True)
-            with open(download_path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
+    if download_url and (force_download or not os.path.exists(model_path)):
+        print(f"Downloading model from {download_url} to {model_path} ...")
+        response = requests.get(download_url, stream=True)
+        response.raise_for_status()
+        total_size = int(response.headers.get('content-length', 0))
+        block_size = 8192
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
+        with tqdm(total=total_size, unit='B', unit_scale=True, desc=os.path.basename(model_path)) as pbar:
+            with open(model_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=block_size):
                     if chunk:
                         f.write(chunk)
-        else:
-            print(f"Model already exists at {download_path} (use force_download=True to overwrite)")
-        return os.path.abspath(download_path)
-
-    else: 
-        abs_path = os.path.abspath(os.path.expanduser(model_path))
-        if not os.path.exists(abs_path):
-            raise FileNotFoundError(f"Model file not found at {abs_path}")
-        return abs_path
+                        pbar.update(len(chunk))
+    
+    abs_path = os.path.abspath(os.path.expanduser(model_path))
+    if not os.path.exists(abs_path):
+        raise FileNotFoundError(f"Model file not found at {abs_path}")
+    return abs_path
+        
 
 class ImageProcessor:
     @staticmethod
