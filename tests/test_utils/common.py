@@ -18,7 +18,7 @@ except ImportError:
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
 
-def print_top_gpu_tensors(n=5, device="cuda:0", print_refs=False):
+def print_top_tensors(n=5, device="cuda:0", print_refs=False):
     # --- Find all GPU tensors ---
     objs = gc.get_objects()
     gpu_tensors = []
@@ -119,7 +119,7 @@ class check_memory_usage:
 
         if not is_close and not is_mps_available:
             print("device: ", self.device)
-            print_top_gpu_tensors()
+            print_top_tensors()
             raise AssertionError(
                 f"Memory usage difference {mem_diff:.2f} MB is not close to expected {self.expected_mem} MB."
             )

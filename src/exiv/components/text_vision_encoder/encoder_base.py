@@ -81,7 +81,7 @@ class TextEncoder(ModelMixin):
             input_embedding = self.get_input_embeddings()
             input_embedding.to(tokens_embed.device)
             tokens_embed = input_embedding(tokens_embed)
-
+            del input_embedding
             
             # ------ inject in custom embeddings
             index = 0
