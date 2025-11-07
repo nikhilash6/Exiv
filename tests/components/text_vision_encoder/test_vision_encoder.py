@@ -4,6 +4,7 @@ import unittest
 from parameterized import parameterized
 
 from exiv.components.text_vision_encoder.vision_encoder import create_vision_encoder
+from exiv.model_utils.model_mixin import move_model
 from exiv.utils.file import ImageProcessor
 from exiv.utils.tensor import common_upscale
 from exiv.utils.device import VRAM_DEVICE, MemoryManager
@@ -14,7 +15,7 @@ from tests.test_utils.common import check_memory_usage
 
 # TODO: extend this for other devices as well
 @unittest.skipIf(not is_cuda_available, "Only available for cuda devices")
-class TextEncoderTest(unittest.TestCase):
+class VisionEncoderTest(unittest.TestCase):
     def setUp(self):
         MemoryManager.clear_memory()    
     
@@ -32,7 +33,7 @@ class TextEncoderTest(unittest.TestCase):
         print("-- device: ", expected_device)
         with check_memory_usage(expected_mem=expected_mem, device=expected_device):
             height, width = 512, 512
-            input_img = ImageProcessor.load_image_list("test.jpg")
+            input_img = ImageProcessor.load_image_list("./tests/test_utils/assets/media/test.jpg")
             input_img = common_upscale(input_img, height, width)
 
             clip_vision_model_path = "./tests/test_utils/assets/models/CLIP-ViT-H-fp16.safetensors"
@@ -41,4 +42,6 @@ class TextEncoderTest(unittest.TestCase):
             clip_model.load_model()
             clip_embed = clip_model.encode_image(input_img)
             
+            move_model(clip_model, device="cpu")
+            del clip_model, clip_embed, input_img
             # TODO: add exact output check later

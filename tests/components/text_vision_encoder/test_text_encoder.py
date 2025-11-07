@@ -5,6 +5,7 @@ from parameterized import parameterized
 
 from exiv.components.text_vision_encoder.te_t5 import UMT5XXL
 from exiv.components.text_vision_encoder.text_tokenizer import UMTT5XXLTokenizer
+from exiv.model_utils.model_mixin import move_model
 from exiv.utils.device import VRAM_DEVICE, MemoryManager
 from exiv.config import global_config
 from exiv.utils.device import is_cuda_available
@@ -53,4 +54,6 @@ class TextEncoderTest(unittest.TestCase):
             embed_output = t5_xxl.encode_token_weights(res_tokens[0], special_tokens)   # output, pooled, extra
             print("embed: ", len(embed_output))
             
+            move_model(t5_xxl, device="cpu")
+            del t5_xxl, embed_output
             # TODO: add check for output the correctness
