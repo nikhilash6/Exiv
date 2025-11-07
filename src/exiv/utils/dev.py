@@ -119,3 +119,21 @@ def print_memory_usage(tag, n=5):
         print(f"{i+1}. {format_bytes(size_bytes)} - {desc}")
         
     app_logger.info(f"----------------------------- END: {tag} ----------------------------")
+
+def print_zombie(model_type_name):
+    # need this pkg to generate the graph image - apt-get install graphviz
+    import objgraph
+    zombie_models = objgraph.by_type(model_type_name)
+    if not zombie_models:
+        print("--- SUCCESS: No zombie models found in memory. ---")
+    else:
+        print(f"--- LEAK FOUND: {len(zombie_models)} zombie '{model_type_name}' instances still in memory.")
+        
+        # Generate a graph showing what is holding the first zombie model
+        print("Generating 'zombie_model_leak.png'...")
+        objgraph.show_backrefs(
+            [zombie_models[0]], 
+            filename='zombie_model_leak.png', 
+            max_depth=10
+        )
+        print("--- LEAK GRAPH SAVED to 'zombie_model_leak.png'. Open this file to see the leak. ---")

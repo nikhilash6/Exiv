@@ -1,10 +1,13 @@
 import torch
+from torch import nn
 
+import gc
 import functools
 
 from typing import Tuple, Any, Dict, Optional
 
 from ..utils.enum import ExtendedEnum
+from ..utils.logging import app_logger
 
 # this creates a lookup table coupled with a doubly linked list, that has O(1) lookup and update
 
@@ -105,9 +108,37 @@ class HookRegistry:
     
     @staticmethod
     def apply_hook_to_module(module, hook):
+        if not hasattr(module, "_original_forward"):
+            module._original_forward = module.forward
+            
         registry = HookRegistry.get_hook_registry(module)
         registry.register_hook(hook)
         module.forward = registry.get_modified_forward()
+        
+    def cleanup_and_remove(self):
+        # NOTE: not in use, added during dev, maybe needs to be removed
+        """
+        Restores the module's original state and breaks all
+        circular references to this registry.
+        """
+        if hasattr(self._module_ref, "_original_forward"):
+            self._module_ref.forward = self._module_ref._original_forward
+            try:
+                del self._module_ref._original_forward
+            except AttributeError:
+                pass
+
+        if hasattr(self._module_ref, "hook_registry"):
+            try:
+                del self._module_ref.hook_registry
+            except AttributeError:
+                pass
+        
+        self.hooks_lookup.clear()
+        self.head = None
+        self.tail = None
+        
+        self._module_ref = None
 
     def get_hook(self, hook_type: str) -> Optional[ModelHook]:
         return self.hooks_lookup.get(hook_type, None)
@@ -121,3 +152,30 @@ class HookRegistry:
             parts.append(f"  {hook_type} - {hook.__class__.__name__}")
         
         return f"HookRegistry(\n" + "\n".join(parts) + "\n)"
+
+def cleanup_model(model: nn.Module):
+    # NOTE: not in use, added during dev, maybe needs to be removed
+    """
+    Completely cleans up a model and all its submodules by removing
+    all HookRegistry patches and breaking circular references.
+    """
+    if model is None:
+        return
+
+    app_logger.debug(f"--- Starting cleanup for model: {model.__class__.__name__} ---")
+    
+    modules_to_clean = list(model.modules())
+    for module in modules_to_clean:
+        registry = HookRegistry.get_hook_registry(module)
+        if registry:
+            registry.cleanup_and_remove()
+        
+        # safety measure
+        if hasattr(module, '_forward_hooks'):
+            module._forward_hooks.clear()
+        if hasattr(module, '_forward_pre_hooks'):
+            module._forward_pre_hooks.clear()
+        if hasattr(module, '_backward_hooks'):
+            module._backward_hooks.clear()
+
+    app_logger.debug("--- Model cleanup complete. Running GC. ---")

@@ -38,6 +38,7 @@ def print_top_tensors(n=5, device="cuda:0", print_refs=False):
     
     gpu_tensors = sorted(gpu_tensors, key=lambda x: x[0], reverse=True)
     print(f"\n Top {len(gpu_tensors[:n])} GPU tensors on {device}:")
+    
     for size, tensor in gpu_tensors[:n]:
         size_mb = size / (1024**2)
         print("---" * 10)
@@ -52,7 +53,28 @@ def print_top_tensors(n=5, device="cuda:0", print_refs=False):
                     
                 for i, ref in enumerate(referrers[:5]): # print top 5 referrers
                     print(f"    {i+1}. ID: {id(ref)} Type: {type(ref)}")
-                    # printing the ref itself can be noisy, so we limit its length
+
+                    location_info = "Location: N/A (complex object)"
+                    try:
+                        if isinstance(ref, dict):
+                            for k, v in ref.items():
+                                if v is tensor:
+                                    location_info = f"Location: Found in dict key: '{k}'"
+                                    break
+                        elif isinstance(ref, (list, tuple)):
+                            for idx, item in enumerate(ref):
+                                if item is tensor:
+                                    location_info = f"Location: Found at list/tuple index: {idx}"
+                                    break
+                        elif hasattr(ref, '__dict__'):
+                            for k, v in ref.__dict__.items():
+                                if v is tensor:
+                                    location_info = f"Location: Found in object attribute: '.{k}'"
+                                    break
+                    except Exception:
+                        location_info = "Location: Cannot be introspected."
+                    
+                    print(f"       {location_info}")
                     print(f"       Value (truncated): {str(ref)[:150]}...")
             except Exception as e:
                 print(f"  Could not get referrers: {e}")

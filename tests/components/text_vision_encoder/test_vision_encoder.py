@@ -42,6 +42,5 @@ class VisionEncoderTest(unittest.TestCase):
             clip_model.load_model()
             clip_embed = clip_model.encode_image(input_img)
             
-            move_model(clip_model, device="cpu")
             del clip_model, clip_embed, input_img
             # TODO: add exact output check later

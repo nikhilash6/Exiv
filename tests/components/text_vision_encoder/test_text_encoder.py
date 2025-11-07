@@ -54,6 +54,5 @@ class TextEncoderTest(unittest.TestCase):
             embed_output = t5_xxl.encode_token_weights(res_tokens[0], special_tokens)   # output, pooled, extra
             print("embed: ", len(embed_output))
             
-            move_model(t5_xxl, device="cpu")
             del t5_xxl, embed_output
             # TODO: add check for output the correctness

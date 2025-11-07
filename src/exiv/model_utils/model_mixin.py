@@ -6,7 +6,6 @@ import functools
 import safetensors
 from typing import Optional, Union
 
-from ..utils.dev import print_memory_usage
 from ..utils.dtype import cast_to
 from ..utils.device import VRAM_DEVICE, MemoryManager, ProcDevice, is_same_device
 from ..utils.file import ensure_model_available
@@ -78,7 +77,6 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         cls.is_leaf_module.cache_clear()
     
     @staticmethod
-    @functools.lru_cache(maxsize=None)
     def is_leaf_module(module: nn.Module) -> bool:
         # TODO: this needs major fixing. Rn we are considering any module with
         # a parameter as the leaf module, so we don't have to load the parameters separately,
@@ -90,7 +88,6 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         return len(list(module.children())) == 0
 
     @staticmethod
-    @functools.lru_cache(maxsize=None)
     def _module_size(module: nn.Module):
         ms = 0
         for param in module.parameters(recurse=False):
@@ -123,12 +120,9 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         self.dtype = dtype or self.dtype
         
         model_path = ensure_model_available(model_path, download_url, force_download)
-        print_memory_usage("State dict load started")
         
         state_dict = ModelMixin.get_state_dict(model_path)
         model_state_dict = self.state_dict()
-        
-        print_memory_usage("State dict loaded in the variable")
         
         for param_name, param in state_dict.items():
             if param_name not in model_state_dict: 
@@ -185,8 +179,6 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
                 )
             else:
                 set_module_tensor_to_device(self, param_name, device, value=param, dtype=dtype)
-                
-        print_memory_usage("State dict loaded in the model dict")
 
     # code adapted from ComfyUI
     @staticmethod

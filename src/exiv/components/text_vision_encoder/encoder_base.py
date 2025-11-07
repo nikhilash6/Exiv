@@ -3,8 +3,6 @@ from torch import Tensor
 
 from dataclasses import dataclass
 
-from ...utils.dev import print_memory_usage
-
 from ...utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, ProcDevice
 from ...model_utils.model_mixin import ModelMixin
 from ...utils.logging import app_logger
@@ -198,8 +196,6 @@ class TextEncoder(ModelMixin):
             intermediate_output_layer_idx = self.layer_idx
         
         # ---------------- main encoding ----------------
-        print_memory_usage("Started the model's forward")
-        
         # TODO: handle dtype fp32
         outputs = self(
             input_ids=None, 
@@ -209,8 +205,6 @@ class TextEncoder(ModelMixin):
             intermediate_output_layer_idx=intermediate_output_layer_idx,
             embeds_info=embeds_info
         )
-        
-        print_memory_usage("Finished the model's forward")
         
         if self.layer == "last":
             final_output = outputs[0].float()
