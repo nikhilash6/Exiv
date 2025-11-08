@@ -5,9 +5,9 @@ import numpy as np
 
 from typing import Optional, Tuple
 
-from .wan_vae import WanVAE
 from ..enum import VAEType
 from ...utils.tensor import random_tensor
+from ...utils.device import VRAM_DEVICE
 from ...model_utils.model_mixin import ModelMixin
 
 class VAEBase(ModelMixin):
@@ -16,6 +16,7 @@ class VAEBase(ModelMixin):
     def get_tiling_config(self, input_shape, tile_x=256, tile_y=256, tile_z=4, overlap_x=64, overlap_y=64):
         assert input_shape is not None, "input shape is required to calc tile dims"
         
+        # input_shape: (W, H, T)
         tile_x = min(tile_x, input_shape[0])
         tile_y = min(tile_y, input_shape[1])
         tile_z = min(tile_z, input_shape[2])
@@ -83,12 +84,14 @@ class VAEBase(ModelMixin):
                         ]
                     
                     self._enc_conv_idx = [0]    # resetting each itr, all the layers of conv are passed again
-                    tile = self.encoder(tile, feat_cache=self._enc_feat_map, feat_idx=self._enc_conv_idx)
-                    tile = self.conv1(tile)
-                    time.append(tile)
+                    tile = tile.to(VRAM_DEVICE)
+                    res_tile = self.encoder(tile, feat_cache=self._enc_feat_map, feat_idx=self._enc_conv_idx)
+                    res_tile = self.quant_conv(res_tile)
+                    time.append(res_tile)
+                    del tile
                 cur_temporal_row.append(torch.cat(time, dim=2))
             temporal_latent_rows.append(cur_temporal_row)
-        self.clear_cache()
+        # self.clear_cache()
 
         # reassemble and blend the latent tiles
         result_temporal_latent_rows = []
@@ -193,6 +196,8 @@ class VAEBase(ModelMixin):
 
     
 def get_vae(vae_type: VAEType) -> VAEBase:
+    from .wan_vae import WanVAE
+    
     if vae_type == VAEType.WAN:
         return WanVAE()
     

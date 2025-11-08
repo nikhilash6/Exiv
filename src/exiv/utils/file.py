@@ -89,7 +89,6 @@ class ImageProcessor:
             np_img = np.array(pil_img).astype(np.float32) / 255.0
 
             # Transposes H x W x C -> C x H x W
-            # (3, 0, 1) is wrong for 3D array; use (2, 0, 1)
             pt_img = torch.from_numpy(np_img.transpose(2, 0, 1)) 
             res.append(pt_img)
         

@@ -68,13 +68,8 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         self.model_path = model_path
     
     def clear_cache(self):
-        # add other cleanup in future
-        self.__class__.clear_cls_cache()
-
-    @classmethod
-    def clear_cls_cache(cls):
-        cls._module_size.cache_clear()
-        cls.is_leaf_module.cache_clear()
+        # TODO: legacy code, will remove after a final check
+        pass
     
     @staticmethod
     def is_leaf_module(module: nn.Module) -> bool:
@@ -126,7 +121,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         
         for param_name, param in state_dict.items():
             if param_name not in model_state_dict: 
-                app_logger.warning(f"skipping the param {param_name} as its not present in the model definition")
+                app_logger.warning(f"skipping the param {param_name} as it's not present in the model definition")
                 continue
             
             if self.dtype is not None:
@@ -241,7 +236,7 @@ def move_module(model, module, module_name, target_device=None):
     if module is None: return   # m_ref can turn out to be None
     
     global c
-    app_logger.info(f"Loading the current module: {c}")
+    app_logger.debug(f"Loading the current module: {c}")
     c += 1
     
     target_device = target_device or model.gpu_device

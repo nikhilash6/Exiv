@@ -545,8 +545,8 @@ class WanVAE(VAEBase):
             self.temporal_downsample,
         )
         
-        self.conv1 = CausalConv3d(z_dim * 2, z_dim * 2, 1)
-        self.conv2 = CausalConv3d(z_dim, z_dim, 1)
+        self.quant_conv = CausalConv3d(z_dim * 2, z_dim * 2, 1)
+        self.post_quant_conv = CausalConv3d(z_dim, z_dim, 1)
         
         self.decoder = Decoder3d(
             base_dim, 
@@ -558,7 +558,7 @@ class WanVAE(VAEBase):
         )
         
         # every downsample layer does spatial compression
-        self.spatial_compression_ratio = 2 ** len(self.temperal_downsample)
+        self.spatial_compression_ratio = 2 ** len(self.temporal_downsample)
         
         # slicing config
         self.use_slicing = max_batch_size != None and max_batch_size >= 1
@@ -583,7 +583,9 @@ class WanVAE(VAEBase):
         self._enc_feat_map = [None] * self._enc_conv_num
 
     def encode(self, x: Tensor):
-        tile_width, tile_height, tile_temporal, overlap_width, overlap_height = self.get_tiling_config(input_shape=x.shape)
+        B, C, T, H, W = x.shape
+        # (T, H, W, C) -> (W, H, T)
+        tile_width, tile_height, tile_temporal, overlap_width, overlap_height = self.get_tiling_config(input_shape=(W, H, T))
         encode_fn = partial(
             self.tiled_encode_3d, 
             tile_width=tile_width, 
@@ -591,7 +593,7 @@ class WanVAE(VAEBase):
             tile_temporal=tile_temporal, 
             overlap_width=overlap_width, 
             overlap_height=overlap_height
-        )   # since can be written in a much shorter way, but writing like this for readability 
+        )   # this can be written in a much shorter way, but writing like this for readability 
         
         if self.use_slicing and x.shape[0] > self.slice_batch_size:
             encoded_slices = [encode_fn(x_slice) for x_slice in x.split(self.slice_batch_size)]
@@ -612,7 +614,7 @@ class WanVAE(VAEBase):
             tile_temporal=tile_temporal, 
             overlap_width=overlap_width, 
             overlap_height=overlap_height
-        )   # since can be written in a much shorter way, but writing like this for readability 
+        )   # this can be written in a much shorter way, but writing like this for readability 
         
         if self.use_slicing and z.shape[0] > 1:
             decoded_slices = [decode_fn(z_slice) for z_slice in z.split(1)]
