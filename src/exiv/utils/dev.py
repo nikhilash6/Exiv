@@ -2,6 +2,7 @@
 # TODO: delete these before making the final release
 
 import torch
+from torch import Tensor
 
 import psutil
 import gc
@@ -120,6 +121,7 @@ def print_memory_usage(tag, n=5):
         
     app_logger.info(f"----------------------------- END: {tag} ----------------------------")
 
+
 def print_zombie(model_type_name):
     # need this pkg to generate the graph image - apt-get install graphviz
     import objgraph
@@ -129,7 +131,6 @@ def print_zombie(model_type_name):
     else:
         print(f"--- LEAK FOUND: {len(zombie_models)} zombie '{model_type_name}' instances still in memory.")
         
-        # Generate a graph showing what is holding the first zombie model
         print("Generating 'zombie_model_leak.png'...")
         objgraph.show_backrefs(
             [zombie_models[0]], 
@@ -137,3 +138,14 @@ def print_zombie(model_type_name):
             max_depth=10
         )
         print("--- LEAK GRAPH SAVED to 'zombie_model_leak.png'. Open this file to see the leak. ---")
+
+
+def print_tensor_size(t: Tensor):
+    num_elements = t.numel()
+    element_size = t.element_size()  # Size in bytes (e.g., float32 is 4)
+
+    total_bytes = num_elements * element_size
+    total_mb = total_bytes / (1024 * 1024)
+
+    print(f"Tensor VRAM: {total_mb:.2f} MB")
+    print(f"Tensor VRAM: {total_bytes:.2f} B")

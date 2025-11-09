@@ -32,7 +32,6 @@ class VAEBase(ModelMixin):
     # ---------------------------------------------------------------
 
     # TODO: make these methods generalized as more and more models are added
-    # TODO: handling movement to and from the cpu
     # TODO: handle the case of no tiling (but temporal chunking)
     def tiled_encode_3d(self, x: torch.Tensor, tile_width: int, tile_height: int, tile_temporal:int = 4, overlap_width=64, overlap_height=64) -> torch.Tensor:
         # (bs, channels, num_frames, height, width)

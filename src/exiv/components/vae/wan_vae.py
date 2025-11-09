@@ -582,6 +582,7 @@ class WanVAE(VAEBase):
         self._enc_conv_idx = [0]
         self._enc_feat_map = [None] * self._enc_conv_num
 
+    @torch.inference_mode
     def encode(self, x: Tensor):
         B, C, T, H, W = x.shape
         # (T, H, W, C) -> (W, H, T)
@@ -605,6 +606,7 @@ class WanVAE(VAEBase):
 
         return posterior.sample()
     
+    @torch.inference_mode
     def decode(self, z: Tensor, input_shape: Tuple):
         tile_width, tile_height, tile_temporal, overlap_width, overlap_height = self.get_tiling_config(input_shape=input_shape)
         decode_fn = partial(
