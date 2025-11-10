@@ -59,7 +59,7 @@ class VAEBase(ModelMixin):
             for j in range(0, width, og_stride_width):
                 self.reset_causal_cache()
                 
-                time = []
+                temporal_tile = []
                 frame_range = 1 + (num_frames - 1) // tile_temporal
                 for k in range(frame_range):
                     if k == 0:
@@ -69,8 +69,8 @@ class VAEBase(ModelMixin):
                             :, 
                             :, 
                             :1, 
-                            i : i + latent_tile_size_height, 
-                            j : j + latent_tile_size_width
+                            i : i + tile_height, 
+                            j : j + tile_width
                         ]
                     else:
                         # k = 1 => 1 to 5, k = 2 => 5 to 9
@@ -78,33 +78,32 @@ class VAEBase(ModelMixin):
                             :,
                             :,
                             1 + tile_temporal * (k - 1) : 1 + tile_temporal * k,
-                            i : i + latent_tile_size_height,
-                            j : j + latent_tile_size_width,
+                            i : i + tile_height,
+                            j : j + tile_width,
                         ]
                     
                     self._enc_conv_idx = [0]    # resetting each itr, all the layers of conv are passed again
                     tile = tile.to(VRAM_DEVICE)
                     res_tile = self.encoder(tile, feat_cache=self._enc_feat_map, feat_idx=self._enc_conv_idx)
                     res_tile = self.quant_conv(res_tile)
-                    time.append(res_tile)
+                    temporal_tile.append(res_tile)                           # complete temporal latent given a starting x,y tile idx
                     del tile
-                cur_temporal_row.append(torch.cat(time, dim=2))
-            temporal_latent_rows.append(cur_temporal_row)
-        # self.clear_cache()
+                cur_temporal_row.append(torch.cat(temporal_tile, dim=2))     # complete temporal latent given a starting x and all y tile idx
+            temporal_latent_rows.append(cur_temporal_row)                    # complete temporal latents for all x,y variants
 
         # reassemble and blend the latent tiles
         result_temporal_latent_rows = []
-        for i, row in enumerate(temporal_latent_rows):
+        for i, cur_temporal_row in enumerate(temporal_latent_rows):
             result_row = []
-            for j, tile in enumerate(row):
+            for j, temporal_tile in enumerate(cur_temporal_row):
                 # wish i could add diagrams to code comments
                 if i > 0:
-                    # blending with the blocks on the left
-                    tile = self.blend_v(temporal_latent_rows[i - 1][j], tile, blend_height)
+                    # blending with the blocks above (starting from the second row)
+                    temporal_tile = self.blend_v(temporal_latent_rows[i - 1][j], temporal_tile, blend_height)
                 if j > 0:
-                    # blending with the blocks above
-                    tile = self.blend_h(row[j - 1], tile, blend_width)
-                result_row.append(tile[:, :, :, :latent_tile_stride_height, :latent_tile_stride_width])
+                    # blending with the blocks on the left
+                    temporal_tile = self.blend_h(cur_temporal_row[j - 1], temporal_tile, blend_width)
+                result_row.append(temporal_tile[:, :, :, :latent_tile_stride_height, :latent_tile_stride_width])
             result_temporal_latent_rows.append(torch.cat(result_row, dim=-1))
 
         enc = torch.cat(result_temporal_latent_rows, dim=3)[:, :, :, :latent_height, :latent_width]
@@ -140,7 +139,7 @@ class VAEBase(ModelMixin):
                 for k in range(num_frames):
                     self._conv_idx = [0]
                     tile = z[:, :, k : k + 1, i : i + latent_tile_size_height, j : j + latent_tile_size_width]
-                    tile = self.conv2(tile)
+                    tile = self.post_quant_conv(tile)
                     decoded = self.decoder(tile, feat_cache=self._feat_map, feat_idx=self._conv_idx)
                     time.append(decoded)
                 cur_temporal_row.append(torch.cat(time, dim=2))
@@ -157,7 +156,7 @@ class VAEBase(ModelMixin):
                     tile = self.blend_v(temporal_latent_rows[i - 1][j], tile, blend_height)
                 if j > 0:
                     tile = self.blend_h(row[j - 1], tile, blend_width)
-                result_row.append(tile[:, :, :, : self.tile_sample_stride_height, : self.tile_sample_stride_width])
+                result_row.append(tile[:, :, :, :og_stride_height, :og_stride_width])
             result_temporal_latent_rows.append(torch.cat(result_row, dim=-1))
 
         dec = torch.cat(result_temporal_latent_rows, dim=3)[:, :, :, :sample_height, :sample_width]
