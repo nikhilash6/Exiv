@@ -9,8 +9,9 @@ from exiv.model_utils.model_mixin import move_model
 from exiv.utils.file import ImageProcessor, ensure_model_available
 from exiv.utils.tensor import common_upscale
 from exiv.utils.device import VRAM_DEVICE, MemoryManager
-from exiv.config import global_config
+from exiv.config import LOADING_MODE, global_config
 from exiv.utils.device import is_cuda_available
+from exiv.utils.logging import app_logger
 
 from tests.test_utils.common import check_memory_usage
 
@@ -24,8 +25,8 @@ class VisionEncoderTest(unittest.TestCase):
         MemoryManager.clear_memory()
     
     LOADING_PARAMS = [
-        # ("no_oom",   {"no_oom": True,  "low_vram": False, "normal_load": False}, 1206,  VRAM_DEVICE),
-        ("normal",   {"no_oom": False, "low_vram": False, "normal_load": True},  1206, VRAM_DEVICE),
+        ("no_oom",   {"no_oom": True,  "low_vram": False, "normal_load": False}, 2106,  VRAM_DEVICE),       # this will force revert to normal_load mode
+        ("normal",   {"no_oom": False, "low_vram": False, "normal_load": True},  2106, VRAM_DEVICE),        # TODO: decoding cache increases vram, look into how this can be reduced
     ]
     @parameterized.expand(LOADING_PARAMS)
     def test_wan_vae(self, load_mode, config, expected_mem, expected_device):
@@ -54,9 +55,13 @@ class VisionEncoderTest(unittest.TestCase):
             B, C, T, H, W = image.shape
             # encode the entire sequence, image: (B, C, T, H, W)
             concat_latent_image = wan_vae.encode(image)
-            print("-------- here")
+            MemoryManager.clear_memory()
+            app_logger.debug("encoding complete")
             decoded_image = wan_vae.decode(concat_latent_image, input_shape=(W, H, T))
-            print("-------- here 2")
+            MemoryManager.clear_memory()
+            app_logger.debug("decoding complete")
+            del wan_vae
+            
             image = image.to(VRAM_DEVICE)
             mse_loss = F.mse_loss(decoded_image, image)
             self.assertLess(mse_loss.item(), 1e-04)

@@ -8,6 +8,7 @@ from typing import Union, Tuple, Optional, List
 
 from .base import DiagonalGaussianDistribution, VAEBase
 from ..activations import get_activation
+from ...config import LOADING_MODE
 
 
 CACHE_T = 2
@@ -531,6 +532,10 @@ class WanVAE(VAEBase):
         ],
     ):
         super().__init__()
+        
+        # in case of any other mode, the partial layers will be loaded and offloaded
+        # many times (num_frames * tiles_per_frame ~ 200) which will make this unusable
+        self.force_load_mode = LOADING_MODE.NORMAL_LOAD.value
         
         self.z_dim = z_dim
         self.temporal_downsample = temporal_downsample

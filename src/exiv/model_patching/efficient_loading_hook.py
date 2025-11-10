@@ -141,7 +141,7 @@ def enable_efficient_loading(model: 'ModelMixin'):
     This patches the forward pass of modules to dynamically load / unload them
     """
     full_load: List[Tuple[weakref.ref, str]] = []
-    loading_mode = global_config.loading_mode
+    loading_mode = getattr(model, 'force_load_mode', None) or global_config.loading_mode
     
     if loading_mode == LOADING_MODE.NO_OOM.value:
         # no full_load modules in this
@@ -174,6 +174,7 @@ def enable_efficient_loading(model: 'ModelMixin'):
         total_modules += 1
 
     app_logger.debug(f"Total modules found: {total_modules}")
+    app_logger.debug(f"Total full load modules found: {len(full_load)}")
 
     model_hook = EfficientModelLoaderHook(full_load=full_load)
     HookRegistry.apply_hook_to_module(model, model_hook)
