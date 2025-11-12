@@ -7,6 +7,7 @@ from exiv.components.text_vision_encoder.te_t5 import UMT5XXL
 from exiv.components.text_vision_encoder.text_tokenizer import UMTT5XXLTokenizer
 from exiv.model_patching.debug_hook import add_debug_hooks
 from exiv.model_utils.model_mixin import move_model
+from exiv.utils.dev import print_memory_usage
 from exiv.utils.device import VRAM_DEVICE, MemoryManager
 from exiv.config import global_config
 from exiv.utils.device import is_cuda_available
@@ -24,7 +25,7 @@ class TextEncoderTest(unittest.TestCase):
     
     LOADING_PARAMS = [
         ("no_oom",   {"no_oom": True,  "low_vram": False, "normal_load": False}, 2012.01,  VRAM_DEVICE),
-        # ("normal",   {"no_oom": False, "low_vram": False, "normal_load": True},  11268.5, VRAM_DEVICE),
+        ("low_vram",   {"no_oom": False, "low_vram": True, "normal_load": False},  5164.5, VRAM_DEVICE),
     ]
     @parameterized.expand(LOADING_PARAMS)
     def test_t5xxl_encoder(self, load_mode, config, expected_mem, expected_device):
@@ -34,7 +35,7 @@ class TextEncoderTest(unittest.TestCase):
             # this will test both the encoder and the tokenizer
             prompt_list = [
                 "a photo of a white dog and a blue bird" * 100,
-                # "a photo of a (white:2) (dog:1) and a ((blue)) (bird:3)"
+                "a photo of a (white:2) (dog:1) and a ((blue)) (bird:3)"
             ]
 
             res_tokens = []
@@ -54,7 +55,7 @@ class TextEncoderTest(unittest.TestCase):
                 download_url="https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp16.safetensors?download=true"
             )
             embed_output = t5_xxl.encode_token_weights(res_tokens, special_tokens)   # output, pooled, extra
-            print("embed: ", len(embed_output))
-            
+            # print("embed details: ", len(embed_output), embed_output[0].shape)
+
             del t5_xxl, embed_output
             # TODO: add check for output the correctness
