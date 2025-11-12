@@ -197,14 +197,15 @@ class TextEncoder(ModelMixin):
         
         # ---------------- main encoding ----------------
         # TODO: handle dtype fp32
-        outputs = self(
-            input_ids=None, 
-            attention_mask=attention_mask_copy, 
-            input_embeds=embeds, 
-            num_tokens=num_tokens, 
-            intermediate_output_layer_idx=intermediate_output_layer_idx,
-            embeds_info=embeds_info
-        )
+        with torch.autocast(device_type="cuda", dtype=torch.float32):
+            outputs = self(
+                input_ids=None, 
+                attention_mask=attention_mask_copy, 
+                input_embeds=embeds, 
+                num_tokens=num_tokens, 
+                intermediate_output_layer_idx=intermediate_output_layer_idx,
+                embeds_info=embeds_info
+            )
         
         if self.layer == "last":
             final_output = outputs[0].float()

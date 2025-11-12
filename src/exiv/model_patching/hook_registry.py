@@ -16,6 +16,8 @@ class HookType(ExtendedEnum):
     
     EFFICIENT_MODEL_LOADER = "efficient_model_loader"
     EFFICIENT_MODULE_LOADER = "efficient_module_loader"
+    
+    NAN_CHECK = "nan_check"
 
 class ModelHook:
     # we are creating a chain of hooks, being applied one after the other
