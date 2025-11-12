@@ -15,8 +15,28 @@ from exiv.utils.file import ImageProcessor
 from exiv.utils.tensor import common_upscale
 
 
-def conditioning_set_values(embed, dict):
-    pass
+def conditioning_set_values(conditioning_list, new_values_dict = {}):
+    is_list = lambda x : isinstance(x, list)
+    is_tuple = lambda x : isinstance(x, tuple)
+    is_not_list_of_list = is_list(conditioning_list) and not \
+        (is_list(conditioning_list[0]) or is_tuple(conditioning_list[0]))
+    if is_not_list_of_list or is_tuple(conditioning_list):
+        # general format is to have list of lists, to accomodate for different
+        # types of prompts for the single generation (like regional prompting)
+        conditioning_list = [conditioning_list]     # list of [tensor, options_dict] pairs
+        
+    updated_conditioning_list = []
+    for conditioning_item in conditioning_list:
+        updated_item = [conditioning_item[0], conditioning_item[1].copy()]
+        options_dict_to_update = updated_item[1]
+
+        for key, value_to_add in new_values_dict.items():
+            value_to_set = value_to_add
+            options_dict_to_update[key] = value_to_set
+
+        updated_conditioning_list.append(updated_item)
+
+    return updated_conditioning_list
 
 def preprocess_wan_conditionals(pos_embed, neg_embed, clip_embed, wan_vae, input_img, height, width, frame_count, batch_size):
     # empty tensor
@@ -32,8 +52,7 @@ def preprocess_wan_conditionals(pos_embed, neg_embed, clip_embed, wan_vae, input
         mask = torch.ones((1, 1, blank_latent.shape[2], concat_latent_image.shape[-2], concat_latent_image.shape[-1]), device=input_img.device, dtype=input_img.dtype)
         mask[:, :, :((input_img.shape[0] - 1) // 4) + 1] = 0.0      # setting the mask to 0 for the conditioning image
 
-        # TODO: right now just going with comfy's flow, will change this later
-        # injecting mask and the latent image into the embeds
+        # following comfy's flow of just adding the conditionals to the dict
         pos_embed = conditioning_set_values(pos_embed, {"concat_latent_image": concat_latent_image, "concat_mask": mask})
         neg_embed = conditioning_set_values(neg_embed, {"concat_latent_image": concat_latent_image, "concat_mask": mask})
 
@@ -41,7 +60,7 @@ def preprocess_wan_conditionals(pos_embed, neg_embed, clip_embed, wan_vae, input
         pos_embed = conditioning_set_values(pos_embed, {"clip_vision_output": clip_embed})
         neg_embed = conditioning_set_values(neg_embed, {"clip_vision_output": clip_embed})
 
-    return pos_embed, neg_embed, Latent(samples=blank_latent)
+    return pos_embed, neg_embed, blank_latent
 
 def main():
     positive_prompt = "a dog running in the park"

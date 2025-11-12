@@ -162,7 +162,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
             
             # final assignment
             if self.quantizer is not None and self.quantizer.check_if_quantized_param(
-                self, param, param_name, state_dict, dtype=dtype
+                self, param, param_name, state_dict, dtype=self.dtype
             ):
                 self.quantizer.create_quantized_param(
                     self,
@@ -170,10 +170,10 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
                     param_name,
                     device,
                     state_dict,
-                    dtype=dtype
+                    dtype=self.dtype
                 )
             else:
-                set_module_tensor_to_device(self, param_name, device, value=param, dtype=dtype)
+                set_module_tensor_to_device(self, param_name, device, value=param, dtype=self.dtype)
 
     # code adapted from ComfyUI
     @staticmethod

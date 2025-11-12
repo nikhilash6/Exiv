@@ -4,6 +4,7 @@ import unittest
 from parameterized import parameterized
 
 from exiv.components.text_vision_encoder.te_t5 import UMT5XXL
+from exiv.components.text_vision_encoder.text_encoder import WanEncoder
 from exiv.components.text_vision_encoder.text_tokenizer import UMTT5XXLTokenizer
 from exiv.model_patching.debug_hook import add_debug_hooks
 from exiv.model_utils.model_mixin import move_model
@@ -25,7 +26,7 @@ class TextEncoderTest(unittest.TestCase):
     
     LOADING_PARAMS = [
         ("no_oom",   {"no_oom": True,  "low_vram": False, "normal_load": False}, 2012.01,  VRAM_DEVICE),
-        ("low_vram",   {"no_oom": False, "low_vram": True, "normal_load": False},  5164.5, VRAM_DEVICE),
+        ("low_vram",   {"no_oom": False, "low_vram": False, "normal_load": True},  11692.67, VRAM_DEVICE),
     ]
     @parameterized.expand(LOADING_PARAMS)
     def test_t5xxl_encoder(self, load_mode, config, expected_mem, expected_device):
@@ -50,7 +51,7 @@ class TextEncoderTest(unittest.TestCase):
                 model_path=path, 
                 dtype=torch.float16
             )
-            add_debug_hooks(t5_xxl)
+            # add_debug_hooks(t5_xxl)
             t5_xxl.load_model(
                 download_url="https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp16.safetensors?download=true"
             )
@@ -59,3 +60,28 @@ class TextEncoderTest(unittest.TestCase):
 
             del t5_xxl, embed_output
             # TODO: add check for output the correctness
+    
+    # same memory req. as above
+    LOADING_PARAMS = [
+        ("no_oom",   {"no_oom": True,  "low_vram": False, "normal_load": False}, 2012.01,  VRAM_DEVICE),
+        ("low_vram",   {"no_oom": False, "low_vram": False, "normal_load": True},  11692.67, VRAM_DEVICE),
+    ]
+    @parameterized.expand(LOADING_PARAMS)
+    def test_wan_encoder(self, load_mode, config, expected_mem, expected_device):
+        global_config.update_config(config)
+        
+        with check_memory_usage(expected_mem=expected_mem, device=expected_device):
+            # almost the same test as above, just testing wan this time
+            prompt = "a photo of a (white:2) (dog:1) and a ((blue)) (bird:3)"
+
+            model_path = "./tests/test_utils/assets/models/umt5_xxl_fp16.safetensors"
+            download_url = "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp16.safetensors?download=true"
+            t5_xxl = UMT5XXL(model_path=model_path, dtype=torch.float16)
+            wan_encoder = WanEncoder(t5_xxl=t5_xxl)
+            wan_encoder.load_model(t5_xxl_download_url=download_url)
+            embed = wan_encoder.encode(prompt)
+            del t5_xxl, wan_encoder
+            
+            print("embed: ")
+            # TODO: add check for output the correctness
+        

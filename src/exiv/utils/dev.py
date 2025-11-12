@@ -149,3 +149,14 @@ def print_tensor_size(t: Tensor):
 
     print(f"Tensor VRAM: {total_mb:.2f} MB")
     print(f"Tensor VRAM: {total_bytes:.2f} B")
+    
+
+def print_model_params(model: torch.nn.Module, break_dtype=None):
+    # break_dtype - loop breaks if this dtype is encountered
+    for name, param in model.named_parameters():
+        print(f"Found parameter: {name}")
+        print(f"Dtype: {param.dtype}")
+        print(f"Device: {param.device}")
+        
+        if param.dtype == break_dtype:
+            break

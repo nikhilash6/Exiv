@@ -1,3 +1,4 @@
+from typing import Tuple
 from .te_t5 import T5XXL
 from .encoder_base import TextEncoder
 from .text_tokenizer import UMTT5XXLTokenizer
@@ -64,13 +65,14 @@ class WanEncoder(ModelEncoder):
         self.t5_xxl = t5_xxl
         self.tokenizer = UMTT5XXLTokenizer()
     
-    def load_model(self):
-        self.t5_xxl.load_model()
+    def load_model(self, t5_xxl_download_url = None):
+        self.t5_xxl.load_model(download_url=t5_xxl_download_url)
         assert self.t5_xxl.te_type == TextEncoderType.T5_XXL.value, f"expected T5_XXL but found {self.t5_xxl.te_type}"
         
     def encode(self, text):
-        tokens = self.tokenize(text)
-        return self.t5_xxl.encode_token_weights(tokens)
+        tokens, special_tokens = self.tokenize(text)
+        return self.t5_xxl.encode_token_weights(tokens, special_tokens)
     
-    def tokenize(self, text, return_word_ids=False):
+    def tokenize(self, text, return_word_ids=False) -> Tuple:
+        # returns (tokens, special_tokens)
         return self.tokenizer.tokenize_with_weights(text, return_word_ids)
