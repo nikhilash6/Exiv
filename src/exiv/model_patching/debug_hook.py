@@ -31,7 +31,7 @@ class NANCheckHook:
             
         return output
 
-# NOTE: this used mainly for test / dev
+# NOTE: this is used mainly for test / dev
 def add_debug_hooks(model):
     hook_handle_list = [NANCheckHook]
     

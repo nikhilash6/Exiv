@@ -13,6 +13,12 @@ from ...utils.logging import app_logger
 
 # code adapted from Huggingface Transformers
 
+def fp16_clamp(x):
+    if x.dtype == torch.float16 and torch.isinf(x).any():
+        clamp = torch.finfo(x.dtype).max - 1000
+        x = torch.clamp(x, min=-clamp, max=clamp)
+    return x
+
 # NOTE: we are passing the position bias around in the layers so we 
 # don't have recompute it everytime in individual layers
 # NOTE: deleting all the KV cache stuff for now, since we are only using the
@@ -277,7 +283,7 @@ class T5LayerSelfAttention(nn.Module):
             mask=attention_mask,
             position_bias=position_bias,
         )
-        hidden_states += attn_output
+        hidden_states = fp16_clamp(hidden_states + attn_output)
         return hidden_states, position_bias
 
 # we don't need cross attn, but keeping the code just in case
@@ -304,7 +310,7 @@ class T5LayerCrossAttention(nn.Module):
             position_bias=position_bias,
         )
 
-        hidden_states += attn_output
+        hidden_states = fp16_clamp(hidden_states + attn_output)
         return hidden_states, position_bias
 
 class T5Block(nn.Module):
