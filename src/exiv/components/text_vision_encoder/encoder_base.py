@@ -2,6 +2,7 @@ import torch
 from torch import Tensor
 
 from dataclasses import dataclass
+from typing import Any, Dict
 
 from ...utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, ProcDevice
 from ...model_utils.model_mixin import ModelMixin
@@ -157,7 +158,7 @@ class TextEncoder(ModelMixin):
             embeds_info     # TODO: likely a bug, overwritten every loop
         )
 
-    def encode_token_weights(self, token_weight_pairs, special_tokens: tuple):
+    def encode_token_weights(self, token_weight_pairs, special_tokens: tuple) -> Dict[str, Any]:
         to_encode = list()
         max_token_len = 0
         has_weights = False
@@ -196,7 +197,6 @@ class TextEncoder(ModelMixin):
             intermediate_output_layer_idx = self.layer_idx
         
         # ---------------- main encoding ----------------
-        # TODO: handle dtype fp32
         with torch.autocast(device_type="cuda", dtype=torch.float32):
             outputs = self(
                 input_ids=None, 
@@ -245,12 +245,15 @@ class TextEncoder(ModelMixin):
                         z[0][j] = (z[0][j] - z_empty[j]) * weight + z_empty[j]
             output.append(z)
 
+        encoder_output = {}
         if (len(output) == 0):
             # returning the empty neutral
-            r = (final_output[-1:].to(OFFLOAD_DEVICE), first_pooled)
+            encoder_output = {"output": final_output[-1:].to(OFFLOAD_DEVICE)}
         else:
             # concatenating all the processed (and weighted) embeddings together
-            r = (torch.cat(output, dim=-2).to(OFFLOAD_DEVICE), first_pooled)
+            encoder_output = { "output": torch.cat(output, dim=-2).to(OFFLOAD_DEVICE)}
+        
+        encoder_output.update({"pooled": first_pooled})
 
         # extra data (like an attention mask), process and append it to the output
         if len(outputs) > 2:
@@ -261,8 +264,8 @@ class TextEncoder(ModelMixin):
                     v = v[:batch_count].flatten().unsqueeze(dim=0).to(OFFLOAD_DEVICE)
                 extra[k] = v
 
-            r = r + (extra,)
-        return r
+            encoder_output.update({ "extra": extra })
+        return encoder_output
         
 
 class VisionEncoder(ModelMixin):
@@ -297,7 +300,7 @@ class VisionEncoder(ModelMixin):
         image = torch.clip((255. * image), 0, 255).round() / 255.0
         return (image - mean.view([3,1,1])) / std.view([3,1,1])
         
-    def encode_image(self, image: Tensor, crop=True):
+    def encode_image(self, image: Tensor, crop=True) -> Dict[str, Any]:
         pixel_values = self.clip_preprocess(image.to(self.gpu_device), crop=crop).float()
         out = self(pixel_values=pixel_values, intermediate_output='all' if self.return_all_hidden_states else -2)
 

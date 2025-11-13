@@ -4,17 +4,18 @@ from exiv.components.enum import KSamplerType, ModelType, SchedulerType
 from exiv.components.models.wan.main import WanModel, WanModelArchConfig
 from exiv.components.samplers.model_sampling import KSampler
 from exiv.components.samplers.sampler_types import get_model_sampling
-from exiv.components.text_vision_encoder.te_t5 import T5XXL
+from exiv.components.text_vision_encoder.te_t5 import T5XXL, UMT5XXL
 from exiv.components.text_vision_encoder.text_encoder import WanEncoder
 from exiv.components.text_vision_encoder.vision_encoder import create_vision_encoder
 from exiv.components.vae.wan_vae import WanVAE
-from exiv.model_utils.latent import Latent
+from exiv.model_utils.common_classes import Latent
+from exiv.model_utils.model_mixin import move_model
 from exiv.model_utils.model_wrapper import ModelWrapper
-from exiv.utils.device import OFFLOAD_DEVICE, ProcDevice
-from exiv.utils.file import ImageProcessor
+from exiv.utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, ProcDevice
+from exiv.utils.file import ImageProcessor, ensure_model_available
 from exiv.utils.tensor import common_upscale
 
-
+# TODO: move to the tensors file
 def conditioning_set_values(conditioning_list, new_values_dict = {}):
     is_list = lambda x : isinstance(x, list)
     is_tuple = lambda x : isinstance(x, tuple)
@@ -38,65 +39,87 @@ def conditioning_set_values(conditioning_list, new_values_dict = {}):
 
     return updated_conditioning_list
 
-def preprocess_wan_conditionals(pos_embed, neg_embed, clip_embed, wan_vae, input_img, height, width, frame_count, batch_size):
+def preprocess_wan_conditionals(pos_embed_dict, neg_embed_dict, clip_embed_dict, input_img, height, width, frame_count, batch_size) -> tuple[list, list, Latent]:
+    # converting pos and neg embed dict in the appropriate format (list of lists)
+    pos_embed = [[pos_embed_dict.pop("output"), pos_embed_dict]]
+    neg_embed = [[neg_embed_dict.pop("output"), neg_embed_dict]]
+    
     # empty tensor
-    blank_latent = torch.zeros([batch_size, 16, ((frame_count - 1) // 4) + 1, height // 8, width // 8], device=OFFLOAD_DEVICE)
-    if input_img:
-        # empty image latent
-        image = torch.ones((frame_count, height, width, input_img.shape[-1]), device=input_img.device, dtype=input_img.dtype) * 0.5
-        image[:input_img.shape[0]] = input_img      # first conditionals are replaced by the input_img
+    blank_latent = Latent()
+    blank_latent.samples = torch.zeros([batch_size, 16, ((frame_count - 1) // 4) + 1, height // 8, width // 8], device=OFFLOAD_DEVICE)
+    if input_img is not None:
+        # empty image latent (T, H, W, C)
+        image = torch.ones((frame_count, height, width, input_img.shape[1]), device=input_img.device, dtype=input_img.dtype) * 0.5
+        image[0] = input_img[0].permute(1, 2, 0)     # first conditionals are replaced by the input_img
 
+        # (T, H, W, C) -> (B, C, T, H, W)
+        image = image.permute(3, 0, 1, 2).unsqueeze(0)
+        
         # encode the entire sequence
-        concat_latent_image = wan_vae.encode(image[:, :, :, :3])
+        download_url = "https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-720P-Diffusers/resolve/main/vae/diffusion_pytorch_model.safetensors?download=true"
+        model_path = "./tests/test_utils/assets/models/wan_2_1_vae.safetensors"
+        model_path = ensure_model_available(model_path=model_path, download_url=download_url)
+        
+        image = image.to(VRAM_DEVICE)
+        wan_vae = WanVAE()
+        wan_vae.load_model(model_path=model_path)
+        move_model(wan_vae, VRAM_DEVICE)
+        concat_latent_image = wan_vae.encode(image)
+        del wan_vae, image
 
-        mask = torch.ones((1, 1, blank_latent.shape[2], concat_latent_image.shape[-2], concat_latent_image.shape[-1]), device=input_img.device, dtype=input_img.dtype)
+        mask = torch.ones((1, 1, blank_latent.samples.shape[2], concat_latent_image.shape[-2], concat_latent_image.shape[-1]), device=input_img.device, dtype=input_img.dtype)
         mask[:, :, :((input_img.shape[0] - 1) // 4) + 1] = 0.0      # setting the mask to 0 for the conditioning image
 
         # following comfy's flow of just adding the conditionals to the dict
         pos_embed = conditioning_set_values(pos_embed, {"concat_latent_image": concat_latent_image, "concat_mask": mask})
         neg_embed = conditioning_set_values(neg_embed, {"concat_latent_image": concat_latent_image, "concat_mask": mask})
 
-    if clip_embed:
-        pos_embed = conditioning_set_values(pos_embed, {"clip_vision_output": clip_embed})
-        neg_embed = conditioning_set_values(neg_embed, {"clip_vision_output": clip_embed})
+    if clip_embed_dict:
+        pos_embed = conditioning_set_values(pos_embed, {"clip_vision_output": clip_embed_dict})
+        neg_embed = conditioning_set_values(neg_embed, {"clip_vision_output": clip_embed_dict})
 
     return pos_embed, neg_embed, blank_latent
 
 def main():
     positive_prompt = "a dog running in the park"
     negative_prompt = "blurry, bad quality"
-    input_img = ImageProcessor.load_image_list("./assets/boy.jpg")[0]
+    input_img = ImageProcessor.load_image_list("./tests/test_utils/assets/media/test.jpg")[0]
     height, width, output_frame_count = 512, 512, 81
     
     # resizing img
-    input_img = common_upscale([input_img], height, width)
+    input_img = common_upscale(input_img.unsqueeze(0), height, width)   # (B, C, H, W)
     
     # generate text embeddings
-    t5_xxl = T5XXL(model_path="")
+    model_path = "./tests/test_utils/assets/models/umt5_xxl_fp16.safetensors"
+    download_url = "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp16.safetensors?download=true"
+    t5_xxl = UMT5XXL(model_path=model_path, dtype=torch.float16)
     wan_encoder = WanEncoder(t5_xxl=t5_xxl)
-    pos_embed = wan_encoder.encode(positive_prompt)
-    neg_embed = wan_encoder.encode(negative_prompt)
+    wan_encoder.load_model(t5_xxl_download_url=download_url)
+    pos_embed_dict = wan_encoder.encode(positive_prompt)
+    neg_embed_dict = wan_encoder.encode(negative_prompt)
+    del wan_encoder
     
     # generate img embeddings
-    clip_vision_model_path = "temp"
-    clip_model = create_vision_encoder(clip_vision_model_path)
-    clip_embed = clip_model.encode_image(input_img)
-    
-    # encoded image latent
-    wan_vae = WanVAE()
+    clip_vision_model_path = "./tests/test_utils/assets/models/CLIP-ViT-H-fp16.safetensors"
+    download_url = "https://huggingface.co/Kijai/CLIPVisionModelWithProjection_fp16/resolve/main/CLIP-ViT-H-fp16.safetensors?download=true"
+    clip_model = create_vision_encoder(model_path=clip_vision_model_path, download_url=download_url, dtype=torch.float16)
+    clip_model.load_model()
+    clip_embed_dict = clip_model.encode_image(input_img)
+    del clip_model
     
     # preprocess conditionals
     pos_embed, neg_embed, blank_latent = preprocess_wan_conditionals(
-                                            pos_embed, 
-                                            neg_embed, 
-                                            clip_embed, 
-                                            wan_vae, 
+                                            pos_embed_dict, 
+                                            neg_embed_dict, 
+                                            clip_embed_dict,
                                             input_img, 
                                             height, 
                                             width, 
                                             output_frame_count, 
                                             1
                                         )
+    
+    print("here")
     
     # create a model wrapper
     wan_dit_model = WanModel()
@@ -121,4 +144,8 @@ def main():
     )
     
     out = main_sampler.run_sampling()
+    wan_vae = WanVAE()
     out = wan_vae.decode(out)
+    
+    
+main()

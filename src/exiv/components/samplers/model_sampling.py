@@ -10,8 +10,8 @@ from .sampler_impl import ksampler_factory
 from ..conditionals import can_concat_cond, cond_cat
 from ...utils.tensor import fix_empty_latent_channels, prepare_noise
 from ...model_utils.model_wrapper import ModelWrapper
-from ...model_utils.latent import Latent
-from ...utils.device import OFFLOAD_DEVICE, ProcDevice
+from ...model_utils.common_classes import Latent
+from ...utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, ProcDevice
 
 class KSampler:
     def __init__(
@@ -26,10 +26,13 @@ class KSampler:
         negative: torch.Tensor,
         latent_image: Latent,
         denoise: float = 1.0,
+        device = None,
     ):
         assert sampler_name in KSamplerType.value_list() + SamplerType.value_list(), f"sampler {sampler_name} not supported"
         assert scheduler_name in SchedulerType.value_list(), f"scheduler {scheduler_name} not supported"
         assert denoise >= 0.0 and denoise <= 1.0, f"denoise {denoise} out of range, should be between 0 and 1"
+        
+        self.device = device or VRAM_DEVICE
         
         self.wrapped_model = wrapped_model
         self.seed = seed
@@ -57,7 +60,7 @@ class KSampler:
     def set_steps(self, steps, denoise=None):
         self.steps = steps
         if denoise is None or denoise > 0.9999:
-            self.sigmas = self.calculate_sigmas(steps).to(self.device)
+            self.sigmas = self.calculate_sigmas().to(self.device)
         else:
             if denoise <= 0.0:
                 self.sigmas = torch.FloatTensor([])

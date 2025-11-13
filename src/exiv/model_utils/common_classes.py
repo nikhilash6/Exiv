@@ -2,10 +2,17 @@ import torch
 from torch import Tensor
 
 from typing import Any, List
+from dataclasses import dataclass, field
 
-from ..model_utils.model_mixin import ModelMixin
+from .model_mixin import ModelMixin
 from ..utils.enum import ExtendedEnum
 
+@dataclass
+class Latent:
+    samples: Tensor | None = None
+    batch_index: List[int] | None = None
+    noise_mask: Tensor | None = None
+    
 
 class ModelOption(ExtendedEnum):
     POST_CFG_FUNC = "sampler_post_cfg_function"
