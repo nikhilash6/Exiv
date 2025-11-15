@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import unittest
 from parameterized import parameterized
 
-from exiv.components.vae.wan_vae import WanVAE
+from exiv.components.vae.wan_vae import Wan21VAE
 from exiv.model_utils.model_mixin import move_model
 from exiv.utils.file import ImageProcessor, ensure_model_available
 from exiv.utils.tensor import common_upscale
@@ -48,7 +48,7 @@ class VisionEncoderTest(unittest.TestCase):
             model_path = "./tests/test_utils/assets/models/wan_2_1_vae.safetensors"
             model_path = ensure_model_available(model_path=model_path, download_url=download_url)
             
-            wan_vae = WanVAE()
+            wan_vae = Wan21VAE()
             wan_vae.load_model(model_path=model_path)
             move_model(wan_vae, VRAM_DEVICE)
             

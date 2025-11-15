@@ -1,13 +1,13 @@
 import torch
 
 from exiv.components.enum import KSamplerType, ModelType, SchedulerType
-from exiv.components.models.wan.main import WanModel, WanModelArchConfig
+from exiv.components.models.wan.main import Wan21Model, WanModelArchConfig
 from exiv.components.samplers.model_sampling import KSampler
 from exiv.components.samplers.sampler_types import get_model_sampling
 from exiv.components.text_vision_encoder.te_t5 import T5XXL, UMT5XXL
 from exiv.components.text_vision_encoder.text_encoder import WanEncoder
 from exiv.components.text_vision_encoder.vision_encoder import create_vision_encoder
-from exiv.components.vae.wan_vae import WanVAE
+from exiv.components.vae.wan_vae import Wan21VAE
 from exiv.model_utils.common_classes import Latent
 from exiv.model_utils.model_mixin import move_model
 from exiv.model_utils.common_classes import ModelWrapper
@@ -61,7 +61,7 @@ def preprocess_wan_conditionals(pos_embed_dict, neg_embed_dict, clip_embed_dict,
         model_path = ensure_model_available(model_path=model_path, download_url=download_url)
         
         image = image.to(VRAM_DEVICE)
-        wan_vae = WanVAE()
+        wan_vae = Wan21VAE()
         wan_vae.load_model(model_path=model_path)
         move_model(wan_vae, VRAM_DEVICE)
         concat_latent_image = wan_vae.encode(image)
@@ -122,7 +122,7 @@ def main():
     print("here")
     
     # create a model wrapper
-    wan_dit_model = WanModel()
+    wan_dit_model = Wan21Model()
     model_sampling = get_model_sampling(ModelType.EDM)
     model_wrapper = ModelWrapper(
         model=wan_dit_model,
@@ -144,7 +144,7 @@ def main():
     )
     
     out = main_sampler.run_sampling()
-    wan_vae = WanVAE()
+    wan_vae = Wan21VAE()
     out = wan_vae.decode(out)
     
     

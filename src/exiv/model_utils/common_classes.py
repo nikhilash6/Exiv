@@ -4,6 +4,8 @@ from torch import Tensor
 from typing import Any, List
 from dataclasses import dataclass, field
 
+from exiv.components.latent_format import Wan21VAELatentFormat
+
 from .model_mixin import ModelMixin
 from ..utils.enum import ExtendedEnum
 
@@ -12,24 +14,24 @@ class Latent:
     samples: Tensor | None = None
     batch_index: List[int] | None = None
     noise_mask: Tensor | None = None
-    
 
 class ModelOption(ExtendedEnum):
     POST_CFG_FUNC = "sampler_post_cfg_function"
 
-# basic config defining model arch (awkwardly placed rn, will move later)
 class ModelArchConfig:
-    latent_channels = 16
+    # will extend this as more models are added
+    latent_format = None
+    
+class Wan21ModelArchConfig(ModelArchConfig):
+    latent_format = Wan21VAELatentFormat()
 
 class ModelWrapper:
     '''
     contains
     - the main model
     - methods of sampling
-    - model arch details like num of channels
+    - model arch details
     '''
-    
-    # TODO: create protocol class from model sampling, rn using Any
     def __init__(
         self, 
         model: ModelMixin, 
@@ -40,15 +42,14 @@ class ModelWrapper:
         self.model_sampling = model_sampling
         self.model_arch_config = model_arch_config
     
-    # TODO: probably needs to be broken into smaller funcs
     def update_options(self, key, value):
         assert key in ModelOption.value_list(), "invalid model option"
         
-        self.model_options[key] = self.model_options.get(key, []) + [value]
+        self.model_options[key] = value
         return self.model_options
     
-    def process_latent_in(self, latent_image: Tensor) -> Tensor:
-        pass
+    def process_latent_in(self, latent_in: Tensor) -> Tensor:
+        return self.model_arch_config.latent_format.process_in(latent_in)
     
-    def process_latent_out(self, samples: List[Tensor]) -> List[Tensor]:
-        pass
+    def process_latent_out(self, latent_out: Tensor) -> Tensor:
+        return self.model_arch_config.latent_format.process_out(latent_out)

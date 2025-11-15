@@ -319,7 +319,7 @@ class MLPProj(torch.nn.Module):
         return clip_extra_context_tokens
 
 
-class WanModel(ModelMixin):
+class Wan21Model(ModelMixin):
     r"""
     Wan diffusion backbone supporting both text-to-video and image-to-video.
     """
