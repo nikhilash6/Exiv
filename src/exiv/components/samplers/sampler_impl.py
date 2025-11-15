@@ -10,7 +10,7 @@ import math
 
 from ..enum import KSamplerType
 from .sampler_types import CONST
-from ...model_utils.model_wrapper import ModelOption, ModelWrapper
+from ...model_utils.common_classes import ModelOption, ModelWrapper
 
 from ...utils.tensor import append_dims
 

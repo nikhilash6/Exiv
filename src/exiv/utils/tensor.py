@@ -7,7 +7,7 @@ from typing import Union, Tuple, List, Optional
 
 from PIL import Image
 
-from ..model_utils.model_wrapper import ModelWrapper
+from ..model_utils.common_classes import ModelWrapper
 from ..utils.logging import app_logger
 
 # many of these methods have been borrowed from ComfyUI

@@ -9,7 +9,7 @@ from ..enum import DISCARD_PENULTIMATE_SIGMA_SAMPLERS, KSamplerType, SamplerType
 from .sampler_impl import ksampler_factory
 from ..conditionals import can_concat_cond, cond_cat
 from ...utils.tensor import fix_empty_latent_channels, prepare_noise
-from ...model_utils.model_wrapper import ModelWrapper
+from ...model_utils.common_classes import ModelWrapper
 from ...model_utils.common_classes import Latent
 from ...utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, ProcDevice
 
@@ -85,6 +85,7 @@ class KSampler:
         # such as last_step, start_step
         
         sampler = ksampler_factory(self.sampler_name)
+        model_options = {}      # TODO: this should be a part of the modelwrapper 🤔
         return sample(
             self.wrapped_model,
             noise,
@@ -93,7 +94,7 @@ class KSampler:
             self.cfg,
             self.sigmas,
             sampler,
-            self.model_options,
+            model_options,
             latent_image=latent_image,
             denoise_mask=self.latent_image.noise_mask,
             callback=lambda *args, **kwargs: None,      # TODO: pass a null fn from the top
@@ -129,12 +130,13 @@ def sample(
         conds[k] = [a.copy() for a in v]
         
     if denoise_mask is not None:
-        denoise_mask = prepare_mask(denoise_mask, noise.shape, wrapped_model.device)
-        
+        denoise_mask = prepare_mask(denoise_mask, noise.shape, wrapped_model.model.device)
+    
+    # not scaling the blank latents
     if latent_image is not None and torch.count_nonzero(latent_image) > 0:
         latent_image = wrapped_model.process_latent_in(latent_image)
         
-    conds = process_conds(noise, conds, wrapped_model.device, latent_image, denoise_mask, seed)
+    conds = process_conds(noise, conds, wrapped_model.model.device, latent_image, denoise_mask, seed)
     pos_conds, neg_conds = conds.get("positive"), conds.get("negative")
     
     extra_args = {"model_options": model_options, "seed":seed}
@@ -192,7 +194,6 @@ def model_sampling(model, x, timestep, uncond, cond, cond_scale, model_options={
     return cfg_result
 
 
-# TODO: still WIP, model_options not in use
 def calc_cond_batch(model, conds, x_in, timestep, model_options):
     """
     It batches all conditioning (pos, neg, controlnet etc..) together, runs the

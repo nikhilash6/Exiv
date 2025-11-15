@@ -10,7 +10,7 @@ from ...enum import Model
 from ...attention import optimized_attention
 from ...positional_embeddings import EmbedND, apply_rope
 from ....model_utils.model_mixin import ModelMixin
-from ....model_utils.model_wrapper import ModelArchConfig
+from ....model_utils.common_classes import ModelArchConfig
 from ....utils.tensor import pad_to_patch_size
 
 class WanModelArchConfig(ModelArchConfig):
