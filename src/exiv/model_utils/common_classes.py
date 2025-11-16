@@ -15,9 +15,6 @@ class Latent:
     batch_index: List[int] | None = None
     noise_mask: Tensor | None = None
 
-class ModelOption(ExtendedEnum):
-    POST_CFG_FUNC = "sampler_post_cfg_function"
-
 class ModelArchConfig:
     # will extend this as more models are added
     latent_format = None
@@ -41,12 +38,6 @@ class ModelWrapper:
         self.model = model
         self.model_sampling = model_sampling
         self.model_arch_config = model_arch_config
-    
-    def update_options(self, key, value):
-        assert key in ModelOption.value_list(), "invalid model option"
-        
-        self.model_options[key] = value
-        return self.model_options
     
     def process_latent_in(self, latent_in: Tensor) -> Tensor:
         return self.model_arch_config.latent_format.process_in(latent_in)

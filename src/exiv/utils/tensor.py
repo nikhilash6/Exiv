@@ -27,13 +27,14 @@ def fix_empty_latent_channels(model_wrapper: ModelWrapper, latent_image: torch.T
         latent_image = repeat_to_batch_size(latent_image, latent_channels, dim=1)
     return latent_image
 
-def prepare_noise(latent_image: torch.Tensor, seed: int, noise_inds: Optional[np.ndarray] = None):
+def prepare_noise(latent_image: torch.Tensor, seed: int | None = None, noise_inds: Optional[np.ndarray] = None):
     """
     Creates random noise tensors based on a latent image's shape, dtype, and layout are used
     e.g. usage, noise_inds = [0, 0, 1, 1] -> first two will share the same noise + the last two will as well
     """
     
-    generator = torch.Generator(device="cpu").manual_seed(seed)
+    generator = torch.Generator(device="cpu")
+    if seed is not None: generator.manual_seed(seed)
 
     if noise_inds is None:
         return random_tensor(
