@@ -45,24 +45,24 @@ def ksampler_factory(sampler_name, extra_options={}, inpaint_options={}):
 
     return Sampler(sampler_function, extra_options, inpaint_options)
 
-# TODO: move this into model patcher
-def inpaint_preprocessing(self, x: Tensor, sigma, denoise_mask: Tensor, model_options={}, seed=None):
-    # self: instance of Callable[..., Any] class
-    # x: current step latent
-    # denoise_mask: denoise everything except the masked area (0s)
-    if denoise_mask is not None:
-        latent_mask = 1. - denoise_mask
-        # sigma is defined for each batch, for a latent image of size [batch_size, channels, height, width]
-        # so reshaping sigma from [4] -> [4, 1, 1, 1]   (assuming batch_size = 4)
-        reshaped_sigma = sigma.reshape([sigma.shape[0]] + [1] * (len(self.noise.shape) - 1))
-        scaled_noise = self.model_sampling.noise_scaling(reshaped_sigma, self.noise, self.latent_image)
-        x = x * denoise_mask + scaled_noise * latent_mask
+# TODO: method is moved into the hooks, not deleting rn as it is required for testing
+# def inpaint_preprocessing(self, x: Tensor, sigma, denoise_mask: Tensor, model_options={}, seed=None):
+#     # self: instance of Callable[..., Any] class
+#     # x: current step latent
+#     # denoise_mask: denoise everything except the masked area (0s)
+#     if denoise_mask is not None:
+#         latent_mask = 1. - denoise_mask
+#         # sigma is defined for each batch, for a latent image of size [batch_size, channels, height, width]
+#         # so reshaping sigma from [4] -> [4, 1, 1, 1]   (assuming batch_size = 4)
+#         reshaped_sigma = sigma.reshape([sigma.shape[0]] + [1] * (len(self.noise.shape) - 1))
+#         scaled_noise = self.model_sampling.noise_scaling(reshaped_sigma, self.noise, self.latent_image)
+#         x = x * denoise_mask + scaled_noise * latent_mask
     
-    out = self(x, sigma, model_options=model_options, seed=seed)
+#     out = self(x, sigma, model_options=model_options, seed=seed)
     
-    if denoise_mask is not None:
-        out = out * denoise_mask + self.latent_image * latent_mask
-    return out
+#     if denoise_mask is not None:
+#         out = out * denoise_mask + self.latent_image * latent_mask
+#     return out
 
 
 class Sampler:
@@ -88,9 +88,10 @@ class Sampler:
         disable_pbar: bool = False
     ):
         extra_args["denoise_mask"] = denoise_mask
+        # TODO: remove after testing the inpainting hook
         # adding inpaint preprocessing
-        patched_method = types.MethodType(inpaint_preprocessing, wrapped_model)
-        wrapped_model.__call__ = patched_method
+        # patched_method = types.MethodType(inpaint_preprocessing, wrapped_model)
+        # wrapped_model.__call__ = patched_method
         
         wrapped_model.latent_image = latent_image
         if self.inpaint_options.get("random", False):

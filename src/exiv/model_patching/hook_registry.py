@@ -4,7 +4,7 @@ from torch import nn
 import gc
 import functools
 
-from typing import Tuple, Any, Dict, Optional
+from typing import Callable, Tuple, Any, Dict, Optional
 
 from ..utils.enum import ExtendedEnum
 from ..utils.logging import app_logger
@@ -12,11 +12,16 @@ from ..utils.logging import app_logger
 # this creates a lookup table coupled with a doubly linked list, that has O(1) lookup and update
 
 class HookType(ExtendedEnum):
-    GENERIC = "generc"
+    GENERIC = "generic"
     
+    # loading hooks
     EFFICIENT_MODEL_LOADER = "efficient_model_loader"
     EFFICIENT_MODULE_LOADER = "efficient_module_loader"
     
+    # pre-processing hooks
+    INPAINT_HOOK = "inpaint_hook"
+    
+    # debug hooks
     NAN_CHECK = "nan_check"
 
 class ModelHook:
@@ -25,6 +30,10 @@ class ModelHook:
         self.hook_type = HookType.GENERIC.value
         self.next_hook: ModelHook = None
         self.prev_hook: ModelHook = None
+    
+    # PONDER: can the structure be improved
+    def call_wrapper(self, module: torch.nn.Module, og_call: Callable, *args, **kwargs):
+        return og_call(*args, **kwargs)
 
     def pre_forward(self, module: torch.nn.Module, *args, **kwargs):
         return args, kwargs
@@ -78,12 +87,14 @@ class HookRegistry:
         
         self._add_to_front(hook)
         self._cached_forward = None
+        self._cached_call = None
     
     def get_modified_forward(self):
         if self._cached_forward:
             return self._cached_forward
     
-        cur_forward = self._module_ref.forward
+        cur_forward = self._module_ref._original_forward if \
+            getattr(self._module_ref, "_original_forward", None) else self._module_ref.forward
         cur_hook = self.head.next_hook
         
         def create_new_forward(hook, og_forward):
@@ -100,6 +111,27 @@ class HookRegistry:
         
         self._cached_forward = cur_forward
         return cur_forward
+    
+    # NOTE: hackish sol for now, instead of overwriting __call__ (which can't be done reliably)
+    # this is directly called from the ModelMixin's __call__ method
+    def get_modified_call(self, og_call):
+        if getattr(self, '_cached_call', None):
+            return self._cached_call
+    
+        cur_call = og_call
+        cur_hook = self.head.next_hook
+        
+        def create_new_call(hook, og_call):
+            def new_call(*args, **kwargs):
+                return hook.call_wrapper(self._module_ref, og_call, *args, **kwargs)
+            return new_call
+        
+        while cur_hook != self.tail:
+            cur_call = create_new_call(hook=cur_hook, og_call=cur_call)
+            cur_hook = cur_hook.next_hook
+        
+        self._cached_call = cur_call
+        return cur_call
     
     @classmethod
     def get_hook_registry(cls, module):

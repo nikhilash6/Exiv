@@ -6,7 +6,7 @@ import math
 from .scheduler_types import calculate_sigmas
 from .sampling_helpers import preprocess_cond, process_conds, prepare_mask
 from ..enum import DISCARD_PENULTIMATE_SIGMA_SAMPLERS, KSamplerType, SamplerType, SchedulerType
-from .sampler_impl import ksampler_factory
+from .sampler_impl import Sampler, ksampler_factory
 from ..conditionals import can_concat_cond, cond_cat
 from ...utils.tensor import fix_empty_latent_channels, prepare_noise
 from ...model_utils.common_classes import ModelWrapper
@@ -84,8 +84,7 @@ class KSampler:
         # TODO: enable calculation of new sigmas as per vars injected at the runtime
         # such as last_step, start_step
         
-        sampler = ksampler_factory(self.sampler_name)
-        model_options = {}      # TODO: this should be a part of the modelwrapper 🤔
+        ksampler_cls_impl = ksampler_factory(self.sampler_name)
         return sample(
             self.wrapped_model,
             noise,
@@ -93,8 +92,7 @@ class KSampler:
             self.negative,
             self.cfg,
             self.sigmas,
-            sampler,
-            model_options,
+            ksampler_cls_impl,
             latent_image=latent_image,
             denoise_mask=self.latent_image.noise_mask,
             callback=lambda *args, **kwargs: None,      # TODO: pass a null fn from the top
@@ -109,8 +107,7 @@ def sample(
     negative,
     cfg,
     sigmas,
-    sampler,
-    model_options,
+    ksampler_cls_impl: Sampler,
     latent_image,
     denoise_mask,
     callback,
@@ -139,7 +136,7 @@ def sample(
     conds = process_conds(noise, conds, wrapped_model.model.device, latent_image, denoise_mask, seed)
     pos_conds, neg_conds = conds.get("positive"), conds.get("negative")
     
-    extra_args = {"model_options": model_options, "seed":seed}
+    extra_args = {"seed":seed}
     
     def denoiser_function(x, sigma, **kwargs):
         return model_sampling(
@@ -153,7 +150,7 @@ def sample(
             seed=kwargs.get("seed")
         )
     
-    samples = sampler.sample(denoiser_function, sigmas, extra_args, callback, noise, latent_image, denoise_mask)
+    samples = ksampler_cls_impl.sample(denoiser_function, sigmas, extra_args, callback, noise, latent_image, denoise_mask)
     return wrapped_model.process_latent_out(samples.to(torch.float32))
 
 

@@ -90,15 +90,21 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         return round(ms / BYTES_IN_MB, 2)
     
     def __call__(self, *args, **kwargs):
-        with torch.inference_mode():
-            # moving the inputs to GPU
-            app_logger.debug(f"moving the inputs to {self.gpu_device}")
-            # new_args = tuple(a.to(self.gpu_device, non_blocking=False) if torch.is_tensor(a) else a for a in args)
-            # new_kwargs = {k: (v.to(self.gpu_device, non_blocking=False) if torch.is_tensor(v) else v) for k, v in kwargs.items()}
-            new_args = tuple(cast_to(a, device=self.gpu_device, dtype=self.dtype) if torch.is_tensor(a) else a for a in args)
-            new_kwargs = {k: (cast_to(v, device=self.gpu_device, dtype=self.dtype) if torch.is_tensor(v) else v) for k, v in kwargs.items()}
+        def original_call(*args, **kwargs):
+            with torch.inference_mode():
+                # moving the inputs to GPU
+                app_logger.debug(f"moving the inputs to {self.gpu_device}")
+                new_args = tuple(cast_to(a, device=self.gpu_device, dtype=self.dtype) if torch.is_tensor(a) else a for a in args)
+                new_kwargs = {k: (cast_to(v, device=self.gpu_device, dtype=self.dtype) if torch.is_tensor(v) else v) for k, v in kwargs.items()}
 
-            return super().__call__(*new_args, **new_kwargs)
+                return super(ModelMixin, self).__call__(*new_args, **new_kwargs)
+            
+        registry = getattr(self, "hook_registry", None)
+        if registry and registry.head.next_hook != registry.tail:
+            wrapped_call = registry.get_modified_call(original_call)
+            return wrapped_call(*args, **kwargs)
+        else:
+            return original_call(*args, **kwargs)
 
     # code adapted from Huggingface Diffusers
     def load_model(
