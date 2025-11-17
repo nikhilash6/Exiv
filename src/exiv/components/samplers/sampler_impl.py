@@ -1,5 +1,3 @@
-import types
-from typing import Any, Callable, List, Optional
 import torch
 from torch import nn, Tensor
 import torchsde
@@ -7,6 +5,7 @@ from tqdm.auto import trange, tqdm
 from scipy import integrate
 
 import math
+from typing import Any, Callable, List, Optional
 
 from ..enum import KSamplerType
 from .sampler_types import CONST
@@ -78,7 +77,8 @@ class Sampler:
 
     def sample(
         self, 
-        wrapped_model: ModelWrapper, 
+        denoising_fn: Callable,     # used as model_forward in sampler methods
+        wrapped_model: ModelWrapper,
         sigmas,
         extra_args: Any, 
         callback: Callable[..., Any],
@@ -93,14 +93,26 @@ class Sampler:
         # patched_method = types.MethodType(inpaint_preprocessing, wrapped_model)
         # wrapped_model.__call__ = patched_method
         
-        wrapped_model.latent_image = latent_image
-        if self.inpaint_options.get("random", False):
-            generator = torch.manual_seed(extra_args.get("seed", 41) + 1)
-            wrapped_model.noise = torch.randn(noise.shape, generator=generator, device="cpu").to(noise.dtype).to(noise.device)
-        else:
-            wrapped_model.noise = noise
+        # ------- moving tensors (messy logic)
+        device = wrapped_model.model.gpu_device
+        sigmas = sigmas.to(device)
+        noise = noise.to(device)
+        
+        if latent_image is not None:
+            latent_image = latent_image.to(device)
+            
+        if denoise_mask is not None:
+            denoise_mask = denoise_mask.to(device)
 
-        # TODO: find different variable shapes here
+        if isinstance(extra_args, dict):
+            new_extra_args = {}
+            for k, v in extra_args.items():
+                if isinstance(v, torch.Tensor):
+                    new_extra_args[k] = v.to(device)
+                else:
+                    new_extra_args[k] = v
+            extra_args = new_extra_args
+
         noise = wrapped_model.model_sampling.noise_scaling(sigmas[0], noise, latent_image, self.max_denoise(wrapped_model, sigmas))
 
         k_callback = None
@@ -108,7 +120,7 @@ class Sampler:
         if callback is not None:
             k_callback = lambda x: callback(x["i"], x["denoised"], x["x"], total_steps)
 
-        samples = self.sampler_function(wrapped_model, noise, sigmas, extra_args=extra_args, callback=k_callback, disable=disable_pbar, **self.extra_options)
+        samples = self.sampler_function(denoising_fn, noise, sigmas, extra_args=extra_args, callback=k_callback, disable=disable_pbar, **self.extra_options)
         samples = wrapped_model.model_sampling.inverse_noise_scaling(sigmas[-1], samples)
         return samples
 

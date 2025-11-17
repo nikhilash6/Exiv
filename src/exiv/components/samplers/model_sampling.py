@@ -127,13 +127,13 @@ def sample(
         conds[k] = [a.copy() for a in v]
         
     if denoise_mask is not None:
-        denoise_mask = prepare_mask(denoise_mask, noise.shape, wrapped_model.model.device)
+        denoise_mask = prepare_mask(denoise_mask, noise.shape, wrapped_model.model.gpu_device)
     
     # not scaling the blank latents
     if latent_image is not None and torch.count_nonzero(latent_image) > 0:
         latent_image = wrapped_model.process_latent_in(latent_image)
         
-    conds = process_conds(noise, conds, wrapped_model.model.device, latent_image, denoise_mask, seed)
+    conds = process_conds(conds, noise.shape, wrapped_model.model.gpu_device)
     pos_conds, neg_conds = conds.get("positive"), conds.get("negative")
     
     extra_args = {"seed":seed}
@@ -146,52 +146,47 @@ def sample(
             neg_conds,
             pos_conds,
             cfg,
-            model_options=kwargs.get("model_options", {}),
             seed=kwargs.get("seed")
         )
     
-    samples = ksampler_cls_impl.sample(denoiser_function, sigmas, extra_args, callback, noise, latent_image, denoise_mask)
+    samples = ksampler_cls_impl.sample(denoiser_function, wrapped_model, sigmas, extra_args, callback, noise, latent_image, denoise_mask)
     return wrapped_model.process_latent_out(samples.to(torch.float32))
 
 
-def model_sampling(model, x, timestep, uncond, cond, cond_scale, model_options={}, seed=None):
+def model_sampling(wrapped_model: ModelWrapper, x, timestep, uncond, cond, cond_scale, seed=None):
     '''
     Single sampling step for a given model. This has to be used inside the sampler's sample methods.
     CFG and post-CFG methods (if any) are applied here.
     '''
-    
-    if math.isclose(cond_scale, 1.0) and model_options.get("disable_cfg1_optimization", False) == False:
+    # TODO: apply pre and post cfg methods here when they are added
+    if math.isclose(cond_scale, 1.0) and wrapped_model.disable_cfg:
         uncond_ = None
     else:
         uncond_ = uncond
 
     conds = [cond, uncond_]
-    out = calc_cond_batch(model, conds, x, timestep, model_options)
-
-    for fn in model_options.get("sampler_pre_cfg_function", []):
-        args = {"conds":conds, "conds_out": out, "cond_scale": cond_scale, "timestep": timestep,
-                "input": x, "sigma": timestep, "model": model, "model_options": model_options}
-        out  = fn(args)
+    out = calc_cond_batch(wrapped_model, conds, x, timestep)
 
     cond_pred, uncond_pred = out[0], out[1]
     
     # ------ applying cfg ---------
-    if "sampler_cfg_function" in model_options:
-        args = {"cond": x - cond_pred, "uncond": x - uncond_pred, "cond_scale": cond_scale, "timestep": timestep, "input": x, "sigma": timestep,
-                "cond_denoised": cond_pred, "uncond_denoised": uncond_pred, "model": model, "model_options": model_options}
-        cfg_result = x - model_options["sampler_cfg_function"](args)
-    else:
-        cfg_result = uncond_pred + (cond_pred - uncond_pred) * cond_scale
-
-    for fn in model_options.get("sampler_post_cfg_function", []):
-        args = {"denoised": cfg_result, "cond": cond, "uncond": uncond, "model": model, "uncond_denoised": uncond_pred, "cond_denoised": cond_pred,
-                "sigma": timestep, "model_options": model_options, "input": x}
-        cfg_result = fn(args)
+    args = {
+        "cond": x - cond_pred, 
+        "uncond": x - uncond_pred, 
+        "cond_scale": cond_scale, 
+        "timestep": timestep, 
+        "input": x, 
+        "sigma": timestep,
+        "cond_denoised": cond_pred, 
+        "uncond_denoised": uncond_pred, 
+        "model": wrapped_model
+    }
+    cfg_result = wrapped_model.cfg_fn(args)
 
     return cfg_result
 
 
-def calc_cond_batch(model, conds, x_in, timestep, model_options):
+def calc_cond_batch(wrapped_model, conds, x_in, timestep):
     """
     It batches all conditioning (pos, neg, controlnet etc..) together, runs the
     model once, and then returns the separated results.
@@ -228,7 +223,7 @@ def calc_cond_batch(model, conds, x_in, timestep, model_options):
         batched_conditioning['control'] = controlnet_cond.get_control(batched_input_x, batched_timestep, batched_conditioning, num_tasks)
 
     # ---- run model
-    output = model.apply_model(batched_input_x, batched_timestep, **batched_conditioning)
+    output = wrapped_model.apply_model(batched_input_x, batched_timestep, **batched_conditioning)
 
     # ---- average the results
     final_outputs = [torch.zeros_like(x_in) for _ in range(len(conds))]

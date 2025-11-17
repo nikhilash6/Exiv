@@ -42,7 +42,7 @@ def process_conds(conds, noise_shape, device):
     prepare_controlnet(conds)
     return conds
 
-
+# NOTE: not very relevant atm, but will update as more models are added
 def process_masks(conds, latent_dims, device):
     """
     - moves the mask tensor to the target device (e.g., GPU).
@@ -67,7 +67,7 @@ def process_masks(conds, latent_dims, device):
 
                 cond['mask'] = mask
 
-
+# TODO: test when proper controlnet support is added
 def prepare_controlnet(conds):
     """
     Ensures ControlNet is applied symmetrically to positive and negative conds.
