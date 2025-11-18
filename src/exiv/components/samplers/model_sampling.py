@@ -1,10 +1,11 @@
+from typing import List
 import torch
 from torch import Tensor
 
 import math
 
 from .scheduler_types import calculate_sigmas
-from .sampling_helpers import preprocess_cond, process_conds, prepare_mask
+from .sampling_helpers import preprocess_cond, prepare_model_conds, prepare_mask
 from ..enum import DISCARD_PENULTIMATE_SIGMA_SAMPLERS, KSamplerType, SamplerType, SchedulerType
 from .sampler_impl import Sampler, ksampler_factory
 from ..conditionals import can_concat_cond, cond_cat
@@ -121,10 +122,7 @@ def sample(
     # returning if there are 0 steps
     if sigmas.shape[-1] == 0: return latent_image
    
-    og_conds = {"positive": positive, "negative": negative}
-    conds = {}
-    for k, v in og_conds.items():
-        conds[k] = [a.copy() for a in v]
+    grouped_cond = {"positive": positive, "negative": negative}
         
     if denoise_mask is not None:
         denoise_mask = prepare_mask(denoise_mask, noise.shape, wrapped_model.model.gpu_device)
@@ -133,7 +131,7 @@ def sample(
     if latent_image is not None and torch.count_nonzero(latent_image) > 0:
         latent_image = wrapped_model.process_latent_in(latent_image)
         
-    conds = process_conds(conds, noise.shape, wrapped_model.model.gpu_device)
+    conds = prepare_model_conds(wrapped_model, grouped_cond, noise, latent_image, denoise_mask, seed)
     pos_conds, neg_conds = conds.get("positive"), conds.get("negative")
     
     extra_args = {"seed":seed}
@@ -186,13 +184,13 @@ def model_sampling(wrapped_model: ModelWrapper, x, timestep, uncond, cond, cond_
     return cfg_result
 
 
-def calc_cond_batch(wrapped_model, conds, x_in, timestep):
+def calc_cond_batch(wrapped_model: ModelWrapper, conds: List[List], x_in: Tensor, timestep: Tensor):
     """
     It batches all conditioning (pos, neg, controlnet etc..) together, runs the
     model once, and then returns the separated results.
     """
     # nothing to process
-    if all(c is None for c in conds):
+    if not len(conds) or all(c is None for c in conds):
         return [torch.zeros_like(x_in) for _ in conds]
 
     # ---- prepare conditioning
@@ -223,7 +221,7 @@ def calc_cond_batch(wrapped_model, conds, x_in, timestep):
         batched_conditioning['control'] = controlnet_cond.get_control(batched_input_x, batched_timestep, batched_conditioning, num_tasks)
 
     # ---- run model
-    output = wrapped_model.apply_model(batched_input_x, batched_timestep, **batched_conditioning)
+    output = wrapped_model.model(batched_input_x, batched_timestep, **batched_conditioning)
 
     # ---- average the results
     final_outputs = [torch.zeros_like(x_in) for _ in range(len(conds))]

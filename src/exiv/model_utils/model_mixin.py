@@ -1,10 +1,12 @@
 import torch
 import torch.nn as nn
+from torch import Tensor
 
 import os
 import functools
 import safetensors
-from typing import Optional, Union
+from typing import List, Optional, Union
+import uuid
 
 from ..utils.dtype import cast_to
 from ..utils.device import VRAM_DEVICE, MemoryManager, ProcDevice, is_same_device
@@ -66,6 +68,7 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
         super().__init__()
         self.gpu_device = device or VRAM_DEVICE
         self.model_path = model_path
+        self.model_arch_config = None
     
     def clear_cache(self):
         # TODO: legacy code, will remove after a final check
@@ -219,6 +222,63 @@ class ModelMixin(nn.Module, metaclass=ModuleMeta):
                 sd = val if isinstance(val, dict) else sd
                 
         return sd
+    
+    def process_latent_in(self, latent_in: Tensor) -> Tensor:
+        assert self.model_arch_config is not None, "model_arch_config not set"
+        return self.model_arch_config.latent_format.process_in(latent_in)
+    
+    def process_latent_out(self, latent_out: Tensor) -> Tensor:
+        assert self.model_arch_config is not None, "model_arch_config not set"
+        return self.model_arch_config.latent_format.process_out(latent_out)
+    
+    def prepare_conds_for_model(self, cond_group_name: str, cond_list: List[List], noise, **kwargs):
+        out = []
+        for cond in cond_list:
+            # --- Step 1: Standardization ---
+            # cond : [tensor, dict]
+            temp = cond[1].copy()
+            model_conds = {}
+            
+            # move the text embedding to a standard key for the model to find later
+            if cond[0] is not None:
+                temp["cross_attn"] = cond[0]
+                
+            temp["model_conds"] = model_conds
+            temp["uuid"] = uuid.uuid4()         # differentiating conds
+
+            # --- Step 2: Formatting  ---
+            params = temp.copy()
+            params["device"] = self.gpu_device
+            params["noise"] = noise
+            
+            spatial_compression_factor = kwargs.get("spatial_compression_factor", 8)
+            if len(noise.shape) >= 4:
+                params["width"] = params.get("width", noise.shape[3] * spatial_compression_factor)
+                params["height"] = params.get("height", noise.shape[2] * spatial_compression_factor)
+                
+            params["prompt_type"] = params.get("prompt_type", cond_group_name)
+            
+            # extra arguments (like latent_image, denoise_mask)
+            for k in kwargs:
+                if k not in params:
+                    params[k] = kwargs[k]
+
+            # model specific formatting
+            formatted_results = self.format_conds(**params)
+
+            # --- Step 3: Update the 'model_conds' dictionary ---
+            current_model_conds = temp['model_conds'].copy()
+            for k in formatted_results:
+                current_model_conds[k] = formatted_results[k]
+                
+            temp['model_conds'] = current_model_conds
+            out.append(temp)
+            
+        return out
+    
+    def format_conds(self):
+        # this formats the conds to a format as required by the underlying model
+        raise NotImplementedError("Child instance has not overriden this empty impl.")
 
 def move_model(model, device):
     # handling device movement through our custom logic

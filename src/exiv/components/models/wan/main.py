@@ -1,10 +1,14 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
 
+from typing import List
 import torch
 import torch.nn as nn
 from einops import rearrange
 
 import math
+import uuid
+
+from exiv.components.latent_format import LatentFormat, Wan21VAELatentFormat
 
 from ...enum import Model
 from ...attention import optimized_attention
@@ -318,6 +322,8 @@ class MLPProj(torch.nn.Module):
         clip_extra_context_tokens = self.proj(image_embeds)
         return clip_extra_context_tokens
 
+class Wan21ModelArchConfig(ModelArchConfig):
+    latent_format: LatentFormat = Wan21VAELatentFormat()
 
 class Wan21Model(ModelMixin):
     r"""
@@ -385,6 +391,7 @@ class Wan21Model(ModelMixin):
 
         assert model_type in [Model.WANT2V.value, Model.WANTI2V.value]
         self.model_type = model_type
+        self.model_arch_config: ModelArchConfig = Wan21ModelArchConfig()
 
         self.patch_size = patch_size
         self.text_len = text_len
@@ -442,6 +449,27 @@ class Wan21Model(ModelMixin):
             self.ref_conv = nn.Conv2d(in_dim_ref_conv, dim, kernel_size=patch_size[1:], stride=patch_size[1:])
         else:
             self.ref_conv = None
+            
+    def format_conds(self, *args, **kwargs):
+        out = super().extra_conds(**kwargs)
+        cross_attn = kwargs.get("cross_attn", None)
+        if cross_attn is not None:
+            out['c_crossattn'] = cross_attn
+
+        clip_vision_output = kwargs.get("clip_vision_output", None)
+        if clip_vision_output is not None:
+            out['clip_fea'] = clip_vision_output.penultimate_hidden_states
+
+        time_dim_concat = kwargs.get("time_dim_concat", None)
+        if time_dim_concat is not None:
+            out['time_dim_concat'] = self.process_latent_in(time_dim_concat)
+
+        reference_latents = kwargs.get("reference_latents", None)
+        if reference_latents is not None:
+            out['reference_latent'] = self.process_latent_in(reference_latents[-1])[:, :, 0]
+
+        return out
+            
 
     def forward_orig(
         self,

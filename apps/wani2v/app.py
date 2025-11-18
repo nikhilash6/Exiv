@@ -127,7 +127,6 @@ def main():
     model_wrapper = ModelWrapper(
         model=wan_dit_model,
         model_sampling=model_sampling,
-        model_arch_config=WanModelArchConfig()
     )
 
     # the main sampling loop

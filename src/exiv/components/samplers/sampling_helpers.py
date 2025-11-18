@@ -1,7 +1,10 @@
+from typing import Any
 import torch
+from torch import Tensor
 
 import collections
 
+from ...model_utils.common_classes import ModelWrapper
 from ...utils.tensor import common_upscale, repeat_to_batch_size
 
 
@@ -37,19 +40,43 @@ def prepare_mask(noise_mask, shape, device):
     return noise_mask
 
 
-def process_conds(conds, noise_shape, device):
-    process_masks(conds, noise_shape[2:], device)
-    prepare_controlnet(conds)
-    return conds
+def prepare_model_conds(wrapped_model: ModelWrapper, grouped_conds: dict, noise: Tensor, latent_image: Tensor, denoise_mask: Tensor, seed: Any):
+    """
+    This creates the model_conds, basically a dict with all the conds in the correct format.
+    In each sample step, we go through these and pick the appropriate conds to apply for that 
+    particular step.
+    
+    grouped_conds : {'positive': [], 'negative': [], ...}
+    noise_shape: tuple
+    device: str / torch.device
+    """
+    
+    device = wrapped_model.model.gpu_device
+    
+    for cond_group_name, cond_list in grouped_conds.items():
+        if cond_list is not None:
+            grouped_conds[cond_group_name] = wrapped_model.model.prepare_conds_for_model(
+                cond_group_name, 
+                cond_list, 
+                noise, 
+                spatial_compression_factor=wrapped_model.model.model_arch_config.latent_format.spatial_compression_ratio, 
+                latent_image=latent_image,
+                denoise_mask=denoise_mask,
+                seed=seed
+            )
+    
+    grouped_conds = process_masks(grouped_conds, noise.shape[2:], device)
+    grouped_conds = prepare_controlnet(grouped_conds)
+    return grouped_conds
 
 # NOTE: not very relevant atm, but will update as more models are added
-def process_masks(conds, latent_dims, device):
+def process_masks(grouped_conds: dict, latent_dims, device):
     """
     - moves the mask tensor to the target device (e.g., GPU).
     - resizes the mask to match the dimensions of the latent image.
     """
-    for k in conds:
-        for cond in conds[k]:
+    for cond_group_name, cond_list in grouped_conds.items():
+        for cond in cond_list:
             if 'mask' in cond:
                 mask = cond['mask']
                 mask = mask.to(device=device)
@@ -66,9 +93,11 @@ def process_masks(conds, latent_dims, device):
                         mask = common_upscale(mask, latent_dims[-1], latent_dims[-2], 'bilinear', 'none')
 
                 cond['mask'] = mask
+                
+    return grouped_conds
 
 # TODO: test when proper controlnet support is added
-def prepare_controlnet(conds):
+def prepare_controlnet(grouped_conds: dict):
     """
     Ensures ControlNet is applied symmetrically to positive and negative conds.
     If a ControlNet guides the positive prompt (e.g., with a depth map), the 
@@ -76,8 +105,8 @@ def prepare_controlnet(conds):
     the model a clean baseline to push away from, making the ControlNet's guidance 
     much more effective.
     """
-    positive_conds = conds.get("positive", [])
-    negative_conds = conds.get("negative", [])
+    positive_conds = grouped_conds.get("positive", [])
+    negative_conds = grouped_conds.get("negative", [])
 
     positive_controls = [
         c['control'] for c in positive_conds
@@ -101,4 +130,6 @@ def prepare_controlnet(conds):
         target_chunk, chunk_index = neg_chunks_without_control[i % len(neg_chunks_without_control)]
         new_chunk = target_chunk.copy()
         new_chunk['control'] = control_to_add
-        conds["negative"][chunk_index] = new_chunk
+        grouped_conds["negative"][chunk_index] = new_chunk
+
+    return grouped_conds

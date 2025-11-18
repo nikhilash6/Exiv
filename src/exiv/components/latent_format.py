@@ -6,6 +6,7 @@ class LatentFormat:
     scale_factor = 1.0
     latent_channels = 4
     latent_rgb_factors = None
+    spatial_compression_ratio = 8
 
     def process_in(self, latent):
         return latent * self.scale_factor
