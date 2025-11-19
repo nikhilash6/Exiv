@@ -186,7 +186,7 @@ def model_sampling(wrapped_model: ModelWrapper, x, timestep, uncond, cond, cond_
 
 def calc_cond_batch(wrapped_model: ModelWrapper, conds: List[List], x_in: Tensor, timestep: Tensor):
     """
-    It batches all conditioning (pos, neg, controlnet etc..) together, runs the
+    It batches all conditioning (pos, neg, others etc..) together, runs the
     model once, and then returns the separated results.
     """
     # nothing to process

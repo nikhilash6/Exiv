@@ -3,7 +3,7 @@ from .te_t5 import T5XXL
 from .encoder_base import TextEncoder
 from .text_tokenizer import UMTT5XXLTokenizer
 from ..enum import TextEncoderType
-from ...model_utils.model_mixin import ModelMixin
+from ...model_utils.model_mixin import ModelMixin, get_state_dict
 from ...utils.device import VRAM_DEVICE
 from ...utils.logging import app_logger
 
@@ -46,7 +46,7 @@ def te_type(sd):
 # auto selects the appropriate class for the given
 # model weights
 def create_text_encoder(model_path) -> TextEncoder:
-    state_dict = ModelMixin.get_state_dict(model_path, VRAM_DEVICE)
+    state_dict = get_state_dict(model_path, VRAM_DEVICE)
     te_type: TextEncoderType = te_type(state_dict)
     if te_type is None or te_type not in TE_TYPE_CLS_MAP:
         raise Exception("Text encoder not supported")
