@@ -1,43 +1,127 @@
-import safetensors
 import torch
-from torch import nn
 
 import os
+import mmap
 from typing import List, Union
+import struct, json
 
-from .helper_methods import get_state_dict
 from ..utils.logging import app_logger
 
 class LoraMixin:
-    """
-    Adds support for adding multiple LoRA weights to the base model
-    with varying strength and time schedules.
-    """
     def __init__(self):
-        # class using this mixin must call super().__init__()
         self.lora_definitions = [] 
         self.active_lora_schedule = {}
-        self.current_lora_step = -1
+        self.mmap_cache = {} # {path: {'mm': mmap, 'header': dict, 'offset': int}}
         
-    def create_lora_key_mapping(self, state_dict: dict):
-        # maps the lora keys according to the model specification (needs to be overriden)
-        # e.g. "lora_unet_up_blocks_1..." -> "up_blocks.1..."
-        mapped_weights = {}
-        for key, weight in state_dict.items():
-            if "lora_" in key: 
-                mapped_weights[key] = weight.to(dtype=torch.float16, device="cpu")
-                
-        return mapped_weights
+    def get_key_map(self, model_key = None, lora_key = None):
+        """
+        If model_key is provided then the corresponding lora_key is returned and vice-versa
+        """
+        if model_key is not None:
+            print("process stuff")
+        elif lora_key is not None:
+            print("process more stuff")
+        else:
+            raise Exception("atleast one key param is required")
 
-    def add_lora(self, lora_path: str, base_strength: float | List = 1.0):
-        app_logger.info(f"Loading LoRA: {lora_path}")
-        lora_sd = get_state_dict(model_path=lora_path)
-
+    def add_lora(self, lora_path: str, base_strength: float = 1.0):
         self.lora_definitions.append({
             "name": os.path.splitext(os.path.basename(lora_path))[0],
-            "weights": lora_sd,
+            "path": lora_path,
             "base_strength": base_strength,
         })
+
+    def _ensure_mmap(self, path):
+        if path in self.mmap_cache: return self.mmap_cache[path]
+        
+        with open(path, "rb") as f:
+            # Parse Safetensors Header
+            header_size = struct.unpack('<Q', f.read(8))[0]
+            header_json = f.read(header_size)
+            header = json.loads(header_json)
+            
+            # Map entire file
+            mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+            
+            self.mmap_cache[path] = {
+                'mm': mm,
+                'header': header,
+                'data_start': 8 + header_size
+            }
+        return self.mmap_cache[path]
+
+    def _read_from_mmap(self, path, key, device, dtype):
+        cache = self._ensure_mmap(path)
+        header, mm, base = cache['header'], cache['mm'], cache['data_start']
+        
+        if key not in header: return None
+        
+        info = header[key]
+        start, end = info['data_offsets']
+        shape = info['shape']
+        
+        # map string dtype to torch dtype
+        dt_map = {'F16': torch.float16, 'F32': torch.float32, 'BF16': torch.bfloat16}
+        src_dtype = dt_map.get(info['dtype'], torch.float32)
+        
+        # zero-copy view from disk to cpu ram
+        data_view = memoryview(mm)[base + start : base + end]
+        tensor = torch.frombuffer(data_view, dtype=src_dtype).reshape(shape)
+        
+        # copy to the target device/dtype (this is the only mem consuming step)
+        return tensor.to(device=device, dtype=dtype)
+
+    def get_delta_from_mmap(self, lora_idx, down_key, up_key, current_scale, device="cuda", dtype=torch.float16):
+        lora_def = self.lora_definitions[lora_idx]
+        path = lora_def["path"]
+        
+        w_down = self._read_from_mmap(path, down_key, device, dtype)
+        w_up = self._read_from_mmap(path, up_key, device, dtype)
+        
+        if w_down is None or w_up is None: return None
+
+        # calculate alpha
+        alpha_key = down_key.split(".")[0] + ".alpha"
+        alpha_tensor = self._read_from_mmap(path, alpha_key, "cpu", torch.float32)
+        if alpha_tensor is None:
+            alpha_key = down_key.split(".lora")[0] + ".alpha"
+            alpha_tensor = self._read_from_mmap(path, alpha_key, "cpu", torch.float32)
+        alpha = alpha_tensor.item() if alpha_tensor is not None else w_down.shape[0]
+        scale = (alpha / w_down.shape[0]) * current_scale
+
+        # flattening trick: (Out, Rank) @ (Rank, In) -> (Out, In)
+        op = torch.mm(w_up.flatten(start_dim=1), w_down.flatten(start_dim=1))
+        
+        target_shape = [w_up.shape[0]] + list(w_down.shape[1:])
+        return op.reshape(target_shape) * scale
+    
+    def get_combined_delta(self, model_key, timestep, target_device, target_dtype):
+        """
+        Iterates all active LoRAs, fetches their mmap deltas, and sums them according
+        to their current timestep strength
+        """
+        total_delta = None
+        
+        for lora_idx, strength in self.active_lora_schedule[timestep]:
+            lora_down_key = self.get_key_map(model_key)
+            lora_up_key = lora_down_key.replace("down", "up")
+            
+            delta = self.get_delta_from_mmap(
+                lora_idx=lora_idx,
+                down_key=lora_down_key,
+                up_key=lora_up_key,
+                current_scale=strength,
+                device=target_device,
+                dtype=target_dtype
+            )
+            
+            if delta is not None:
+                if total_delta is None:
+                    total_delta = delta
+                else:
+                    total_delta.add_(delta) # In-place add for speed
+                    
+        return total_delta
         
     def _expand_schedule(self, strength_input: Union[float, List[float]], total_steps: int) -> List[float]:
         # single float -> constant schedule
@@ -86,7 +170,7 @@ class LoraMixin:
                 dynamic_schedules.append(sched)
 
         # fusing constant loras
-        if constant_indices:
+        if len(constant_indices):
             app_logger.info(f"Fusing {len(constant_indices)} constant LoRAs...")
             
             to_fuse = []
@@ -108,44 +192,6 @@ class LoraMixin:
         
         self.current_lora_step = -1
 
-    def get_delta_from_disk(path, down_key, up_key, device="cpu", dtype=torch.float32):
-        """
-        Loads only the specific A/B keys from disk and returns the Merge Delta
-        """
-        with safetensors.safe_open(path, framework="pt", device=device) as f:
-            w_down = f.get_tensor(down_key).to(dtype=dtype)
-            w_up = f.get_tensor(up_key).to(dtype=dtype)
-            
-            # trying to find alpha
-            alpha = None
-            rank = w_down.shape[0]
-            
-            possible_alpha_keys = [
-                down_key.replace("lora_down.weight", "alpha"),
-                down_key.replace("lora.down.weight", "alpha"),
-                down_key.split(".lora")[0] + ".alpha"
-            ]
-
-            for a_key in possible_alpha_keys:
-                if a_key in f.keys():
-                    alpha = f.get_tensor(a_key).item()
-                    break
-            
-            if alpha is None:
-                alpha = rank # default
-            scale = alpha / rank
-            
-            # flattening trick
-            op = torch.mm(
-                w_up.flatten(start_dim=1), 
-                w_down.flatten(start_dim=1)
-            )
-            
-            # restore shape
-            target_shape = [w_up.shape[0]] + list(w_down.shape[1:])
-            
-            return (op.reshape(target_shape) * scale)
-    
     def _merge_constant_loras(self, lora_list):
         # merges constant loras directly into the base model
         merged_weights = {}
@@ -250,6 +296,10 @@ class LoraMixin:
             "base_strength": 1.0,
         }
 
+    def cleanup(self):
+        for v in self.mmap_cache.values():
+            v['mm'].close()
+        self.mmap_cache.clear()
 
 def compress_and_save(merged_weights, target_rank, device):
     new_lora = {}
