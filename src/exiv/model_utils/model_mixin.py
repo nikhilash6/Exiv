@@ -66,6 +66,8 @@ class ModelMixin(nn.Module, LoraMixin, metaclass=ModuleMeta):
     '''
     def __init__(self, device: str = None, quant_type: QuantType = None, model_path: str = None, dtype = torch.float32):     # quant_type, dtype is used by the meta class
         super().__init__()
+        LoraMixin.__init__(self)
+        
         self.gpu_device = device or VRAM_DEVICE
         self.model_path = model_path
         self.model_arch_config = None

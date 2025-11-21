@@ -26,7 +26,7 @@ class EfficientModelLoaderHook(ModelHook):
         return args, kwargs
     
     def _full_load(self, model):
-        from ..model_utils.model_mixin import move_module
+        from ..model_utils.helper_methods import move_module
         
         if getattr(model, "_fully_loaded", False): return
         # load initial full_load modules
@@ -54,7 +54,7 @@ class EfficientModuleLoaderHook(ModelHook):
         self.full_load_module = full_load_module
 
     def pre_forward(self, module: torch.nn.Module, *args, **kwargs):
-        from ..model_utils.model_mixin import move_module
+        from ..model_utils.helper_methods import move_module
         
         model = self.model_ref()
         if model is None:
@@ -67,15 +67,36 @@ class EfficientModuleLoaderHook(ModelHook):
                 module=module,
                 module_name=self.module_name
             )
+        
+        # lora patching
+        current_step = getattr(model, "current_time_step", -1)
+        model_key = f"{self.module_name}.weight"
+        delta = model.get_combined_delta(
+            model_key=model_key,
+            timestep=current_step,
+            target_device=module.weight.device,
+            target_dtype=module.weight.dtype
+        )
+        
+        if delta is not None:
+            app_logger.debug("---- patching lora weights delta")
+            module.weight.data.add_(delta)
+            self._applied_delta = delta
             
         return args, kwargs
 
     def post_forward(self, module: torch.nn.Module, output: Any):
-        from ..model_utils.model_mixin import move_module
+        from ..model_utils.helper_methods import move_module
         
         model = self.model_ref()
         if model is None: 
             return output
+        
+        # unpatch lora
+        if getattr(self, "_applied_delta", None) is not None:
+            app_logger.debug("---- UNpatching lora weights delta")
+            module.weight.data.sub_(self._applied_delta)
+            self._applied_delta = None
         
         if not self.full_load_module:
             app_logger.debug(f"Moving back {self.module_name} to cpu via hook")
@@ -94,7 +115,6 @@ There are three modes for loading the model:
 3. NORMAL   => This loads the entire model in one go and keeps it in VRAM for the entire inference
 """
 
-@staticmethod
 def split_model_for_loading(model: 'ModelMixin'):
     # this determines which modules can be fully loaded permanently on the vram
     # and which has to be dynamically loaded

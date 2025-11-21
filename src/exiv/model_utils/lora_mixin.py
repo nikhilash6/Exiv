@@ -7,6 +7,8 @@ import struct, json
 
 from ..utils.logging import app_logger
 
+
+# TODO: incorporate disable_mmap from the globa_config
 class LoraMixin:
     def __init__(self):
         self.lora_definitions = [] 
@@ -81,7 +83,7 @@ class LoraMixin:
         if w_down is None or w_up is None: return None
 
         # calculate alpha
-        alpha_key = down_key.split(".")[0] + ".alpha"
+        alpha_key = down_key.replace(".down", ".alpha")
         alpha_tensor = self._read_from_mmap(path, alpha_key, "cpu", torch.float32)
         if alpha_tensor is None:
             alpha_key = down_key.split(".lora")[0] + ".alpha"
@@ -100,8 +102,10 @@ class LoraMixin:
         Iterates all active LoRAs, fetches their mmap deltas, and sums them according
         to their current timestep strength
         """
-        total_delta = None
+        if timestep < 0: timestep += len(self.active_lora_schedule)
+        if timestep >= len(self.active_lora_schedule): return None
         
+        total_delta = None
         for lora_idx, strength in self.active_lora_schedule[timestep]:
             lora_down_key = self.get_key_map(model_key)
             lora_up_key = lora_down_key.replace("down", "up")
@@ -187,10 +191,11 @@ class LoraMixin:
         
         for step in range(total_steps):
             self.active_lora_schedule[step] = [
-                sched[step] if step < len(sched) else sched[-1] for sched in dynamic_schedules
+                (idx, strength[step] if step < len(strength) else strength[-1])
+                for idx, strength in enumerate(dynamic_schedules)
             ]
         
-        self.current_lora_step = -1
+        self.current_time_step = -1
 
     def _merge_constant_loras(self, lora_list):
         # merges constant loras directly into the base model
