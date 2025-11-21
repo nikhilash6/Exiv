@@ -8,7 +8,7 @@ import struct, json
 from ..utils.logging import app_logger
 
 
-# TODO: incorporate disable_mmap from the globa_config
+# TODO: incorporate disable_mmap from the global_config
 class LoraMixin:
     def __init__(self):
         self.lora_definitions = [] 
@@ -76,6 +76,12 @@ class LoraMixin:
     def get_delta_from_mmap(self, lora_idx, down_key, up_key, current_scale, device="cuda", dtype=torch.float16):
         lora_def = self.lora_definitions[lora_idx]
         path = lora_def["path"]
+        
+        # TODO: add more custom keys as they are added
+        if "diff" in down_key:
+            weight = self._read_from_mmap(path, down_key, device, dtype)
+            if weight is None: return None
+            return weight * current_scale
         
         w_down = self._read_from_mmap(path, down_key, device, dtype)
         w_up = self._read_from_mmap(path, up_key, device, dtype)
