@@ -185,6 +185,11 @@ class ModelMixin(nn.Module, LoraMixin, metaclass=ModuleMeta):
                 )
             else:
                 set_module_tensor_to_device(self, param_name, device, value=param, dtype=self.dtype)
+        
+        if hasattr(self, "create_model_lora_key_map"):
+            self.create_model_lora_key_map(state_dict)
+        else:
+            app_logger.warning("Unable to create key map for model and lora keys. Lora loading won't be supported")
     
     def process_latent_in(self, latent_in: Tensor) -> Tensor:
         assert self.model_arch_config is not None, "model_arch_config not set"

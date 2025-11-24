@@ -8,23 +8,42 @@ import struct, json
 from ..utils.logging import app_logger
 
 
+CACHED_MODEL_LORA_KEY_MAP = "_cached_m_l_map"
+
 # TODO: incorporate disable_mmap from the global_config
 class LoraMixin:
     def __init__(self):
         self.lora_definitions = [] 
         self.active_lora_schedule = {}
         self.mmap_cache = {} # {path: {'mm': mmap, 'header': dict, 'offset': int}}
+    
+    def create_model_lora_key_map(self, state_dict):
+        """
+        Creates a map of lora_key <-> model_key and vice versa in the same dict.
+        Only returns the 'down' key for the LoRA.
+        """
+        # NOTE: needs to be overidden in the child class, this is a generic impl.
+        # set this to a null method to disable lora loading
+        sd_keys = state_dict.keys()
+        key_map = {}
         
-    def get_key_map(self, model_key = None, lora_key = None):
+        for k in sd_keys:
+            if k.endswith(".weight"):
+                key_lora = k[len("diffusion_model."):-len(".weight")].replace(".", "_")
+                key_map["lora_unet_{}".format(key_lora)] = k
+                key_map["{}".format(k[:-len(".weight")])] = k
+            else:
+                key_map["{}".format(k)] = k
+                
+        setattr(self, CACHED_MODEL_LORA_KEY_MAP, key_map)
+    
+    def get_mapped_key(self, key = None):
         """
         If model_key is provided then the corresponding lora_key is returned and vice-versa
         """
-        if model_key is not None:
-            print("process stuff")
-        elif lora_key is not None:
-            print("process more stuff")
-        else:
-            raise Exception("atleast one key param is required")
+        if not hasattr(self, CACHED_MODEL_LORA_KEY_MAP): return None    # set by create_model_lora_key_map
+        d = getattr(self, CACHED_MODEL_LORA_KEY_MAP)
+        return d.get(key, None)
 
     def add_lora(self, lora_path: str, base_strength: float = 1.0):
         self.lora_definitions.append({
@@ -113,7 +132,7 @@ class LoraMixin:
         
         total_delta = None
         for lora_idx, strength in self.active_lora_schedule[timestep]:
-            lora_down_key = self.get_key_map(model_key)
+            lora_down_key = self.get_mapped_key(model_key)
             lora_up_key = lora_down_key.replace("down", "up")
             
             delta = self.get_delta_from_mmap(

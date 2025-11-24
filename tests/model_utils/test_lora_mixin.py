@@ -3,10 +3,9 @@ import os
 import unittest
 from safetensors.torch import save_file
 
-# Make sure to import these from your actual project structure
+from exiv.model_utils.lora_mixin import CACHED_MODEL_LORA_KEY_MAP
 from tests.test_utils.common import SimpleModel
 from exiv.utils.device import MemoryManager
-from exiv.model_patching.efficient_loading_hook import enable_efficient_loading
 
 class LoRASimpleModel(SimpleModel):
     def __init__(self, *args, **kwargs):
@@ -18,14 +17,24 @@ class LoRASimpleModel(SimpleModel):
             self.output_layer.weight.fill_(0.0)
             self.output_layer.bias.fill_(0.0)
 
-    def get_key_map(self, model_key=None, lora_key=None):
-        if model_key: return f"lora.{model_key.replace('.', '_')}.down"
-        return None
+    def create_model_lora_key_map(self, state_dict):
+        key_map = {}
+        sd = state_dict.keys()
+        for k in sd:
+            if k.endswith(".weight"):
+                key_lora = f"lora.{k.replace('.', '_')}.down"
+                key_map[key_lora] = k
+                key_map[k] = key_lora
+            else:
+                key_map["{}".format(k)] = k
+        
+        setattr(self, CACHED_MODEL_LORA_KEY_MAP, key_map)
 
 class TestMultiStepLora(unittest.TestCase):
     LORA_PATH = "tests/test_utils/assets/models/test_lora_multistep.safetensors"
     LORA_A_PATH = "tests/test_utils/assets/models/test_lora_A.safetensors"
     LORA_B_PATH = "tests/test_utils/assets/models/test_lora_B.safetensors"
+    DUMMY_MODEL_PATH = "tests/test_utils/assets/models/dummy_model.safetensors"
 
     def setUp(self):
         MemoryManager.clear_memory()
@@ -35,12 +44,24 @@ class TestMultiStepLora(unittest.TestCase):
         # Create LoRA A (Delta = 0.16) and B (Delta = 0.08)
         self.create_lora(self.LORA_A_PATH, val_down=0.1, val_up=0.2)
         self.create_lora(self.LORA_B_PATH, val_down=0.05, val_up=0.2)
+        self.create_model()
 
     def tearDown(self):
-        for path in [self.LORA_PATH, self.LORA_A_PATH, self.LORA_B_PATH]:
+        for path in [self.LORA_PATH, self.LORA_A_PATH, \
+            self.LORA_B_PATH, self.DUMMY_MODEL_PATH]:
             if os.path.exists(path):
                 os.remove(path)
         MemoryManager.clear_memory()
+        
+    def create_model(self):
+        state_dict = {
+            "input_layer.weight": torch.zeros(2048, 1024),
+            "input_layer.bias": torch.zeros(2048),
+            "output_layer.weight": torch.zeros(512, 2048),
+            "output_layer.bias": torch.zeros(512)
+        }
+
+        save_file(state_dict, self.DUMMY_MODEL_PATH)
 
     def create_lora(self, path, val_down, val_up):
         """Generic method to create a Rank 4 LoRA with specific values"""
@@ -71,6 +92,7 @@ class TestMultiStepLora(unittest.TestCase):
     def test_multistep_single_lora(self):
         steps = 5
         model = LoRASimpleModel()
+        model.load_model(self.DUMMY_MODEL_PATH)
         
         model.add_lora(self.LORA_PATH, base_strength=1.0)
         model.setup_lora_schedule(total_steps=steps)
@@ -98,6 +120,7 @@ class TestMultiStepLora(unittest.TestCase):
     def test_variable_schedule_multi_lora(self):
         steps = 5
         model = LoRASimpleModel()
+        model.load_model(self.DUMMY_MODEL_PATH)
         
         schedule_a = [0.0, 0.5, 1.0, 0.5, 0.0]
         schedule_b = [1.0, 1.0, 0.0, 0.0, 1.0]

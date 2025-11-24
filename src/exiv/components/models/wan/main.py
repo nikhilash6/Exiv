@@ -9,6 +9,7 @@ import math
 import uuid
 
 from exiv.components.latent_format import LatentFormat, Wan21VAELatentFormat
+from exiv.model_utils.helper_methods import get_state_dict
 
 from ...enum import Model
 from ...attention import optimized_attention
@@ -601,3 +602,6 @@ class Wan21Model(ModelMixin):
         u = u.reshape(b, c, *[i * j for i, j in zip(grid_sizes, self.patch_size)])
         return u
 
+    def get_mapped_key(self, model_key=None, lora_key=None):
+        if hasattr(self, "_cached_key_map"):
+            return self._cached_key_map
