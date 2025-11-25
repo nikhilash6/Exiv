@@ -22,7 +22,7 @@ def repeat_to_batch_size(tensor: torch.Tensor, batch_size: int, dim=0):
 
 def fix_empty_latent_channels(wrapped_model: ModelWrapper, latent_image: torch.Tensor):
     # resize the empty latent image so it has the right number of channels
-    latent_channels = wrapped_model.model.model_arch_config.latent_channels
+    latent_channels = wrapped_model.model.model_arch_config.latent_format.latent_channels
     if latent_channels != latent_image.shape[1] and torch.count_nonzero(latent_image) == 0:
         latent_image = repeat_to_batch_size(latent_image, latent_channels, dim=1)
     return latent_image
