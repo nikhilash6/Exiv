@@ -127,6 +127,7 @@ class LoraMixin:
         Iterates all active LoRAs, fetches their mmap deltas, and sums them according
         to their current timestep strength
         """
+        if len(self.active_lora_schedule) == 0: return None
         if timestep < 0: timestep += len(self.active_lora_schedule)
         if timestep >= len(self.active_lora_schedule): return None
         

@@ -9,8 +9,8 @@ from exiv.components.text_vision_encoder.text_encoder import WanEncoder
 from exiv.components.text_vision_encoder.vision_encoder import create_vision_encoder
 from exiv.components.vae.wan_vae import Wan21VAE
 from exiv.model_utils.common_classes import Latent
-from exiv.model_utils.model_mixin import move_model
 from exiv.model_utils.common_classes import ModelWrapper
+from exiv.model_utils.helper_methods import move_model
 from exiv.utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, ProcDevice
 from exiv.utils.file import ImageProcessor, ensure_model_available
 from exiv.utils.tensor import common_upscale

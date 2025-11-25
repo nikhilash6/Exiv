@@ -7,7 +7,6 @@ from exiv.components.text_vision_encoder.te_t5 import UMT5XXL
 from exiv.components.text_vision_encoder.text_encoder import WanEncoder
 from exiv.components.text_vision_encoder.text_tokenizer import UMTT5XXLTokenizer
 from exiv.model_patching.debug_hook import add_debug_hooks
-from exiv.model_utils.model_mixin import move_model
 from exiv.utils.dev import print_memory_usage
 from exiv.utils.device import VRAM_DEVICE, MemoryManager
 from exiv.config import global_config

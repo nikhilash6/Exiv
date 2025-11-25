@@ -4,7 +4,6 @@ import unittest
 from parameterized import parameterized
 
 from exiv.components.text_vision_encoder.vision_encoder import create_vision_encoder
-from exiv.model_utils.model_mixin import move_model
 from exiv.utils.file import ImageProcessor
 from exiv.utils.tensor import common_upscale
 from exiv.utils.device import VRAM_DEVICE, MemoryManager

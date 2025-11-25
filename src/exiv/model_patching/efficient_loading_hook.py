@@ -69,14 +69,16 @@ class EfficientModuleLoaderHook(ModelHook):
             )
         
         # lora patching
-        current_step = getattr(model, "current_time_step", -1)
-        model_key = f"{self.module_name}.weight"
-        delta = model.get_combined_delta(
-            model_key=model_key,
-            timestep=current_step,
-            target_device=module.weight.device,
-            target_dtype=module.weight.dtype
-        )
+        delta = None
+        if hasattr(module, "weight"):
+            current_step = getattr(model, "current_time_step", -1)
+            model_key = f"{self.module_name}.weight"
+            delta = model.get_combined_delta(
+                model_key=model_key,
+                timestep=current_step,
+                target_device=module.weight.device,
+                target_dtype=module.weight.dtype
+            )
         
         if delta is not None:
             app_logger.debug("---- patching lora weights delta")

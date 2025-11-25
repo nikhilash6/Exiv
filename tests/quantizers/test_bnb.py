@@ -4,7 +4,6 @@ import unittest
 from parameterized import parameterized
 import bitsandbytes as bnb
 
-from exiv.model_utils.model_mixin import move_model
 from exiv.quantizers.base import QuantType
 from tests.test_utils.common import LargeModel, check_memory_usage, create_large_model_file
 from exiv.utils.device import OFFLOAD_DEVICE, MemoryManager, VRAM_DEVICE, is_cuda_available
