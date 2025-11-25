@@ -5,7 +5,7 @@ from torch import Tensor
 import math
 
 from .scheduler_types import calculate_sigmas
-from .sampling_helpers import preprocess_cond, prepare_model_conds, prepare_mask
+from .sampling_helpers import preprocess_cond_per_step, prepare_model_conds, prepare_mask
 from ..enum import DISCARD_PENULTIMATE_SIGMA_SAMPLERS, KSamplerType, SamplerType, SchedulerType
 from .sampler_impl import Sampler, ksampler_factory
 from ..conditionals import can_concat_cond, cond_cat
@@ -85,6 +85,7 @@ class KSampler:
         # TODO: enable calculation of new sigmas as per vars injected at the runtime
         # such as last_step, start_step
         
+        # main sampling loop
         ksampler_cls_impl = ksampler_factory(self.sampler_name)
         return sample(
             self.wrapped_model,
@@ -116,7 +117,7 @@ def sample(
 ) -> Tensor:
     '''
     - processes the inputs, masks and conditionals 
-    - constructs the model_sampling that is ultimately passed in the sampler's sample method
+    - constructs the model_sampling_step that is ultimately passed in the sampler's sample method
     - sampler's sample returns the output after running the sampling loop
     '''
     # returning if there are 0 steps
@@ -129,15 +130,17 @@ def sample(
     
     # not scaling the blank latents
     if latent_image is not None and torch.count_nonzero(latent_image) > 0:
-        latent_image = wrapped_model.process_latent_in(latent_image)
-        
+        latent_image = wrapped_model.model.process_latent_in(latent_image)
+    
+    print("here")
+    
     conds = prepare_model_conds(wrapped_model, grouped_cond, noise, latent_image, denoise_mask, seed)
     pos_conds, neg_conds = conds.get("positive"), conds.get("negative")
     
     extra_args = {"seed":seed}
     
     def denoiser_function(x, sigma, **kwargs):
-        return model_sampling(
+        return model_sampling_step(
             wrapped_model,
             x,
             sigma,
@@ -148,29 +151,32 @@ def sample(
         )
     
     samples = ksampler_cls_impl.sample(denoiser_function, wrapped_model, sigmas, extra_args, callback, noise, latent_image, denoise_mask)
-    return wrapped_model.process_latent_out(samples.to(torch.float32))
+    return wrapped_model.model.process_latent_out(samples.to(torch.float32))
 
 
-def model_sampling(wrapped_model: ModelWrapper, x, timestep, uncond, cond, cond_scale, seed=None):
+def model_sampling_step(wrapped_model: ModelWrapper, x, sigma, uncond, cond, cond_scale, seed=None):
     '''
-    Single sampling step for a given model. This has to be used inside the sampler's sample methods.
-    CFG and post-CFG methods (if any) are applied here.
+    Single sampling step for a given model. 
+    - scales input using calculate_input
+    - runs the model
+    - applies CFG
+    - calculates denoised output (x0) using calculate_denoised
     '''
-    # TODO: apply pre and post cfg methods here when they are added
-    if math.isclose(cond_scale, 1.0) and wrapped_model.disable_cfg:
-        uncond_ = None
-    else:
-        uncond_ = uncond
-
-    conds = [cond, uncond_]
-    out = calc_cond_batch(wrapped_model, conds, x, timestep)
-
-    cond_pred, uncond_pred = out[0], out[1]
     
-    # ------ applying cfg ---------
+    # convert sigma (noise level) to the discrete timestep expected by the model
+    timestep = wrapped_model.model_sampling.timestep(sigma)
+    
+    # x is the current noisy latent
+    x_in = wrapped_model.model_sampling.calculate_input(sigma, x)
+
+    # **** main model run ****
+    conds = [cond, uncond]
+    out = calc_cond_batch(wrapped_model, conds, x_in, timestep)
+    # TODO: streamline this as more cfg methods are added
+    cond_pred, uncond_pred = out[0], out[1]
     args = {
-        "cond": x - cond_pred, 
-        "uncond": x - uncond_pred, 
+        "cond": cond_pred, 
+        "uncond": uncond_pred, 
         "cond_scale": cond_scale, 
         "timestep": timestep, 
         "input": x, 
@@ -179,15 +185,20 @@ def model_sampling(wrapped_model: ModelWrapper, x, timestep, uncond, cond, cond_
         "uncond_denoised": uncond_pred, 
         "model": wrapped_model
     }
+    # we can apply cfg on raw outputs, no matter what they are 
     cfg_result = wrapped_model.cfg_fn(args)
 
-    return cfg_result
+    # convert the model output (EPS, V, etc.) back to the denoised latent (x0)
+    denoised = wrapped_model.model_sampling.calculate_denoised(sigma, cfg_result, x)
 
+    return denoised
 
+# TODO: support multi batch conditionals, like multiple conditionals applied to different frames, that require
+# the model to be run multiple times
 def calc_cond_batch(wrapped_model: ModelWrapper, conds: List[List], x_in: Tensor, timestep: Tensor):
     """
     It batches all conditioning (pos, neg, others etc..) together, runs the
-    model once, and then returns the separated results.
+    model once, and then returns the separated results. (for now)
     """
     # nothing to process
     if not len(conds) or all(c is None for c in conds):
@@ -200,7 +211,7 @@ def calc_cond_batch(wrapped_model: ModelWrapper, conds: List[List], x_in: Tensor
     for i, cond_list in enumerate(conds):
         if cond_list is None: continue
         for c in cond_list:
-            prepared_chunk = preprocess_cond(c, x_in)
+            prepared_chunk = preprocess_cond_per_step(c, x_in)
             applied_cond.append(prepared_chunk)
             applied_cond_group.append(i)
 
@@ -220,6 +231,8 @@ def calc_cond_batch(wrapped_model: ModelWrapper, conds: List[List], x_in: Tensor
     if controlnet_cond is not None:
         batched_conditioning['control'] = controlnet_cond.get_control(batched_input_x, batched_timestep, batched_conditioning, num_tasks)
 
+    print("just before the model")
+    
     # ---- run model
     output = wrapped_model.model(batched_input_x, batched_timestep, **batched_conditioning)
 
@@ -240,12 +253,11 @@ def calc_cond_batch(wrapped_model: ModelWrapper, conds: List[List], x_in: Tensor
         final_outputs[i] /= final_counts[i]
 
     final_results = []
-    output_idx = 0
-    for c in conds:
-        if c is None: final_results.append(torch.zeros_like(x_in))
+    for i, c in enumerate(conds):
+        if c is None: 
+            final_results.append(torch.zeros_like(x_in))
         else:
-            final_results.append(final_outputs[output_idx])
-            output_idx += 1
+            final_results.append(final_outputs[i])
 
     return final_results
 

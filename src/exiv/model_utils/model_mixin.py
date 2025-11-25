@@ -231,7 +231,7 @@ class ModelMixin(nn.Module, LoraMixin, metaclass=ModuleMeta):
                 if k not in params:
                     params[k] = kwargs[k]
 
-            # model specific formatting
+            # **** model specific formatting ****
             formatted_results = self.format_conds(**params)
 
             # --- Step 3: Update the 'model_conds' dictionary ---

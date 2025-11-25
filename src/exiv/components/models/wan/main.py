@@ -1,6 +1,5 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
 
-from typing import List
 import torch
 import torch.nn as nn
 from einops import rearrange
@@ -8,12 +7,12 @@ from einops import rearrange
 import math
 import uuid
 
-from exiv.components.latent_format import LatentFormat, Wan21VAELatentFormat
-from exiv.model_utils.helper_methods import get_state_dict
-
 from ...enum import Model
 from ...attention import optimized_attention
 from ...positional_embeddings import EmbedND, apply_rope
+from ...conditionals import CONDCrossAttn, CONDRegular
+from ...latent_format import LatentFormat, Wan21VAELatentFormat
+from ....model_utils.helper_methods import get_state_dict
 from ....model_utils.model_mixin import ModelMixin
 from ....model_utils.common_classes import ModelArchConfig
 from ....utils.tensor import pad_to_patch_size
@@ -452,25 +451,24 @@ class Wan21Model(ModelMixin):
             self.ref_conv = None
             
     def format_conds(self, *args, **kwargs):
-        out = super().extra_conds(**kwargs)
+        out = {}
         cross_attn = kwargs.get("cross_attn", None)
         if cross_attn is not None:
-            out['c_crossattn'] = cross_attn
+            out['c_crossattn'] = CONDCrossAttn(cross_attn)
 
         clip_vision_output = kwargs.get("clip_vision_output", None)
         if clip_vision_output is not None:
-            out['clip_fea'] = clip_vision_output.penultimate_hidden_states
+            out['clip_fea'] = CONDRegular(clip_vision_output["penultimate_hidden_states"])
 
-        time_dim_concat = kwargs.get("time_dim_concat", None)
-        if time_dim_concat is not None:
-            out['time_dim_concat'] = self.process_latent_in(time_dim_concat)
+        concat_latent_image = kwargs.get("concat_latent_image", None)
+        if concat_latent_image is not None:
+            out['time_dim_concat'] = CONDRegular(self.process_latent_in(concat_latent_image))
 
         reference_latents = kwargs.get("reference_latents", None)
         if reference_latents is not None:
-            out['reference_latent'] = self.process_latent_in(reference_latents[-1])[:, :, 0]
+            out['reference_latent'] = CONDRegular(self.process_latent_in(reference_latents[-1])[:, :, 0])
 
         return out
-            
 
     def forward_orig(
         self,

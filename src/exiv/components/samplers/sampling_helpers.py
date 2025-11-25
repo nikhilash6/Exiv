@@ -1,15 +1,19 @@
-from typing import Any
 import torch
 from torch import Tensor
 
+import math
 import collections
+from typing import Any, List
 
 from ...model_utils.common_classes import ModelWrapper
 from ...utils.tensor import common_upscale, repeat_to_batch_size
 
 
-def preprocess_cond(conds, x_in):
+def preprocess_cond_per_step(conds, x_in):
     '''
+    NOTE: a lot of functionality has not been added for now, like switching conditionals
+    on/off depending on timestep or the area, and things might seem pretty static for now.
+    
     - calculates conditionals strength
     - reshapes model conditionals to match bs
     - separates controlnet conditionals
@@ -24,6 +28,7 @@ def preprocess_cond(conds, x_in):
     for c in model_conds:
         conditioning[c] = model_conds[c].process_cond(batch_size=x_in.shape[0], device=x_in.device)
 
+    # TODO: implement this
     # ---- controlnets
     control = conds.get('control', None)
 
@@ -52,10 +57,10 @@ def prepare_model_conds(wrapped_model: ModelWrapper, grouped_conds: dict, noise:
     """
     
     device = wrapped_model.model.gpu_device
-    
+    res = {}
     for cond_group_name, cond_list in grouped_conds.items():
         if cond_list is not None:
-            grouped_conds[cond_group_name] = wrapped_model.model.prepare_conds_for_model(
+            temp_out = wrapped_model.model.prepare_conds_for_model(
                 cond_group_name, 
                 cond_list, 
                 noise, 
@@ -64,10 +69,11 @@ def prepare_model_conds(wrapped_model: ModelWrapper, grouped_conds: dict, noise:
                 denoise_mask=denoise_mask,
                 seed=seed
             )
+            res[cond_group_name] = temp_out
     
-    grouped_conds = process_masks(grouped_conds, noise.shape[2:], device)
-    grouped_conds = prepare_controlnet(grouped_conds)
-    return grouped_conds
+    res = process_masks(res, noise.shape[2:], device)
+    res = prepare_controlnet(res)
+    return res
 
 # NOTE: not very relevant atm, but will update as more models are added
 def process_masks(grouped_conds: dict, latent_dims, device):
@@ -114,7 +120,7 @@ def prepare_controlnet(grouped_conds: dict):
     ]
 
     if not positive_controls:
-        return
+        return grouped_conds
 
     neg_chunks_without_control = [
         (chunk, i) for i, chunk in enumerate(negative_conds)
@@ -122,7 +128,7 @@ def prepare_controlnet(grouped_conds: dict):
     ]
 
     if not neg_chunks_without_control:
-        return
+        return grouped_conds
 
     # for each positive ControlNet, apply it to a corresponding negative prompt.
     for i, control_to_add in enumerate(positive_controls):

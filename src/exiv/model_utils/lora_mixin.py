@@ -11,6 +11,8 @@ from ..utils.logging import app_logger
 CACHED_MODEL_LORA_KEY_MAP = "_cached_m_l_map"
 
 # TODO: incorporate disable_mmap from the global_config
+# TODO: support multi batch / per frame lora (like frame_1 can have lora_1 applied, frame_2 has lora_2 ..)
+#       - this can be done by passing lora indices to get_combined_delta (will require some other modifications as well)
 class LoraMixin:
     def __init__(self):
         self.lora_definitions = [] 
