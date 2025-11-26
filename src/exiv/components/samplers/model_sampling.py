@@ -8,7 +8,6 @@ from .scheduler_types import calculate_sigmas
 from .sampling_helpers import preprocess_cond_per_step, prepare_model_conds, prepare_mask
 from ..enum import DISCARD_PENULTIMATE_SIGMA_SAMPLERS, KSamplerType, SamplerType, SchedulerType
 from .sampler_impl import Sampler, ksampler_factory
-from ..conditionals import can_concat_cond, cond_cat
 from ...utils.tensor import fix_empty_latent_channels, prepare_noise
 from ...model_utils.common_classes import ModelWrapper
 from ...model_utils.common_classes import Latent
@@ -193,6 +192,15 @@ def model_sampling_step(wrapped_model: ModelWrapper, x, sigma, uncond, cond, con
 
     return denoised
 
+# will check and update this later
+def cond_cat(conds):
+    c_out = {}
+    for k in conds[0]:
+        current_conds = [c[k] for c in conds[1:]]
+        c_out[k] = conds[0][k].concat(current_conds)
+        
+    return c_out
+
 # TODO: support multi batch conditionals, like multiple conditionals applied to different frames, that require
 # the model to be run multiple times
 def calc_cond_batch(wrapped_model: ModelWrapper, conds: List[List], x_in: Tensor, timestep: Tensor):
@@ -221,7 +229,7 @@ def calc_cond_batch(wrapped_model: ModelWrapper, conds: List[List], x_in: Tensor
 
     # ---- build the batch
     num_tasks = len(applied_cond)
-    batched_input_x = x_in.repeat(num_tasks, 1, 1, 1)
+    batched_input_x = x_in.repeat(num_tasks, *[1] * (x_in.ndim - 1))
     batched_timestep = timestep.repeat(num_tasks)
     conditioning_to_cat = [t.conditioning for t in applied_cond]
 
