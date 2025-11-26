@@ -21,6 +21,7 @@ class ModuleMeta(type(nn.Module)):
     def __call__(cls, *args, **kwargs):
         model_dtype = kwargs.pop("dtype", torch.float32)
         quant_type = kwargs.get("quant_type", None)
+        force_load_mode = kwargs.get("force_load_mode", None)
         original_dtype = torch.get_default_dtype()
         
         try:
@@ -36,6 +37,7 @@ class ModuleMeta(type(nn.Module)):
                     quantizer.process_model_before_weight_loading(model=instance)
                 
                 if isinstance(instance, ModelMixin):    # mainly for safety
+                    instance.force_load_mode = force_load_mode
                     enable_efficient_loading(instance)  # kinda default hook
                     if not getattr(instance, 'dtype', None):
                         instance.dtype = model_dtype
@@ -64,7 +66,7 @@ class ModelMixin(nn.Module, LoraMixin, metaclass=ModuleMeta):
     - (TODO) improve safetensor loading
     - URL download support
     '''
-    def __init__(self, device: str = None, quant_type: QuantType = None, model_path: str = None, dtype = torch.float32):     # quant_type, dtype is used by the meta class
+    def __init__(self, device: str = None, quant_type: QuantType = None, model_path: str = None, dtype = torch.float32):     # quant_type, force_load_mode, dtype is used by the meta class
         super().__init__()
         LoraMixin.__init__(self)
         
@@ -90,7 +92,7 @@ class ModelMixin(nn.Module, LoraMixin, metaclass=ModuleMeta):
     @staticmethod
     def _module_size(module: nn.Module):
         ms = 0
-        for param in module.parameters(recurse=False):
+        for param in module.parameters(recurse=True):
             ms += param.nelement() * param.element_size()
         return round(ms / BYTES_IN_MB, 2)
     

@@ -20,19 +20,21 @@ class EfficientModelLoaderHook(ModelHook):
     
     # module here is the main model
     def pre_forward(self, module, *args, **kwargs):
-        app_logger.info(f"Loading {module.__class__.__name__}")
+        app_logger.info(f"*****##### Loading {module.__class__.__name__}")
         app_logger.debug(f"full load modules count: {len(self.full_load)}")
         self._full_load(module)
         return args, kwargs
     
     def _full_load(self, model):
         from ..model_utils.helper_methods import move_module
-        
+        total = 0
         if getattr(model, "_fully_loaded", False): return
         # load initial full_load modules
         for m_ref, m_name in self.full_load:
             m = m_ref()
-            app_logger.debug(f"Loading via full load: {m_name}")
+            s = model._module_size(m)
+            total += s
+            app_logger.debug(f"Loading via full load: {m_name} , size: {s}, total: {total}")
             move_module(model=model, module=m, module_name=m_name)
 
         model._fully_loaded = True
@@ -70,7 +72,7 @@ class EfficientModuleLoaderHook(ModelHook):
         
         # lora patching
         delta = None
-        if hasattr(module, "weight"):
+        if getattr(module, "weight", None) is not None:
             current_step = getattr(model, "current_time_step", -1)
             model_key = f"{self.module_name}.weight"
             delta = model.get_combined_delta(

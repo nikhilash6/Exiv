@@ -10,12 +10,12 @@ import uuid
 from ...enum import Model
 from ...attention import optimized_attention
 from ...positional_embeddings import EmbedND, apply_rope
-from ...conditionals import CONDCrossAttn, CONDRegular
+from ...conditionals import CONDCrossAttn, CONDNoiseShape, CONDRegular
 from ...latent_format import LatentFormat, Wan21VAELatentFormat
 from ....model_utils.helper_methods import get_state_dict
 from ....model_utils.model_mixin import ModelMixin
 from ....model_utils.common_classes import ModelArchConfig
-from ....utils.tensor import pad_to_patch_size
+from ....utils.tensor import common_upscale, pad_to_patch_size, repeat_to_batch_size
 
 class WanModelArchConfig(ModelArchConfig):
     latent_channels = 16
@@ -96,11 +96,12 @@ class WanSelfAttention(nn.Module):
 
 class WanT2VCrossAttention(WanSelfAttention):
 
-    def forward(self, x, context):
+    def forward(self, x, context, **kwargs):
         r"""
         Args:
             x(Tensor): Shape [B, L1, C]
             context(Tensor): Shape [B, L2, C]
+            kwargs: extra args that maybe in use in i2v
         """
         # compute query, key, value
         q = self.norm_q(self.q(x))
@@ -336,13 +337,13 @@ class Wan21Model(ModelMixin):
         patch_size=(1, 2, 2),
         text_len=512,
         in_dim=16,
-        dim=2048,
-        ffn_dim=8192,
+        dim=5120,
+        ffn_dim=13824,
         freq_dim=256,
         text_dim=4096,
         out_dim=16,
-        num_heads=16,
-        num_layers=32,
+        num_heads=40,
+        num_layers=40,
         window_size=(-1, -1),
         qk_norm=True,
         cross_attn_norm=True,
@@ -350,6 +351,7 @@ class Wan21Model(ModelMixin):
         flf_pos_embed_token_number=None,
         in_dim_ref_conv=None,
         wan_attn_block_class=WanAttentionBlock,
+        **kwargs
     ):
         r"""
         Initialize the diffusion model backbone.
@@ -450,6 +452,77 @@ class Wan21Model(ModelMixin):
         else:
             self.ref_conv = None
             
+    def concat_cond(self, **kwargs):
+        noise = kwargs.get("noise", None)
+        
+        extra_channels = self.patch_embedding.weight.shape[1] - noise.shape[1]
+        if extra_channels == 0:
+            return None
+
+        image = kwargs.get("concat_latent_image", None)
+        device = kwargs["device"]
+
+        # CASE 1: No reference image was provided
+        if image is None:
+            shape_image = list(noise.shape)
+            shape_image[1] = extra_channels
+            image = torch.zeros(shape_image, dtype=noise.dtype, layout=noise.layout, device=noise.device)
+        else:
+            # CASE 2: A reference image exists.
+            latent_dim = self.latent_format.latent_channels
+            
+            # Upscale/Resize the reference image
+            image = common_upscale(image.to(device), noise.shape[-1], noise.shape[-2], "bilinear", "center")
+            
+            # Process the latents to match the model's expected distribution
+            for i in range(0, image.shape[1], latent_dim):
+                image[:, i: i + latent_dim] = self.process_latent_in(image[:, i: i + latent_dim])
+            
+            # Ensure the batch size matches (e.g., repeating the image for every frame in the batch).
+            image = repeat_to_batch_size(image, noise.shape[0])
+
+        # Handle mismatch in channel counts (e.g., if using a specific I2V model vs T2V)
+        if extra_channels != image.shape[1] + 4:
+            if not self.image_to_video or extra_channels == image.shape[1]:
+                return image
+
+        # Truncate the image if it has too many channels for the available slots
+        # (e.g. reserving 4 channels for the mask).
+        if image.shape[1] > (extra_channels - 4):
+            image = image[:, :(extra_channels - 4)]
+
+        # --- Mask Processing ---
+        
+        mask = kwargs.get("concat_mask", kwargs.get("denoise_mask", None))
+        if mask is None:
+            mask = torch.zeros_like(noise)[:, :4]
+        else:
+            if mask.shape[1] != 4:
+                mask = torch.mean(mask, dim=1, keepdim=True)
+            
+            mask = 1.0 - mask
+            mask = common_upscale(mask.to(device), noise.shape[-1], noise.shape[-2], "bilinear", "center")
+            
+            # Pad the mask
+            if mask.shape[-3] < noise.shape[-3]:
+                mask = torch.nn.functional.pad(mask, (0, 0, 0, 0, 0, noise.shape[-3] - mask.shape[-3]), mode='constant', value=0)
+            
+            # Expand a 1-channel mask to 4 channels
+            if mask.shape[1] == 1:
+                mask = mask.repeat(1, 4, 1, 1, 1)
+            
+            # Ensure batch size alignment.
+            mask = repeat_to_batch_size(mask, noise.shape[0])
+
+        # --- Final Assembly ---
+        
+        # Concatenate the Mask and the Image together
+        concat_mask_index = kwargs.get("concat_mask_index", 0)
+        if concat_mask_index != 0:
+            return torch.cat((image[:, :concat_mask_index], mask, image[:, concat_mask_index:]), dim=1)
+        else:
+            return torch.cat((mask, image), dim=1)
+            
     def format_conds(self, *args, **kwargs):
         out = {}
         cross_attn = kwargs.get("cross_attn", None)
@@ -460,14 +533,26 @@ class Wan21Model(ModelMixin):
         if clip_vision_output is not None:
             out['clip_fea'] = CONDRegular(clip_vision_output["penultimate_hidden_states"])
 
-        concat_latent_image = kwargs.get("concat_latent_image", None)
-        if concat_latent_image is not None:
-            out['time_dim_concat'] = CONDRegular(self.process_latent_in(concat_latent_image))
+        time_dim_concat = kwargs.get("time_dim_concat", None)
+        if time_dim_concat is not None:
+            out['time_dim_concat'] = CONDRegular(self.process_latent_in(time_dim_concat))
 
         reference_latents = kwargs.get("reference_latents", None)
         if reference_latents is not None:
             out['reference_latent'] = CONDRegular(self.process_latent_in(reference_latents[-1])[:, :, 0])
 
+        concat_cond = self.concat_cond(**kwargs)
+        if concat_cond is not None:
+            out['c_concat'] = CONDNoiseShape(concat_cond)
+
+        cross_attn_cnet = kwargs.get("cross_attn_controlnet", None)
+        if cross_attn_cnet is not None:
+            out['crossattn_controlnet'] = CONDCrossAttn(cross_attn_cnet)
+
+        c_concat = kwargs.get("noise_concat", None)
+        if c_concat is not None:
+            out['c_concat'] = CONDNoiseShape(c_concat)
+        
         return out
 
     def forward_orig(
@@ -501,7 +586,8 @@ class Wan21Model(ModelMixin):
                 List of denoised video tensors with original input shapes [C_out, F, H / 8, W / 8]
         """
         # embeddings
-        x = self.patch_embedding(x.float()).to(x.dtype)
+        with torch.autocast(device_type="cuda", dtype=torch.float32):
+            x = self.patch_embedding(x.float()).to(x.dtype)
         grid_sizes = x.shape[2:]
         x = x.flatten(2).transpose(1, 2)
 
@@ -523,14 +609,14 @@ class Wan21Model(ModelMixin):
 
         # clip conditioning
         context_img_len = None
-        if clip_fea is not None:
+        if False and clip_fea is not None:
             if self.img_emb is not None:
                 context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
                 context = torch.concat([context_clip, context], dim=1)
             context_img_len = clip_fea.shape[-2]
 
         # running through all the attn blocks
-        for i, block in self.blocks:
+        for i, block in enumerate(self.blocks):
             x = block(x, e=e0, freqs=freqs, context=context, context_img_len=context_img_len)
         
         # head

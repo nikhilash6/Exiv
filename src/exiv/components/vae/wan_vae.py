@@ -523,7 +523,7 @@ class Wan21VAE(VAEBase):
         max_batch_size: Union[int, None] = 4,
     ):
         super().__init__()
-        
+        # TODO: this has to be moved before super init
         # in case of any other mode, the partial layers will be loaded and offloaded
         # many times (num_frames * tiles_per_frame ~ 200) which will make this unusable
         self.force_load_mode = LOADING_MODE.NORMAL_LOAD.value

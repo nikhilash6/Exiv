@@ -2,16 +2,18 @@ import torch
 
 from exiv.components.enum import KSamplerType, ModelType, SchedulerType
 from exiv.components.models.wan.main import Wan21Model, WanModelArchConfig
+from exiv.components.samplers.cfg_methods import default_cfg
 from exiv.components.samplers.model_sampling import KSampler
 from exiv.components.samplers.sampler_types import get_model_sampling
 from exiv.components.text_vision_encoder.te_t5 import T5XXL, UMT5XXL
 from exiv.components.text_vision_encoder.text_encoder import WanEncoder
 from exiv.components.text_vision_encoder.vision_encoder import create_vision_encoder
 from exiv.components.vae.wan_vae import Wan21VAE
+from exiv.config import LOADING_MODE
 from exiv.model_utils.common_classes import Latent
 from exiv.model_utils.common_classes import ModelWrapper
 from exiv.model_utils.helper_methods import move_model
-from exiv.utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, ProcDevice
+from exiv.utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, MemoryManager, ProcDevice
 from exiv.utils.file import ImageProcessor, ensure_model_available
 from exiv.utils.tensor import common_upscale
 
@@ -97,6 +99,7 @@ def main():
     wan_encoder.load_model(t5_xxl_download_url=download_url)
     pos_embed_dict = wan_encoder.encode(positive_prompt)
     neg_embed_dict = wan_encoder.encode(negative_prompt)
+    del t5_xxl
     del wan_encoder
     
     # generate img embeddings
@@ -120,20 +123,27 @@ def main():
                                         )
     
     print("here")
+    MemoryManager.clear_memory()
     
     # create a model wrapper
-    wan_dit_model = Wan21Model()
+    model_path = "./tests/test_utils/assets/models/wan21_14B.safetensors"
+    # download_url = "https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B/resolve/main/diffusion_pytorch_model.safetensors?download=true"
+    download_url = "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_14B_fp16.safetensors?download=true"
+    wan_dit_model = Wan21Model(force_load_mode=LOADING_MODE.LOW_VRAM.value, dtype=torch.float16)
+    # wan_dit_model = Wan21Model(dtype=torch.float16)
+    wan_dit_model.load_model(model_path=model_path, download_url=download_url)
     model_sampling = get_model_sampling(ModelType.EDM)
     model_wrapper = ModelWrapper(
         model=wan_dit_model,
         model_sampling=model_sampling,
+        cfg_func=default_cfg
     )
 
     # the main sampling loop
     main_sampler = KSampler(
         wrapped_model=model_wrapper,
         seed=123,
-        steps=50,
+        steps=1,
         cfg=7.0,
         sampler_name=KSamplerType.EULER.value,
         scheduler_name=SchedulerType.SIMPLE.value,
@@ -142,6 +152,7 @@ def main():
         latent_image=blank_latent
     )
     
+    print("here")
     out = main_sampler.run_sampling()
     wan_vae = Wan21VAE()
     out = wan_vae.decode(out)

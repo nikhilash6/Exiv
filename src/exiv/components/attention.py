@@ -68,12 +68,12 @@ def optimized_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, heads
 
     assert all(len(x.shape) == 3 for x in [q, k, v]), "shape mismatch, requires 3D tensors (bs, seq_len, dim)"
     
-    b, seq_len, dim = q.shape
+    b, target_len, dim = q.shape
     assert dim % heads == 0, "dim mismatch in attn, not divisible by heads"
     dim_head = dim // heads
 
-    # q, k, v -> (bs, h, seq_len, dim_head)
-    q, k, v = map(lambda t: t.view(b, seq_len, heads, dim_head).transpose(1, 2), (q, k, v))
+    # q, k, v -> (bs, h, -1, dim_head)
+    q, k, v = map(lambda t: t.view(b, -1, heads, dim_head).transpose(1, 2), (q, k, v))
 
     # SDPA and our standard fallback expect (bs, h, seq_len, dim_head)
     if optimized_attention.impl is F.scaled_dot_product_attention or optimized_attention.impl is standard_attention:

@@ -173,7 +173,7 @@ def model_sampling_step(wrapped_model: ModelWrapper, x, sigma, uncond, cond, con
     out = calc_cond_batch(wrapped_model, conds, x_in, timestep)
     # TODO: streamline this as more cfg methods are added
     cond_pred, uncond_pred = out[0], out[1]
-    args = {
+    kwargs = {
         "cond": cond_pred, 
         "uncond": uncond_pred, 
         "cond_scale": cond_scale, 
@@ -185,7 +185,7 @@ def model_sampling_step(wrapped_model: ModelWrapper, x, sigma, uncond, cond, con
         "model": wrapped_model
     }
     # we can apply cfg on raw outputs, no matter what they are 
-    cfg_result = wrapped_model.cfg_fn(args)
+    cfg_result = wrapped_model.cfg_func(**kwargs)
 
     # convert the model output (EPS, V, etc.) back to the denoised latent (x0)
     denoised = wrapped_model.model_sampling.calculate_denoised(sigma, cfg_result, x)
@@ -239,6 +239,9 @@ def calc_cond_batch(wrapped_model: ModelWrapper, conds: List[List], x_in: Tensor
     if controlnet_cond is not None:
         batched_conditioning['control'] = controlnet_cond.get_control(batched_input_x, batched_timestep, batched_conditioning, num_tasks)
 
+    if "c_crossattn" in batched_conditioning:
+        batched_conditioning["context"] = batched_conditioning.pop("c_crossattn")
+    
     print("just before the model")
     
     # ---- run model
