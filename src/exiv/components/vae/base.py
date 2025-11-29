@@ -6,11 +6,20 @@ import numpy as np
 from typing import Optional, Tuple
 
 from ..enum import VAEType
+from ...config import LOADING_MODE
+from ...utils.logging import app_logger
 from ...utils.tensor import random_tensor
 from ...utils.device import VRAM_DEVICE
 from ...model_utils.model_mixin import ModelMixin
 
 class VAEBase(ModelMixin):
+    def __init__(self, *args, **kwargs):
+        # NOTE: in case of any other mode, the partial layers will be loaded and offloaded
+        # many times (num_frames * tiles_per_frame ~ 200) which will make this unusable
+        app_logger.info("VAE loading mode changed to normal")
+        self.force_load_mode = LOADING_MODE.NORMAL_LOAD.value
+        super().__init__(*args, **kwargs)
+        
     # ------- these methods must be overriden in the child ---------
     # children must also define 'encoder' and 'decoder' properties (obviously)
     def get_tiling_config(self, input_shape, tile_x=256, tile_y=256, tile_z=4, overlap_x=64, overlap_y=64):
