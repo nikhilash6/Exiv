@@ -9,6 +9,20 @@ from ..utils.device import OFFLOAD_DEVICE, RESERVED_MEM, MemoryManager
 from ..config import LOADING_MODE, global_config
 
 
+def move_module_or_params(model, module, target_device, module_name=None):
+    from ..model_utils.helper_methods import move_module, move_immediate_params
+    
+    # if it has params then only the params are moved (as children are moved through their own hook)
+    # or else the entire module is moved (leaf/children)
+    if model.is_leaf_module(module):
+        move_module(model=model, module=module, module_name=module_name, target_device=target_device)
+    elif model.has_orphan_params(module):
+        move_immediate_params(module=module, device=target_device)
+        
+def should_preload(model, module):
+    # we only preload modules that are either leaves or they have params that needs to be moved as well
+    return model.is_leaf_module(module) or model.has_orphan_params(module)
+
 class EfficientModelLoaderHook(ModelHook):
     """
     this hook loads the initial set of full_load modules before the main model's forward call
@@ -26,7 +40,7 @@ class EfficientModelLoaderHook(ModelHook):
         return args, kwargs
     
     def _full_load(self, model):
-        from ..model_utils.helper_methods import move_module
+        
         total = 0
         if getattr(model, "_fully_loaded", False): return
         # load initial full_load modules
@@ -35,7 +49,7 @@ class EfficientModelLoaderHook(ModelHook):
             s = model._module_size(m)
             total += s
             app_logger.debug(f"Loading via full load: {m_name} , size: {s}, total: {total}")
-            move_module(model=model, module=m, module_name=m_name)
+            move_module_or_params(model=model, module=m, target_device=model.gpu_device, module_name=m_name)
 
         model._fully_loaded = True
     
@@ -56,17 +70,16 @@ class EfficientModuleLoaderHook(ModelHook):
         self.full_load_module = full_load_module
 
     def pre_forward(self, module: torch.nn.Module, *args, **kwargs):
-        from ..model_utils.helper_methods import move_module
-        
         model = self.model_ref()
         if model is None:
             return args, kwargs
 
         if not self.full_load_module:
             app_logger.debug(f"Loading via hook: {self.module_name}")
-            move_module(
+            move_module_or_params(
                 model=model,
                 module=module,
+                target_device=model.gpu_device,
                 module_name=self.module_name
             )
         
@@ -90,8 +103,6 @@ class EfficientModuleLoaderHook(ModelHook):
         return args, kwargs
 
     def post_forward(self, module: torch.nn.Module, output: Any):
-        from ..model_utils.helper_methods import move_module
-        
         model = self.model_ref()
         if model is None: 
             return output
@@ -104,7 +115,7 @@ class EfficientModuleLoaderHook(ModelHook):
         
         if not self.full_load_module:
             app_logger.debug(f"Moving back {self.module_name} to cpu via hook")
-            move_module(model, module, module_name=self.module_name, target_device=OFFLOAD_DEVICE)
+            move_module_or_params(model, module, target_device=OFFLOAD_DEVICE, module_name=self.module_name)
             MemoryManager.clear_memory()
             
         return output
@@ -129,7 +140,7 @@ def split_model_for_loading(model: 'ModelMixin'):
     
     module_by_size = []     # contains modules sorted by size (asc)
     for m_name, m in model.named_modules():
-        if m is model or not model.is_leaf_module(m):
+        if m is model or not should_preload(model, m):
             continue
         module_by_size.append((model._module_size(m), m_name, m))
     
@@ -178,16 +189,18 @@ def enable_efficient_loading(model: 'ModelMixin'):
     else:
         # normal load, everything should be in full_load
         for m_name, m in model.named_modules():
-            if m is model or not model.is_leaf_module(m):
+            if m is model or not should_preload(model, m):
                 continue
             
             full_load.append((weakref.ref(m), m_name))
     
     total_modules = 0
     for m_name, m in model.named_modules():
-        if m is model or not model.is_leaf_module(m):
+        if m is model or not should_preload(model, m):
             continue
         
+        # NOTE: both leaf and has_orphan modules are given the preload hooks, but in case of has_orphan
+        # only the orphan_params are loaded and not the children (as they will have their own hooks)
         module_hook = EfficientModuleLoaderHook(
             model_ref=model,
             module_name=m_name,

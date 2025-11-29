@@ -80,19 +80,17 @@ class ModelMixin(nn.Module, LoraMixin, metaclass=ModuleMeta):
     
     @staticmethod
     def is_leaf_module(module: nn.Module) -> bool:
-        # TODO: this needs major fixing. Rn we are considering any module with
-        # a parameter as the leaf module, so we don't have to load the parameters separately,
-        # but this means that modules with multiple sub modules and even just one parameter
-        # count as leaf (and will be significantly heavy than a leaf), thus increasing the min mem required
-        if len(list(module.parameters(recurse=False))) > 0:
-            return True
-        
         return len(list(module.children())) == 0
+    
+    @staticmethod
+    def has_orphan_params(module: nn.Module) -> bool:
+        return len(list(module.parameters(recurse=False))) > 0 or \
+                      len(list(module.buffers(recurse=False))) > 0
 
     @staticmethod
     def _module_size(module: nn.Module):
         ms = 0
-        for param in module.parameters(recurse=True):
+        for param in module.parameters(recurse=False):
             ms += param.nelement() * param.element_size()
         return round(ms / BYTES_IN_MB, 2)
     

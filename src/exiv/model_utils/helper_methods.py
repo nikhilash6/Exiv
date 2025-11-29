@@ -9,6 +9,7 @@ from ..config import global_config
 from ..utils.logging import app_logger
 from ..utils.device import is_same_device
 
+
 def move_model(model, device):
     # handling device movement through our custom logic
     for name, module in model.named_modules():
@@ -20,6 +21,20 @@ def move_model(model, device):
         )
 
     return model
+
+def move_immediate_params(module, device, non_blocking=False):
+    """
+    Moves only the immediate parameters of the module
+    """
+    for param in module.parameters(recurse=False):
+        if param is not None:
+            param.data = param.data.to(device, non_blocking=non_blocking)
+            if param.grad is not None:
+                param.grad.data = param.grad.data.to(device, non_blocking=non_blocking)
+
+    for name, buf in module.named_buffers(recurse=False):
+        if buf is not None:
+            module._buffers[name] = buf.to(device, non_blocking=non_blocking)
 
 c = 0
 # TODO: dtype and non_blocking params are not handled as of now
@@ -69,6 +84,8 @@ def move_module(model, module, module_name, target_device=None):
     else:
         # standard .to() for all other regular modules
         module.to(device=target_device)
+        
+    move_immediate_params(module, target_device)
 
     # app_logger.debug(f"modules rn: {[m.__class__.__name__ for mn, m in model.named_modules() if m != model]}")
     # MemoryManager.clear_memory()
