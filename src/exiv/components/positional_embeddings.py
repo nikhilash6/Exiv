@@ -44,7 +44,7 @@ def rope(pos: Tensor, dim: int, theta: int) -> Tensor:
     out = rearrange(out, "b n d (i j) -> b n d i j", i=2, j=2)
 
     # Return the final rotation matrices.
-    return out.float()
+    return out.type_as(pos)
 
 
 def apply_rope(x: Tensor, freqs_cis: Tensor) -> Tensor:

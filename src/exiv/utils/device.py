@@ -89,7 +89,7 @@ def is_same_device(first_device, second_device):
 
 # ------------------ Memory availability
 
-RESERVED_MEM = 1024 * 2         # buffers, cache.. 
+RESERVED_MEM = 1024         # buffers, cache.. 
 
 # TODO: do somekind of ttl based caching to eliminate repeated calls
 class MemoryManager:

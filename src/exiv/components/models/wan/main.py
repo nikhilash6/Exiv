@@ -689,3 +689,32 @@ class Wan21Model(ModelMixin):
     def get_mapped_key(self, model_key=None, lora_key=None):
         if hasattr(self, "_cached_key_map"):
             return self._cached_key_map
+
+    def get_memory_footprint_params(self):
+        """
+        Returns architectural constants for memory estimation.
+        """
+        try:
+             dtype_size = torch.tensor([], dtype=self.dtype).element_size()
+        except:
+             dtype_size = 2
+             
+        return {
+            "patch_size": self.patch_size,      # (1, 2, 2)
+            "hidden_dim": self.dim,             # 5120
+            "ffn_dim": self.ffn_dim,            # 13824
+            # TODO: optimize this memory usage
+            # 1. Query
+            # 2. Key  
+            # 3. Value
+            # 4. RoPE Q
+            # 5. RoPE K
+            # 6. Attention Output / Buffer
+            "attn_factor": 6.0, 
+            
+            # 1. Up Project
+            # 2. Gate/Act  
+            "ffn_factor": 2.0,
+            
+            "dtype_size": dtype_size
+        }

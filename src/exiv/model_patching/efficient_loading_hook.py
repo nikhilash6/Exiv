@@ -132,80 +132,60 @@ There are three modes for loading the model:
 3. NORMAL   => This loads the entire model in one go and keeps it in VRAM for the entire inference
 """
 
-def estimate_max_activation_size(model, target_shape = None):
+def estimate_peak_activation_size(model, target_shape):
     """
-    Estimates the peak activation memory in MBs for a given input shape.
-    target_shape: (B, C, T, H, W)
+    A rough estimation of what peak mem use could be. Mostly focused
+    on attn + rope part.
     """
     if not target_shape: return 0
-    
-    max_activation_bytes = 0
-    # NOTE: Standardize Input to 5D: (Batch, Channels, Time, Height, Width)
-    # will need more fixing / patching as more models are added
-    # ------------------------------------------------------------------
-    current_shape = list(target_shape)
-    
-    # image (B, C, H, W) -> insert time=1 -> (B, C, 1, H, W)
-    if len(current_shape) == 4:
-        current_shape.insert(2, 1)
-    
-    # text (B, L, D) or other 3D -> pad with 1s -> (B, L, D, 1, 1)
-    # (preventing IndexError in Conv logic, though Conv is rare here)
-    while len(current_shape) < 5:
-        current_shape.append(1)
+
+    if hasattr(model, "get_memory_footprint_params"):
+        # NOTE: update this normalization logic as more models are added
+        # ------------------------------
+        safe_shape = list(target_shape)
         
-    current_feat_shape = np.array(current_shape)
-    # ------------------------------------------------------------------
-    
-    model_dtype = getattr(model, "dtype", torch.float16)
-    
-    try:
-        # good way to get bytes per element (e.g., float32 -> 4, float16 -> 2)
-        dtype_size = torch.tensor([], dtype=model_dtype).element_size()
-    except Exception:
-        dtype_size = 2
-
-    for name, m in model.named_modules():
-        if not model.is_leaf_module(m):
-            continue
-
-        output_elements = 0
+        # image (B, C, H, W) -> insert time=1 -> (B, C, 1, H, W)
+        if len(safe_shape) == 4:
+            safe_shape.insert(2, 1)
+            
+        # text/latents (B, L, D) -> pad spatial dims with 1 -> (B, L, D, 1, 1)
+        while len(safe_shape) < 5:
+            safe_shape.append(1)
+        target_shape = safe_shape
+        # --------------------------------
         
-        # estimate output size
-        if isinstance(m, nn.Conv3d):
-            out_channels = m.out_channels
-            stride = m.stride if isinstance(m.stride, tuple) else (m.stride, m.stride, m.stride)
-            t_new = max(1, current_feat_shape[2] // stride[0])
-            h_new = max(1, current_feat_shape[3] // stride[1])
-            w_new = max(1, current_feat_shape[4] // stride[2])
-            
-            output_elements = current_feat_shape[0] * out_channels * t_new * h_new * w_new
-            
-            # update shape if this is the patch embedder
-            if "patch_embedding" in name or "patch_embed" in name:
-                current_feat_shape = np.array([current_feat_shape[0], out_channels, t_new, h_new, w_new])
-
-        elif isinstance(m, nn.Linear):
-            # treat volume as sequence length for Linear layers
-            total_tokens = np.prod(current_feat_shape) // current_feat_shape[1]
-            output_elements = total_tokens * m.out_features
-            
-        elif isinstance(m, (nn.LayerNorm, nn.GroupNorm, nn.RMSNorm)):
-            output_elements = np.prod(current_feat_shape)
-
-        act_bytes = output_elements * dtype_size
-        if act_bytes > max_activation_bytes:
-            max_activation_bytes = act_bytes
-
-    return max_activation_bytes / BYTES_IN_MB
-
+        params = model.get_memory_footprint_params()
+        
+        # target_shape is (B, C, T, H, W)
+        t, h, w = target_shape[2], target_shape[3], target_shape[4]
+        patch_t, patch_h, patch_w = params.get("patch_size", (1, 1, 1))
+        
+        # round up dimensions to nearest patch multiple (padding logic)
+        t_tokens = (t + patch_t - 1) // patch_t
+        h_tokens = (h + patch_h - 1) // patch_h
+        w_tokens = (w + patch_w - 1) // patch_w
+        
+        num_tokens = target_shape[0] * t_tokens * h_tokens * w_tokens
+        
+        # attn calculation
+        attn_peak = params["hidden_dim"] * params.get("attn_factor", 6.0)
+        ffn_peak  = params["ffn_dim"]    * params.get("ffn_factor", 2.0)
+        peak_width = max(attn_peak, ffn_peak)
+        
+        dtype_size = params.get("dtype_size", 2)
+        total_bytes = num_tokens * peak_width * dtype_size * 2
+        
+        return total_bytes / BYTES_IN_MB
+    else:
+        return 0
+    
 def split_model_for_loading(model: 'ModelMixin', target_shape = None):
     # this determines which modules can be fully loaded permanently on the vram
     # and which has to be dynamically loaded
     full_load_modules: List[Tuple[weakref.ref, str]] = []
     
     current_mem_used = 0
-    act_mb = estimate_max_activation_size(model, target_shape)
+    act_mb = estimate_peak_activation_size(model, target_shape)
     available_mem = MemoryManager.available_memory(model.gpu_device) - (RESERVED_MEM + act_mb)
     
     module_by_size = []     # contains modules sorted by size (asc)

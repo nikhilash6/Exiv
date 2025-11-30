@@ -297,5 +297,10 @@ class ModelMixin(nn.Module, LoraMixin, metaclass=ModuleMeta):
         return out
     
     def format_conds(self):
-        # this formats the conds to a format as required by the underlying model
+        # NOTE: this formats the conds to a format as required by the underlying model
         raise NotImplementedError("Child instance has not overriden this empty impl.")
+    
+    def get_memory_footprint_params(self):
+        # NOTE: this has to be overidden in the child model
+        app_logger.warning("Memory footprint params not found, skipping activation buffer calculations")
+        return None

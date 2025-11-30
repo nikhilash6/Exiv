@@ -1,4 +1,5 @@
 import torch
+import torchvision
 
 from exiv.components.enum import KSamplerType, ModelType, SchedulerType
 from exiv.components.models.wan.main import Wan21Model, WanModelArchConfig
@@ -86,7 +87,7 @@ def main():
     positive_prompt = "a dog running in the park"
     negative_prompt = "blurry, bad quality"
     input_img = ImageProcessor.load_image_list("./tests/test_utils/assets/media/test.jpg")[0]
-    height, width, output_frame_count = 512, 512, 33
+    height, width, output_frame_count = 512, 512, 81
     
     # resizing img
     input_img = common_upscale(input_img.unsqueeze(0), height, width)   # (B, C, H, W)
@@ -139,11 +140,12 @@ def main():
         cfg_func=default_cfg
     )
 
+    print("before sampling")
     # the main sampling loop
     main_sampler = KSampler(
         wrapped_model=model_wrapper,
         seed=123,
-        steps=1,
+        steps=10,
         cfg=7.0,
         sampler_name=KSamplerType.EULER.value,
         scheduler_name=SchedulerType.SIMPLE.value,
@@ -152,10 +154,37 @@ def main():
         latent_image=blank_latent
     )
     
-    print("here")
     out = main_sampler.run_sampling()
-    wan_vae = Wan21VAE()
-    out = wan_vae.decode(out)
+    wan_dit_model.to("cpu")
+    del wan_dit_model, model_wrapper
+    MemoryManager.clear_memory()
     
+    print("final decode")
+    model_path = "./tests/test_utils/assets/models/wan_2_1_vae.safetensors"
+    wan_vae = Wan21VAE()
+    wan_vae.load_model(model_path=model_path)
+    move_model(wan_vae, VRAM_DEVICE)
+    out = wan_vae.decode(out, (height, width, output_frame_count))
+    save_video(out)
+    
+def save_video(out):
+    video_tensor = out.sample if hasattr(out, "sample") else out
+
+    # rescale from [-1, 1] to [0, 255] and cast to uint8
+    video_tensor = ((video_tensor.clamp(-1.0, 1.0) + 1.0) * 127.5).to(torch.uint8)
+
+    # current shape: (Batch, Channels, Time, Height, Width) -> e.g., (1, 3, 121, 512, 768)
+    for i, video in enumerate(video_tensor):
+        # (C, T, H, W) -> (T, H, W, C), for torchvision
+        video_formatted = video.permute(1, 2, 3, 0).cpu()
+        
+        save_path = f"output_video_{i}.mp4"
+        torchvision.io.write_video(
+            save_path,
+            video_formatted,
+            fps=24,
+            options={"crf": "5"}  # 'Constant Rate Factor' for quality (lower is better)
+        )
+        print(f"Saved {save_path}") 
     
 main()
