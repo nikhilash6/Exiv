@@ -38,7 +38,6 @@ class ModuleMeta(type(nn.Module)):
                 
                 if isinstance(instance, ModelMixin):    # mainly for safety
                     instance.force_load_mode = getattr(instance, "force_load_mode", None) or force_load_mode
-                    enable_efficient_loading(instance)  # kinda default hook
                     if not getattr(instance, 'dtype', None):
                         instance.dtype = model_dtype
                         
@@ -94,11 +93,64 @@ class ModelMixin(nn.Module, LoraMixin, metaclass=ModuleMeta):
             ms += param.nelement() * param.element_size()
         return round(ms / BYTES_IN_MB, 2)
     
+    def _get_input_tensor(self, *args, **kwargs):
+        # TODO: this is a VERY fragile piece of code, will fix later
+        input_tensor = None
+        
+        # priority list of keyword arguments to check
+        target_keys = [
+            "x",                # Standard for DiTs / Wan
+            "input_ids",        # Standard for Text Encoders (T5/CLIP)
+            "sample",           # Diffusers standard
+            "latents",          # ComfyUI / VAEs
+            "input_embeds",     # Text Encoders (pre-computed)
+            "hidden_states",    # Middle blocks / VAE Decoders
+            "pixel_values"      # Image encoder
+        ]
+        
+        for key in target_keys:
+            if key in kwargs and torch.is_tensor(kwargs[key]):
+                input_tensor = kwargs[key]
+                break
+        
+        if input_tensor is None:
+            for arg in args:
+                if torch.is_tensor(arg):
+                    input_tensor = arg
+                    break
+                
+        return input_tensor
+    
     def __call__(self, *args, **kwargs):
+        input_tensor = self._get_input_tensor(*args, **kwargs)
+        
+        # only re-calculate if shape changed (perf optmization)
+        current_shape = None
+        if torch.is_tensor(input_tensor):
+            current_shape = tuple(input_tensor.shape)
+            
+        if current_shape != (prev_cached:=getattr(self, "_cached_input_shape", None)):
+            app_logger.info(f"Input shape changed {prev_cached} -> {current_shape}. Recalculating memory split.")
+            enable_efficient_loading(self, target_shape=current_shape)
+            self._cached_input_shape = current_shape
+        else:
+            # if there is no input tensor and no hook applied
+            registry = getattr(self, "hook_registry", None)
+            
+            # Check if the loader hook is missing
+            hook_missing = True
+            if registry:
+                from ..model_patching.hook_registry import HookType
+                hook_missing = registry.get_hook(HookType.EFFICIENT_MODEL_LOADER.value) == None
+            
+            if hook_missing:
+                app_logger.warning("No input tensor detected, applying default Efficient Loading without max_act safeguard")
+                enable_efficient_loading(self)
+
         def original_call(*args, **kwargs):
             with torch.inference_mode():
                 # moving the inputs to GPU
-                app_logger.debug(f"moving the inputs to {self.gpu_device}")
+                app_logger.debug(f"moving the inputs to {self.gpu_device} and dtype {self.dtype}")
                 new_args = tuple(cast_to(a, device=self.gpu_device, dtype=self.dtype) if torch.is_tensor(a) else a for a in args)
                 new_kwargs = {k: (cast_to(v, device=self.gpu_device, dtype=self.dtype) if torch.is_tensor(v) else v) for k, v in kwargs.items()}
 

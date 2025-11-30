@@ -1,4 +1,6 @@
 import torch
+from torch import nn
+import numpy as np
 
 import weakref
 from typing import List, Any, Tuple
@@ -6,7 +8,7 @@ from typing import List, Any, Tuple
 from .hook_registry import HookRegistry, HookType, ModelHook
 from ..utils.logging import app_logger
 from ..utils.device import OFFLOAD_DEVICE, RESERVED_MEM, MemoryManager
-from ..config import LOADING_MODE, global_config
+from ..config import BYTES_IN_MB, LOADING_MODE, global_config
 
 
 def move_module_or_params(model, module, target_device, module_name=None):
@@ -119,7 +121,7 @@ class EfficientModuleLoaderHook(ModelHook):
             MemoryManager.clear_memory()
             
         return output
-    
+
     
 """
 There are three modes for loading the model:
@@ -130,13 +132,81 @@ There are three modes for loading the model:
 3. NORMAL   => This loads the entire model in one go and keeps it in VRAM for the entire inference
 """
 
-def split_model_for_loading(model: 'ModelMixin'):
+def estimate_max_activation_size(model, target_shape = None):
+    """
+    Estimates the peak activation memory in MBs for a given input shape.
+    target_shape: (B, C, T, H, W)
+    """
+    if not target_shape: return 0
+    
+    max_activation_bytes = 0
+    # NOTE: Standardize Input to 5D: (Batch, Channels, Time, Height, Width)
+    # will need more fixing / patching as more models are added
+    # ------------------------------------------------------------------
+    current_shape = list(target_shape)
+    
+    # image (B, C, H, W) -> insert time=1 -> (B, C, 1, H, W)
+    if len(current_shape) == 4:
+        current_shape.insert(2, 1)
+    
+    # text (B, L, D) or other 3D -> pad with 1s -> (B, L, D, 1, 1)
+    # (preventing IndexError in Conv logic, though Conv is rare here)
+    while len(current_shape) < 5:
+        current_shape.append(1)
+        
+    current_feat_shape = np.array(current_shape)
+    # ------------------------------------------------------------------
+    
+    model_dtype = getattr(model, "dtype", torch.float16)
+    
+    try:
+        # good way to get bytes per element (e.g., float32 -> 4, float16 -> 2)
+        dtype_size = torch.tensor([], dtype=model_dtype).element_size()
+    except Exception:
+        dtype_size = 2
+
+    for name, m in model.named_modules():
+        if not model.is_leaf_module(m):
+            continue
+
+        output_elements = 0
+        
+        # estimate output size
+        if isinstance(m, nn.Conv3d):
+            out_channels = m.out_channels
+            stride = m.stride if isinstance(m.stride, tuple) else (m.stride, m.stride, m.stride)
+            t_new = max(1, current_feat_shape[2] // stride[0])
+            h_new = max(1, current_feat_shape[3] // stride[1])
+            w_new = max(1, current_feat_shape[4] // stride[2])
+            
+            output_elements = current_feat_shape[0] * out_channels * t_new * h_new * w_new
+            
+            # update shape if this is the patch embedder
+            if "patch_embedding" in name or "patch_embed" in name:
+                current_feat_shape = np.array([current_feat_shape[0], out_channels, t_new, h_new, w_new])
+
+        elif isinstance(m, nn.Linear):
+            # treat volume as sequence length for Linear layers
+            total_tokens = np.prod(current_feat_shape) // current_feat_shape[1]
+            output_elements = total_tokens * m.out_features
+            
+        elif isinstance(m, (nn.LayerNorm, nn.GroupNorm, nn.RMSNorm)):
+            output_elements = np.prod(current_feat_shape)
+
+        act_bytes = output_elements * dtype_size
+        if act_bytes > max_activation_bytes:
+            max_activation_bytes = act_bytes
+
+    return max_activation_bytes / BYTES_IN_MB
+
+def split_model_for_loading(model: 'ModelMixin', target_shape = None):
     # this determines which modules can be fully loaded permanently on the vram
     # and which has to be dynamically loaded
     full_load_modules: List[Tuple[weakref.ref, str]] = []
     
     current_mem_used = 0
-    available_mem = MemoryManager.available_memory(model.gpu_device) - RESERVED_MEM
+    act_mb = estimate_max_activation_size(model, target_shape)
+    available_mem = MemoryManager.available_memory(model.gpu_device) - (RESERVED_MEM + act_mb)
     
     module_by_size = []     # contains modules sorted by size (asc)
     for m_name, m in model.named_modules():
@@ -170,11 +240,11 @@ def split_model_for_loading(model: 'ModelMixin'):
         
     return full_load_modules
 
-
-def enable_efficient_loading(model: 'ModelMixin'):
+def enable_efficient_loading(model: 'ModelMixin', target_shape = None):
     """
     This patches the forward pass of modules to dynamically load / unload them
     """
+    model._fully_loaded = False
     full_load: List[Tuple[weakref.ref, str]] = []
     loading_mode = getattr(model, 'force_load_mode', None) or global_config.loading_mode
     
@@ -184,7 +254,7 @@ def enable_efficient_loading(model: 'ModelMixin'):
         
     elif loading_mode == LOADING_MODE.LOW_VRAM.value:
         # full_load modules
-        full_load = split_model_for_loading(model)
+        full_load = split_model_for_loading(model, target_shape)
 
     else:
         # normal load, everything should be in full_load

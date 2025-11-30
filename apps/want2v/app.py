@@ -86,7 +86,7 @@ def main():
     positive_prompt = "a dog running in the park"
     negative_prompt = "blurry, bad quality"
     input_img = ImageProcessor.load_image_list("./tests/test_utils/assets/media/test.jpg")[0]
-    height, width, output_frame_count = 512, 512, 81
+    height, width, output_frame_count = 512, 512, 33
     
     # resizing img
     input_img = common_upscale(input_img.unsqueeze(0), height, width)   # (B, C, H, W)
