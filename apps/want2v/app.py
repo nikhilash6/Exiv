@@ -127,13 +127,13 @@ def main():
     MemoryManager.clear_memory()
     
     # create a model wrapper
-    model_path = "./tests/test_utils/assets/models/wan21_14B.safetensors"
-    # download_url = "https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B/resolve/main/diffusion_pytorch_model.safetensors?download=true"
-    download_url = "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_14B_fp16.safetensors?download=true"
+    model_path = "./tests/test_utils/assets/models/wan21_1_3B.safetensors"
+    download_url = "https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B/resolve/main/diffusion_pytorch_model.safetensors?download=true"
+    # download_url = "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_14B_fp16.safetensors?download=true"
     wan_dit_model = Wan21Model(force_load_mode=LOADING_MODE.LOW_VRAM.value, dtype=torch.float16)
     # wan_dit_model = Wan21Model(dtype=torch.float16)
     wan_dit_model.load_model(model_path=model_path, download_url=download_url)
-    model_sampling = get_model_sampling(ModelType.EDM)
+    model_sampling = get_model_sampling(ModelType.FLOW)
     model_wrapper = ModelWrapper(
         model=wan_dit_model,
         model_sampling=model_sampling,
@@ -145,8 +145,8 @@ def main():
     main_sampler = KSampler(
         wrapped_model=model_wrapper,
         seed=123,
-        steps=10,
-        cfg=7.0,
+        steps=50,
+        cfg=6.0,
         sampler_name=KSamplerType.EULER.value,
         scheduler_name=SchedulerType.SIMPLE.value,
         positive=pos_embed,

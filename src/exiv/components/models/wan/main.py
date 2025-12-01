@@ -604,6 +604,8 @@ class Wan21Model(ModelMixin):
             List[Tensor]:
                 List of denoised video tensors with original input shapes [C_out, F, H / 8, W / 8]
         """
+        x_input_debug = x.detach().clone().float().cpu()
+        
         # embeddings
         with torch.autocast(device_type="cuda", dtype=torch.float32):
             x = self.patch_embedding(x.float()).to(x.dtype)
@@ -646,6 +648,22 @@ class Wan21Model(ModelMixin):
 
         # unpatchify
         x = self.unpatchify(x, grid_sizes)
+        
+        x_output_debug = x.detach().float().cpu()
+
+        # Metric 1: Did the values change? (Mean Absolute Difference)
+        # If this is 0.0, your model is essentially an identity function (doing nothing).
+        diff = (x_input_debug - x_output_debug).abs().mean().item()
+        
+        # Metric 2: Is the output dead?
+        # If output std is 0.0, your model has collapsed (outputting constant values).
+        out_std = x_output_debug.std().item()
+
+        print(f"--- Forward Pass Check ---")
+        print(f"Input Mean/Std:  {x_input_debug.mean():.4f} / {x_input_debug.std():.4f}")
+        print(f"Output Mean/Std: {x_output_debug.mean():.4f} / {x_output_debug.std():.4f}")
+        print(f"Avg Change (Diff): {diff:.6f}") # Should be significant (e.g., > 0.1)
+        
         return x
 
     def rope_encode(self, t, h, w, t_start=0, steps_t=None, steps_h=None, steps_w=None, device=None, dtype=None):

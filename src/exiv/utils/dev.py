@@ -167,4 +167,5 @@ def print_model_params(model: torch.nn.Module, break_dtype=None):
         
 def get_tensor_hash(t):
     data = t.detach().cpu().contiguous().numpy()
-    return hashlib.sha256(data.tobytes()).hexdigest()[:8] # First 8 chars are usually enough
+    hash = hashlib.sha256(data.tobytes()).hexdigest()[:8] # First 8 chars are usually enough
+    print(f"[Probe] | Shape: {tuple(t.shape)} | Mean: {t.mean():.4f} | Std: {t.std():.4f} | Min: {t.min():.4f} | Max: {t.max():.4f} | Hash: {hash}")
