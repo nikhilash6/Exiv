@@ -66,3 +66,41 @@ class VisionEncoderTest(unittest.TestCase):
             mse_loss = F.mse_loss(decoded_image, image)
             self.assertLess(mse_loss.item(), 1e-04)
             self.assertEqual(image.shape, decoded_image.shape)
+
+
+    LOADING_PARAMS = [
+        ("normal",   {"no_oom": False, "low_vram": False, "normal_load": True},  2346.53, VRAM_DEVICE),
+    ]
+    @parameterized.expand(LOADING_PARAMS)
+    def test_wan_vae_video(self, load_mode, config, expected_mem, expected_device):
+        global_config.update_config(config)
+        
+        with check_memory_usage(expected_mem=expected_mem, device=expected_device):
+            height, width = 512, 512
+            frame_count = 81 
+            
+            # synthetic video data: (1, 3, 81, 512, 512)
+            video = torch.rand((1, 3, frame_count, height, width), device=VRAM_DEVICE, dtype=torch.float32)
+
+            download_url = "https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-720P-Diffusers/resolve/main/vae/diffusion_pytorch_model.safetensors?download=true"
+            model_path = "./tests/test_utils/assets/models/wan_2_1_vae.safetensors"
+            model_path = ensure_model_available(model_path=model_path, download_url=download_url)
+            
+            wan_vae = Wan21VAE()
+            wan_vae.load_model(model_path=model_path)
+            move_model(wan_vae, VRAM_DEVICE)
+            
+            # Encode: video is (B, C, T, H, W)
+            concat_latent_image = wan_vae.encode(video)
+            MemoryManager.clear_memory()
+            app_logger.debug("encoding complete")
+            
+            # Decode
+            decoded_image = wan_vae.decode(concat_latent_image, input_shape=(width, height, frame_count))
+            MemoryManager.clear_memory()
+            app_logger.debug("decoding complete")
+            del wan_vae
+            
+            self.assertEqual(video.shape, decoded_image.shape)
+            mse_loss = F.mse_loss(decoded_image, video)
+            self.assertLess(mse_loss.item(), 1e-02)
