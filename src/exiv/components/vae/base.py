@@ -131,8 +131,8 @@ class VAEBase(ModelMixin):
         og_stride_height = tile_height - overlap_height
         og_stride_width = tile_width - overlap_width
     
-        blend_width = overlap_width // self.spatial_compression_ratio
-        blend_height = overlap_height // self.spatial_compression_ratio
+        blend_width = overlap_width
+        blend_height = overlap_height
         latent_tile_size_height = tile_height // self.spatial_compression_ratio
         latent_tile_size_width = tile_width // self.spatial_compression_ratio
         latent_tile_stride_height = og_stride_height // self.spatial_compression_ratio

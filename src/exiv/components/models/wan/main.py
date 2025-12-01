@@ -329,11 +329,8 @@ class Wan21ModelArchConfig(ModelArchConfig):
 class Wan21Model(ModelMixin):
     r"""
     Wan diffusion backbone supporting both text-to-video and image-to-video.
-    """
-
-    def __init__(
-        self,
-        model_type=Model.WANT2V.value,
+    14B config (will remove this junk after dynamic config loading) -- 
+    model_type=Model.WANT2V.value,
         patch_size=(1, 2, 2),
         text_len=512,
         in_dim=16,
@@ -344,6 +341,28 @@ class Wan21Model(ModelMixin):
         out_dim=16,
         num_heads=40,
         num_layers=40,
+        window_size=(-1, -1),
+        qk_norm=True,
+        cross_attn_norm=True,
+        eps=1e-6,
+        flf_pos_embed_token_number=None,
+        in_dim_ref_conv=None,
+        wan_attn_block_class=WanAttentionBlock,
+    """
+
+    def __init__(
+        self,
+        model_type=Model.WANT2V.value,
+        patch_size=(1, 2, 2),
+        text_len=512,
+        in_dim=16,
+        dim=1536,          
+        ffn_dim=8960,      
+        freq_dim=256,
+        text_dim=4096,
+        out_dim=16,
+        num_heads=12,      
+        num_layers=30,     
         window_size=(-1, -1),
         qk_norm=True,
         cross_attn_norm=True,
