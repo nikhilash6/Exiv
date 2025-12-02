@@ -16,6 +16,7 @@ from ....model_utils.helper_methods import get_state_dict
 from ....model_utils.model_mixin import ModelMixin
 from ....model_utils.common_classes import ModelArchConfig
 from ....utils.tensor import common_upscale, pad_to_patch_size, repeat_to_batch_size
+from ....utils.dev import get_tensor_hash
 
 class WanModelArchConfig(ModelArchConfig):
     latent_channels = 16
@@ -604,11 +605,11 @@ class Wan21Model(ModelMixin):
             List[Tensor]:
                 List of denoised video tensors with original input shapes [C_out, F, H / 8, W / 8]
         """
-        x_input_debug = x.detach().clone().float().cpu()
-        
         # embeddings
         with torch.autocast(device_type="cuda", dtype=torch.float32):
             x = self.patch_embedding(x.float()).to(x.dtype)
+        print("--- input: ")
+        get_tensor_hash(x)
         grid_sizes = x.shape[2:]
         x = x.flatten(2).transpose(1, 2)
 
@@ -648,21 +649,8 @@ class Wan21Model(ModelMixin):
 
         # unpatchify
         x = self.unpatchify(x, grid_sizes)
-        
-        x_output_debug = x.detach().float().cpu()
-
-        # Metric 1: Did the values change? (Mean Absolute Difference)
-        # If this is 0.0, your model is essentially an identity function (doing nothing).
-        diff = (x_input_debug - x_output_debug).abs().mean().item()
-        
-        # Metric 2: Is the output dead?
-        # If output std is 0.0, your model has collapsed (outputting constant values).
-        out_std = x_output_debug.std().item()
-
-        print(f"--- Forward Pass Check ---")
-        print(f"Input Mean/Std:  {x_input_debug.mean():.4f} / {x_input_debug.std():.4f}")
-        print(f"Output Mean/Std: {x_output_debug.mean():.4f} / {x_output_debug.std():.4f}")
-        print(f"Avg Change (Diff): {diff:.6f}") # Should be significant (e.g., > 0.1)
+        print("--- output: ")
+        get_tensor_hash(x)
         
         return x
 

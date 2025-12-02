@@ -133,7 +133,7 @@ def main():
     wan_dit_model = Wan21Model(force_load_mode=LOADING_MODE.LOW_VRAM.value, dtype=torch.float16)
     # wan_dit_model = Wan21Model(dtype=torch.float16)
     wan_dit_model.load_model(model_path=model_path, download_url=download_url)
-    model_sampling = get_model_sampling(ModelType.FLOW)
+    model_sampling = get_model_sampling(ModelType.FLOW, {"sampling_settings": {"shift": 8}})
     model_wrapper = ModelWrapper(
         model=wan_dit_model,
         model_sampling=model_sampling,
@@ -144,8 +144,8 @@ def main():
     # the main sampling loop
     main_sampler = KSampler(
         wrapped_model=model_wrapper,
-        seed=123,
-        steps=50,
+        seed=2563,
+        steps=30,
         cfg=6.0,
         sampler_name=KSamplerType.EULER.value,
         scheduler_name=SchedulerType.SIMPLE.value,
