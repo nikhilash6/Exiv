@@ -472,7 +472,11 @@ class Wan21Model(ModelMixin):
         else:
             self.ref_conv = None
             
-    def concat_cond(self, **kwargs):
+    def concatenate_conditioning_latents(self, **kwargs):
+        """
+        Inserts 'concat_mask' in a specific position ('concat_mask_index') in the 
+        'concat_latent_image' tensor channels. Insert position defaults to 0.
+        """
         noise = kwargs.get("noise", None)
         
         extra_channels = self.patch_embedding.weight.shape[1] - noise.shape[1]
@@ -491,28 +495,23 @@ class Wan21Model(ModelMixin):
             # CASE 2: A reference image exists.
             latent_dim = self.latent_format.latent_channels
             
-            # Upscale/Resize the reference image
+            # upscale/resize + process to match vae's distribution
             image = common_upscale(image.to(device), noise.shape[-1], noise.shape[-2], "bilinear", "center")
-            
-            # Process the latents to match the model's expected distribution
             for i in range(0, image.shape[1], latent_dim):
                 image[:, i: i + latent_dim] = self.process_latent_in(image[:, i: i + latent_dim])
             
-            # Ensure the batch size matches (e.g., repeating the image for every frame in the batch).
             image = repeat_to_batch_size(image, noise.shape[0])
 
-        # Handle mismatch in channel counts (e.g., if using a specific I2V model vs T2V)
+        # masks are repeated to 4 channels (not clear why)
         if extra_channels != image.shape[1] + 4:
             if not self.image_to_video or extra_channels == image.shape[1]:
                 return image
 
-        # Truncate the image if it has too many channels for the available slots
-        # (e.g. reserving 4 channels for the mask).
+        # truncate image channels
         if image.shape[1] > (extra_channels - 4):
             image = image[:, :(extra_channels - 4)]
 
         # --- Mask Processing ---
-        
         mask = kwargs.get("concat_mask", kwargs.get("denoise_mask", None))
         if mask is None:
             mask = torch.zeros_like(noise)[:, :4]
@@ -522,21 +521,15 @@ class Wan21Model(ModelMixin):
             
             mask = 1.0 - mask
             mask = common_upscale(mask.to(device), noise.shape[-1], noise.shape[-2], "bilinear", "center")
-            
-            # Pad the mask
             if mask.shape[-3] < noise.shape[-3]:
                 mask = torch.nn.functional.pad(mask, (0, 0, 0, 0, 0, noise.shape[-3] - mask.shape[-3]), mode='constant', value=0)
             
-            # Expand a 1-channel mask to 4 channels
             if mask.shape[1] == 1:
                 mask = mask.repeat(1, 4, 1, 1, 1)
             
-            # Ensure batch size alignment.
             mask = repeat_to_batch_size(mask, noise.shape[0])
 
         # --- Final Assembly ---
-        
-        # Concatenate the Mask and the Image together
         concat_mask_index = kwargs.get("concat_mask_index", 0)
         if concat_mask_index != 0:
             return torch.cat((image[:, :concat_mask_index], mask, image[:, concat_mask_index:]), dim=1)
@@ -546,7 +539,7 @@ class Wan21Model(ModelMixin):
     def format_conds(self, *args, **kwargs):
         out = {}
         
-        concat_cond = self.concat_cond(**kwargs)
+        concat_cond = self.concatenate_conditioning_latents(**kwargs)
         if concat_cond is not None:
             out['c_concat'] = CONDNoiseShape(concat_cond)
 
@@ -709,7 +702,7 @@ class Wan21Model(ModelMixin):
         u = u.reshape(b, c, *[i * j for i, j in zip(grid_sizes, self.patch_size)])
         return u
 
-    def get_mapped_key(self, model_key=None, lora_key=None):
+    def get_mapped_lora_key(self, model_key=None, lora_key=None):
         if hasattr(self, "_cached_key_map"):
             return self._cached_key_map
 

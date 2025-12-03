@@ -4,6 +4,7 @@ from torch import Tensor
 
 import math
 
+from .utils import normalize_seed
 from .scheduler_types import calculate_sigmas
 from .sampling_helpers import preprocess_cond_per_step, prepare_model_conds, prepare_mask
 from ..enum import DISCARD_PENULTIMATE_SIGMA_SAMPLERS, KSamplerType, SamplerType, SchedulerType
@@ -35,7 +36,7 @@ class KSampler:
         self.device = device or VRAM_DEVICE
         
         self.wrapped_model = wrapped_model
-        self.seed = seed
+        self.seed = normalize_seed(seed)
         self.steps = steps
         self.cfg = cfg 
         self.sampler_name = sampler_name

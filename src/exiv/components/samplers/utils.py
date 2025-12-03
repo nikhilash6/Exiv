@@ -1,6 +1,8 @@
+import math
 import torch
-
 import numpy as np
+
+import random
 
 from ..enum import BetaSchedule
 
@@ -30,3 +32,16 @@ def make_beta_schedule(schedule_type, n_timestep, linear_start=1e-4, linear_end=
     else:
         raise ValueError(f"schedule '{schedule_type}' unknown.")
     return betas
+
+def normalize_seed(seed):
+    max_val = 99999
+    if seed == -1:
+        seed = random.randint(1, max_val)
+    elif seed >= 0:
+        seed = seed
+    else:
+        # seed < -1
+        seed *= -1
+    
+    seed = min(seed, max_val)
+    return seed

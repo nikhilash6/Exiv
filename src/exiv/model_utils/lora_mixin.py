@@ -39,7 +39,7 @@ class LoraMixin:
                 
         setattr(self, CACHED_MODEL_LORA_KEY_MAP, key_map)
     
-    def get_mapped_key(self, key = None):
+    def get_mapped_lora_key(self, key = None):
         """
         If model_key is provided then the corresponding lora_key is returned and vice-versa
         """
@@ -135,7 +135,7 @@ class LoraMixin:
         
         total_delta = None
         for lora_idx, strength in self.active_lora_schedule[timestep]:
-            lora_down_key = self.get_mapped_key(model_key)
+            lora_down_key = self.get_mapped_lora_key(model_key)
             lora_up_key = lora_down_key.replace("down", "up")
             
             delta = self.get_delta_from_mmap(
