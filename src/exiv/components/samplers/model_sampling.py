@@ -131,8 +131,6 @@ def sample(
     if latent_image is not None and torch.count_nonzero(latent_image) > 0:
         latent_image = wrapped_model.model.process_latent_in(latent_image)
     
-    print("here")
-    
     conds = prepare_model_conds(wrapped_model, grouped_cond, noise, latent_image, denoise_mask, seed)
     pos_conds, neg_conds = conds.get("positive"), conds.get("negative")
     
@@ -241,8 +239,6 @@ def calc_cond_batch(wrapped_model: ModelWrapper, conds: List[List], x_in: Tensor
 
     if "c_crossattn" in batched_conditioning:
         batched_conditioning["context"] = batched_conditioning.pop("c_crossattn")
-    
-    print("just before the model")
     
     # ---- run model
     output = wrapped_model.model(batched_input_x, batched_timestep, **batched_conditioning)

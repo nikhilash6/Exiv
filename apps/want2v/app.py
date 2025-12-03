@@ -144,7 +144,7 @@ def main():
     # the main sampling loop
     main_sampler = KSampler(
         wrapped_model=model_wrapper,
-        seed=2563,
+        seed=-1,
         steps=30,
         cfg=6.0,
         sampler_name=KSamplerType.EULER.value,

@@ -545,6 +545,19 @@ class Wan21Model(ModelMixin):
             
     def format_conds(self, *args, **kwargs):
         out = {}
+        
+        concat_cond = self.concat_cond(**kwargs)
+        if concat_cond is not None:
+            out['c_concat'] = CONDNoiseShape(concat_cond)
+
+        cross_attn_cnet = kwargs.get("cross_attn_controlnet", None)
+        if cross_attn_cnet is not None:
+            out['crossattn_controlnet'] = CONDCrossAttn(cross_attn_cnet)
+
+        c_concat = kwargs.get("noise_concat", None)
+        if c_concat is not None:
+            out['c_concat'] = CONDNoiseShape(c_concat)
+
         cross_attn = kwargs.get("cross_attn", None)
         if cross_attn is not None:
             out['c_crossattn'] = CONDCrossAttn(cross_attn)
@@ -560,18 +573,6 @@ class Wan21Model(ModelMixin):
         reference_latents = kwargs.get("reference_latents", None)
         if reference_latents is not None:
             out['reference_latent'] = CONDRegular(self.process_latent_in(reference_latents[-1])[:, :, 0])
-
-        concat_cond = self.concat_cond(**kwargs)
-        if concat_cond is not None:
-            out['c_concat'] = CONDNoiseShape(concat_cond)
-
-        cross_attn_cnet = kwargs.get("cross_attn_controlnet", None)
-        if cross_attn_cnet is not None:
-            out['crossattn_controlnet'] = CONDCrossAttn(cross_attn_cnet)
-
-        c_concat = kwargs.get("noise_concat", None)
-        if c_concat is not None:
-            out['c_concat'] = CONDNoiseShape(c_concat)
         
         return out
 
@@ -608,8 +609,7 @@ class Wan21Model(ModelMixin):
         # embeddings
         with torch.autocast(device_type="cuda", dtype=torch.float32):
             x = self.patch_embedding(x.float()).to(x.dtype)
-        print("--- input: ")
-        get_tensor_hash(x)
+
         grid_sizes = x.shape[2:]
         x = x.flatten(2).transpose(1, 2)
 
@@ -631,7 +631,7 @@ class Wan21Model(ModelMixin):
 
         # clip conditioning
         context_img_len = None
-        if False and clip_fea is not None:
+        if self.model_type in [Model.WANTI2V.value] and clip_fea is not None:
             if self.img_emb is not None:
                 context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
                 context = torch.concat([context_clip, context], dim=1)
@@ -649,8 +649,6 @@ class Wan21Model(ModelMixin):
 
         # unpatchify
         x = self.unpatchify(x, grid_sizes)
-        print("--- output: ")
-        get_tensor_hash(x)
         
         return x
 
