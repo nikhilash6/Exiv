@@ -364,7 +364,7 @@ class T5XXLConfig:
     is_decoder = False
     is_gated_act = True
     layer_norm_epsilon = 1e-06
-    model_type = "t5"
+    model_type = "t5_xxl"
     num_decoder_layers = 24
     num_heads = 64
     num_layers = 24
@@ -377,4 +377,5 @@ class T5XXLConfig:
 
 @dataclass
 class UMT5XXLConfig(T5XXLConfig):
+    model_type = "umt5_xxl"
     vocab_size = 256384

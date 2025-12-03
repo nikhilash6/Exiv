@@ -145,7 +145,7 @@ def main():
     main_sampler = KSampler(
         wrapped_model=model_wrapper,
         seed=-1,
-        steps=30,
+        steps=40,
         cfg=6.0,
         sampler_name=KSamplerType.EULER.value,
         scheduler_name=SchedulerType.SIMPLE.value,

@@ -150,8 +150,9 @@ class ModelMixin(nn.Module, LoraMixin, metaclass=ModuleMeta):
         def original_call(*args, **kwargs):
             with torch.inference_mode():
                 # moving the inputs to GPU
+                # TODO: mfking FIX THIS !!!! this is a work around for now
                 app_logger.debug(f"moving the inputs to {self.gpu_device} and dtype {self.dtype}")
-                new_args = tuple(cast_to(a, device=self.gpu_device, dtype=self.dtype) if torch.is_tensor(a) else a for a in args)
+                new_args = tuple(cast_to(a, device=self.gpu_device, dtype=self.dtype) if torch.is_tensor(a) and idx == 0 else a for idx, a in enumerate(args))
                 new_kwargs = {k: (cast_to(v, device=self.gpu_device, dtype=self.dtype) if torch.is_tensor(v) else v) for k, v in kwargs.items()}
 
                 return super(ModelMixin, self).__call__(*new_args, **new_kwargs)

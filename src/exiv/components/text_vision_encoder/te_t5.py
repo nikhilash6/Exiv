@@ -235,28 +235,33 @@ class T5Attention(nn.Module):
         # value_states = value_states.view(batch_size, -1, self.n_heads, self.key_value_proj_dim).transpose(1, 2)
 
         # compute or use position bias
-        if position_bias is None:
+        if self.has_relative_attention_bias:
+            key_length = key_states.shape[-2] # usually same as seq_length for self-attn
+            position_bias = self.compute_bias(seq_length, key_length, device=query_states.device)
+        
+        # fallback: If we didn't compute it (T5-Layer>0) and nothing was passed, init zero
+        elif position_bias is None:
             key_length = key_states.shape[-2]
-            if not self.has_relative_attention_bias:
-                position_bias = torch.zeros(
-                    (1, self.n_heads, seq_length, key_length),
-                    device=query_states.device,
-                    dtype=query_states.dtype,
-                )
-            else:
-                position_bias = self.compute_bias(seq_length, key_length, device=query_states.device)
+            position_bias = torch.zeros(
+                (1, self.n_heads, seq_length, key_length),
+                device=query_states.device,
+                dtype=query_states.dtype,
+            )
 
-            # add mask to the position bias
-            if mask is not None:
-                mask = position_bias + mask
-            else:
-                mask = position_bias
+        # add mask to the position bias
+        if mask is not None:
+            mask = position_bias + mask
+        else:
+            mask = position_bias
 
+        # IMPORTANT: NOTE: t5 attn doesn't use 1/sqrt(d) scale
+        d_head = self.inner_dim // self.n_heads
+        
         # ultimately, scores = scores + mask + bias
         # in this code we are using the mask AS the bias
         attn_output = optimized_attention(
             query_states,
-            key_states,
+            key_states * (d_head ** 0.5),
             value_states,
             self.n_heads,
             mask
@@ -351,8 +356,9 @@ class T5Stack(nn.Module):
         super().__init__()
         self.is_decoder = config.is_decoder     # always false
 
+        is_umt5 = config.model_type == UMT5XXLConfig.model_type
         self.block = nn.ModuleList(
-            [T5Block(config, has_relative_attention_bias=bool(i == 0)) for i in range(config.num_layers)]
+            [T5Block(config, has_relative_attention_bias=bool(is_umt5 or i == 0)) for i in range(config.num_layers)]
         )
         self.final_layer_norm = T5LayerNorm(config.d_model, eps=config.layer_norm_epsilon)
 
