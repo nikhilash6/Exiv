@@ -127,9 +127,10 @@ def main():
     MemoryManager.clear_memory()
     
     # create a model wrapper
-    model_path = "./tests/test_utils/assets/models/wan21_1_3B.safetensors"
-    download_url = "https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B/resolve/main/diffusion_pytorch_model.safetensors?download=true"
-    # download_url = "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_14B_fp16.safetensors?download=true"
+    # model_path = "./tests/test_utils/assets/models/wan21_1_3B.safetensors"
+    model_path = "./tests/test_utils/assets/models/wan21_14B.safetensors"
+    # download_url = "https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B/resolve/main/diffusion_pytorch_model.safetensors?download=true"
+    download_url = "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_14B_fp16.safetensors?download=true"
     wan_dit_model = get_wan_21_instance(model_path, download_url, force_dtype=torch.float16)
     model_wrapper = ModelWrapper(model=wan_dit_model)
 
