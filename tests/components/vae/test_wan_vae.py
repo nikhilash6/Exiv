@@ -8,7 +8,7 @@ from parameterized import parameterized
 
 from exiv.components.vae.wan_vae import Wan21VAE
 from exiv.model_utils.helper_methods import move_model
-from exiv.utils.file import ImageProcessor, ensure_model_available
+from exiv.utils.file import MediaProcessor, ensure_model_availability
 from exiv.utils.tensor import common_upscale
 from exiv.utils.device import VRAM_DEVICE, MemoryManager
 from exiv.config import LOADING_MODE, global_config
@@ -36,7 +36,7 @@ class VisionEncoderTest(unittest.TestCase):
         
         with check_memory_usage(expected_mem=expected_mem, device=expected_device):
             height, width, frame_count = 512, 512, 81
-            input_img = ImageProcessor.load_image_list("./tests/test_utils/assets/media/test.jpg")
+            input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/test.jpg")
             input_img = common_upscale(input_img, height, width)    # B, C, H, W
             
             image = torch.ones((frame_count, height, width, input_img.shape[1]), device=input_img.device, dtype=input_img.dtype) * 0.5
@@ -48,7 +48,7 @@ class VisionEncoderTest(unittest.TestCase):
 
             download_url = "https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-720P-Diffusers/resolve/main/vae/diffusion_pytorch_model.safetensors?download=true"
             model_path = "./tests/test_utils/assets/models/wan_2_1_vae.safetensors"
-            model_path = ensure_model_available(model_path=model_path, download_url=download_url)
+            model_path = ensure_model_availability(model_path=model_path, download_url=download_url)
             
             wan_vae = Wan21VAE()
             wan_vae.load_model(model_path=model_path)
@@ -94,7 +94,7 @@ class VisionEncoderTest(unittest.TestCase):
 
     #     download_url = "https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-720P-Diffusers/resolve/main/vae/diffusion_pytorch_model.safetensors?download=true"
     #     model_path = "./tests/test_utils/assets/models/wan_2_1_vae.safetensors"
-    #     model_path = ensure_model_available(model_path=model_path, download_url=download_url)
+    #     model_path = ensure_model_availability(model_path=model_path, download_url=download_url)
         
     #     wan_vae = Wan21VAE()
     #     wan_vae.load_model(model_path=model_path)

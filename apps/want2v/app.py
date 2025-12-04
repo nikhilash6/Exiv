@@ -1,5 +1,4 @@
 import torch
-import torchvision
 
 from exiv.components.enum import KSamplerType, ModelType, SchedulerType
 from exiv.components.models.wan.main import Wan21Model, WanModelArchConfig
@@ -15,7 +14,7 @@ from exiv.model_utils.common_classes import Latent
 from exiv.model_utils.common_classes import ModelWrapper
 from exiv.model_utils.helper_methods import move_model
 from exiv.utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, MemoryManager, ProcDevice
-from exiv.utils.file import ImageProcessor, ensure_model_available
+from exiv.utils.file import MediaProcessor, ensure_model_availability
 from exiv.utils.tensor import common_upscale
 
 # TODO: move to the tensors file
@@ -61,7 +60,7 @@ def preprocess_wan_conditionals(pos_embed_dict, neg_embed_dict, clip_embed_dict,
         # encode the entire sequence
         download_url = "https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-720P-Diffusers/resolve/main/vae/diffusion_pytorch_model.safetensors?download=true"
         model_path = "./tests/test_utils/assets/models/wan_2_1_vae.safetensors"
-        model_path = ensure_model_available(model_path=model_path, download_url=download_url)
+        model_path = ensure_model_availability(model_path=model_path, download_url=download_url)
         
         image = image.to(VRAM_DEVICE)
         wan_vae = Wan21VAE()
@@ -86,7 +85,7 @@ def preprocess_wan_conditionals(pos_embed_dict, neg_embed_dict, clip_embed_dict,
 def main():
     positive_prompt = "a dog running in the park"
     negative_prompt = "blurry, bad quality"
-    input_img = ImageProcessor.load_image_list("./tests/test_utils/assets/media/test.jpg")[0]
+    input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/test.jpg")[0]
     height, width, output_frame_count = 512, 512, 81
     
     # resizing img
@@ -159,26 +158,6 @@ def main():
     wan_vae.load_model(model_path=model_path)
     move_model(wan_vae, VRAM_DEVICE)
     out = wan_vae.decode(out, (height, width, output_frame_count))
-    save_video(out)
-    
-def save_video(out):
-    video_tensor = out.sample if hasattr(out, "sample") else out
-
-    # rescale from [-1, 1] to [0, 255] and cast to uint8
-    video_tensor = ((video_tensor.clamp(-1.0, 1.0) + 1.0) * 127.5).to(torch.uint8)
-
-    # current shape: (Batch, Channels, Time, Height, Width) -> e.g., (1, 3, 121, 512, 768)
-    for i, video in enumerate(video_tensor):
-        # (C, T, H, W) -> (T, H, W, C), for torchvision
-        video_formatted = video.permute(1, 2, 3, 0).cpu()
-        
-        save_path = f"output_video_{i}.mp4"
-        torchvision.io.write_video(
-            save_path,
-            video_formatted,
-            fps=24,
-            options={"crf": "5"}  # 'Constant Rate Factor' for quality (lower is better)
-        )
-        print(f"Saved {save_path}") 
+    MediaProcessor.save_latents_to_media(out)
     
 main()

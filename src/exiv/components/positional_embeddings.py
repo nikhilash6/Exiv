@@ -44,6 +44,8 @@ def rope(pos: Tensor, dim: int, theta: int) -> Tensor:
     out = rearrange(out, "b n d (i j) -> b n d i j", i=2, j=2)
 
     # Return the final rotation matrices.
+    # NOTE: fp16 also works here perfectly fine, but since this doesn't affect perf that much
+    # and can be used for longer videos as well, we are keeping it in fp32
     return out.to(dtype=torch.float32, device=pos.device)
 
 

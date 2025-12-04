@@ -7,7 +7,7 @@ import os
 import safetensors
 
 from ...utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, ProcDevice
-from ...utils.file import ensure_model_available
+from ...utils.file import ensure_model_availability
 from ...utils.logging import app_logger
 
 # code adapted from Forge
@@ -117,7 +117,7 @@ def parse_prompt_attention(text):
 
 def load_embed(embedding_path: str, embed_key: str = None) -> Tensor | None:
     # loads the textual inversion file
-    found_path = ensure_model_available(model_path=embedding_path)
+    found_path = ensure_model_availability(model_path=embedding_path)
     embedding_name = os.path.basename(embedding_path)
     
     if not found_path:

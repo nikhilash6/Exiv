@@ -137,7 +137,8 @@ def estimate_peak_activation_size(model, target_shape):
     A rough estimation of what peak mem use could be. Mostly focused
     on attn + rope part.
     """
-    if not target_shape: return 0
+    default_mem_estimate = 0
+    if not target_shape: return default_mem_estimate
 
     if hasattr(model, "get_memory_footprint_params"):
         # NOTE: update this normalization logic as more models are added
@@ -155,6 +156,7 @@ def estimate_peak_activation_size(model, target_shape):
         # --------------------------------
         
         params = model.get_memory_footprint_params()
+        if not params: return default_mem_estimate
         
         # target_shape is (B, C, T, H, W)
         t, h, w = target_shape[2], target_shape[3], target_shape[4]
@@ -177,7 +179,7 @@ def estimate_peak_activation_size(model, target_shape):
         
         return total_bytes / BYTES_IN_MB
     else:
-        return 0
+        return default_mem_estimate
     
 def split_model_for_loading(model: 'ModelMixin', target_shape = None):
     # this determines which modules can be fully loaded permanently on the vram

@@ -11,7 +11,7 @@ from ..components.enum import ModelType
 from ..components.samplers.sampler_types import get_model_sampling
 from ..utils.dtype import cast_to
 from ..utils.device import VRAM_DEVICE,ProcDevice
-from ..utils.file import ensure_model_available
+from ..utils.file import ensure_model_availability
 from ..utils.logging import app_logger
 from ..config import BYTES_IN_MB
 from ..quantizers.base import QuantType, Quantizer, get_quantizer
@@ -152,7 +152,7 @@ class ModelMixin(nn.Module, LoraMixin, metaclass=ModuleMeta):
         def original_call(*args, **kwargs):
             with torch.inference_mode():
                 # moving the inputs to GPU
-                # TODO: mfking FIX THIS !!!! this is a work around for now
+                # TODO: FIX THIS !!!! this is a work around for now (only converting dtype of idx == 0)
                 app_logger.debug(f"moving the inputs to {self.gpu_device} and dtype {self.dtype}")
                 new_args = tuple(cast_to(a, device=self.gpu_device, dtype=self.dtype) if torch.is_tensor(a) and idx == 0 else a for idx, a in enumerate(args))
                 new_kwargs = {k: (cast_to(v, device=self.gpu_device, dtype=self.dtype) if torch.is_tensor(v) else v) for k, v in kwargs.items()}
@@ -180,7 +180,7 @@ class ModelMixin(nn.Module, LoraMixin, metaclass=ModuleMeta):
         device = ProcDevice.CPU.value
         self.dtype = dtype or self.dtype
         
-        model_path = ensure_model_available(model_path, download_url, force_download)
+        model_path = ensure_model_availability(model_path, download_url, force_download)
         
         state_dict = get_state_dict(model_path)
         model_state_dict = self.state_dict()

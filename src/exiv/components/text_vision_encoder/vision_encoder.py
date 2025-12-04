@@ -4,7 +4,7 @@ from .ve_clip import CLIPViTH, CLIPViTL, CLIPVitLlava
 from ..enum import VisionEncoderType
 from ...model_utils.model_mixin import ModelMixin, get_state_dict
 from ...utils.device import VRAM_DEVICE
-from ...utils.file import ensure_model_available
+from ...utils.file import ensure_model_availability
 
 
 VE_TYPE_CLS_MAP = {
@@ -41,7 +41,7 @@ def get_ve_type(sd):
 
 
 def create_vision_encoder(model_path=None, download_url=None, dtype=None) -> VisionEncoder:
-    model_path = ensure_model_available(model_path=model_path, download_url=download_url)
+    model_path = ensure_model_availability(model_path=model_path, download_url=download_url)
     state_dict = get_state_dict(model_path, VRAM_DEVICE)
     state_dict = convert_sd_to_hf_format(state_dict)
     

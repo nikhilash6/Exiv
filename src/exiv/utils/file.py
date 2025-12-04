@@ -1,4 +1,5 @@
 import torch
+import torchvision
 import numpy as np
 
 import os
@@ -29,7 +30,7 @@ def create_sanitized_path(file_path):
 
     return os.path.join(file_path, f"img_{idx}.jpg")
 
-def ensure_model_available(model_path: str, download_url: str = None, force_download: bool = False) -> str:
+def ensure_model_availability(model_path: str, download_url: str = None, force_download: bool = False) -> str:
     """
     - Downloads model if a URL is provided, else verifies the local path.
     - Works with absolute paths (internally converts relative to absolute)
@@ -69,7 +70,7 @@ def ensure_model_available(model_path: str, download_url: str = None, force_down
     return abs_path
         
 
-class ImageProcessor:
+class MediaProcessor:
     @staticmethod
     def load_image_list(image_path_list: List[str]):
         from PIL import Image
@@ -97,3 +98,26 @@ class ImageProcessor:
             return torch.empty(0) 
         
         return torch.stack(res, dim=0)
+    
+    @staticmethod
+    def save_latents_to_media(out):
+        # TODO: make this a generic method, allowing saving images/audio/3d as well
+        # rn it is only for video
+        video_tensor = out.sample if hasattr(out, "sample") else out
+
+        # rescale from [-1, 1] to [0, 255] and cast to uint8
+        video_tensor = ((video_tensor.clamp(-1.0, 1.0) + 1.0) * 127.5).to(torch.uint8)
+
+        # current shape: (Batch, Channels, Time, Height, Width) -> e.g., (1, 3, 121, 512, 768)
+        for i, video in enumerate(video_tensor):
+            # (C, T, H, W) -> (T, H, W, C), for torchvision
+            video_formatted = video.permute(1, 2, 3, 0).cpu()
+            
+            save_path = f"output_video_{i}.mp4"
+            torchvision.io.write_video(
+                save_path,
+                video_formatted,
+                fps=24,
+                options={"crf": "5"}  # 'Constant Rate Factor' for quality (lower is better)
+            )
+            print(f"Saved {save_path}") 

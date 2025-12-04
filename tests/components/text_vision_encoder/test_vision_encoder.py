@@ -4,7 +4,7 @@ import unittest
 from parameterized import parameterized
 
 from exiv.components.text_vision_encoder.vision_encoder import create_vision_encoder
-from exiv.utils.file import ImageProcessor
+from exiv.utils.file import MediaProcessor
 from exiv.utils.tensor import common_upscale
 from exiv.utils.device import VRAM_DEVICE, MemoryManager
 from exiv.config import global_config
@@ -32,7 +32,7 @@ class VisionEncoderTest(unittest.TestCase):
         print("-- device: ", expected_device)
         with check_memory_usage(expected_mem=expected_mem, device=expected_device):
             height, width = 512, 512
-            input_img = ImageProcessor.load_image_list("./tests/test_utils/assets/media/test.jpg")
+            input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/test.jpg")
             input_img = common_upscale(input_img, height, width)
 
             clip_vision_model_path = "./tests/test_utils/assets/models/CLIP-ViT-H-fp16.safetensors"
