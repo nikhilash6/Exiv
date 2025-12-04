@@ -1,6 +1,7 @@
 import torch
 
 from exiv.components.enum import KSamplerType, ModelType, SchedulerType
+from exiv.components.models.wan.constructor import get_wan_21_instance
 from exiv.components.models.wan.main import Wan21Model, WanModelArchConfig
 from exiv.components.samplers.cfg_methods import default_cfg
 from exiv.components.samplers.model_sampling import KSampler
@@ -129,8 +130,7 @@ def main():
     model_path = "./tests/test_utils/assets/models/wan21_1_3B.safetensors"
     download_url = "https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B/resolve/main/diffusion_pytorch_model.safetensors?download=true"
     # download_url = "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_14B_fp16.safetensors?download=true"
-    wan_dit_model = Wan21Model(force_load_mode=LOADING_MODE.LOW_VRAM.value, dtype=torch.float16)
-    wan_dit_model.load_model(model_path=model_path, download_url=download_url)
+    wan_dit_model = get_wan_21_instance(model_path, download_url, force_dtype=torch.float16)
     model_wrapper = ModelWrapper(model=wan_dit_model)
 
     print("before sampling")
