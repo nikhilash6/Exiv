@@ -30,12 +30,12 @@ class ModelWrapper:
     def __init__(
         self, 
         model: ModelMixin, 
-        model_sampling: Any,
+        model_sampling: Any = None,
         disable_cfg: bool = False,
         cfg_func: Callable = default_cfg
     ):
         self.model: ModelMixin = model
-        self.model_sampling = model_sampling
+        self.model_sampling = model_sampling or model.get_model_sampling_obj()
         
         self.disable_cfg: bool = disable_cfg
         self.cfg_func: Callable = cfg_func

@@ -7,6 +7,8 @@ import uuid
 
 from .lora_mixin import LoraMixin
 from .helper_methods import get_state_dict, set_module_tensor_to_device
+from ..components.enum import ModelType
+from ..components.samplers.sampler_types import get_model_sampling
 from ..utils.dtype import cast_to
 from ..utils.device import VRAM_DEVICE,ProcDevice
 from ..utils.file import ensure_model_available
@@ -305,3 +307,8 @@ class ModelMixin(nn.Module, LoraMixin, metaclass=ModuleMeta):
         # NOTE: this has to be overidden in the child model
         app_logger.warning("Memory footprint params not found, skipping activation buffer calculations")
         return None
+
+    def get_model_sampling_obj(self):
+        # NOTE: this has to overidden in the child model
+        app_logger.warning("Model sampling config not found, defaulting to simple Flow based sampling")
+        return get_model_sampling(ModelType.FLOW)

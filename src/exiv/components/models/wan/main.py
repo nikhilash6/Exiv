@@ -7,11 +7,12 @@ from einops import rearrange
 import math
 import uuid
 
-from ...enum import Model
+from ...enum import Model, ModelType
 from ...attention import optimized_attention
 from ...positional_embeddings import EmbedND, apply_rope
 from ...conditionals import CONDCrossAttn, CONDNoiseShape, CONDRegular
 from ...latent_format import LatentFormat, Wan21VAELatentFormat
+from ....components.samplers.sampler_types import get_model_sampling
 from ....model_utils.helper_methods import get_state_dict
 from ....model_utils.model_mixin import ModelMixin
 from ....model_utils.common_classes import ModelArchConfig
@@ -734,3 +735,6 @@ class Wan21Model(ModelMixin):
             
             "dtype_size": dtype_size
         }
+        
+    def get_model_sampling_obj(self):
+        return get_model_sampling(ModelType.FLOW, {"sampling_settings": {"shift": 8}})

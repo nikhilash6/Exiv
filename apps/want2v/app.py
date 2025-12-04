@@ -131,21 +131,15 @@ def main():
     download_url = "https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B/resolve/main/diffusion_pytorch_model.safetensors?download=true"
     # download_url = "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_14B_fp16.safetensors?download=true"
     wan_dit_model = Wan21Model(force_load_mode=LOADING_MODE.LOW_VRAM.value, dtype=torch.float16)
-    # wan_dit_model = Wan21Model(dtype=torch.float16)
     wan_dit_model.load_model(model_path=model_path, download_url=download_url)
-    model_sampling = get_model_sampling(ModelType.FLOW, {"sampling_settings": {"shift": 8}})
-    model_wrapper = ModelWrapper(
-        model=wan_dit_model,
-        model_sampling=model_sampling,
-        cfg_func=default_cfg
-    )
+    model_wrapper = ModelWrapper(model=wan_dit_model)
 
     print("before sampling")
     # the main sampling loop
     main_sampler = KSampler(
         wrapped_model=model_wrapper,
         seed=-1,
-        steps=40,
+        steps=30,
         cfg=6.0,
         sampler_name=KSamplerType.EULER.value,
         scheduler_name=SchedulerType.SIMPLE.value,
