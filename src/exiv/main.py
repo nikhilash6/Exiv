@@ -1,7 +1,7 @@
 import click
 
 from .server.server import run_server, start_worker
-from .server.task_manager import ScriptRequest, task_manager
+from .server.task_manager import task_manager
 from .utils.logging import app_logger
 from .config import global_config
 
@@ -15,9 +15,9 @@ def cli():
         allow_extra_args=True,
     )
 )
-@click.argument('script_filename')
+@click.argument('app_name')
 @click.pass_context
-def run(ctx, script_filename):
+def run(ctx, app_name):
     """ Runs a task synchronously """
     metadata = {}
     # ctx.args will be a list like ['--seed', '12345', '--negative-prompt', 'blurry']
@@ -33,13 +33,7 @@ def run(ctx, script_filename):
     global_config.update_config(metadata)
     app_logger.set_level(global_config.logging_level)
 
-    script_request = ScriptRequest(
-        filename=script_filename,
-        git_url=metadata.get("git_url", None),
-        git_commit=metadata.get("git_commit", None),
-        metadata=metadata
-    )
-    task_id = task_manager.add_task(script_request)
+    task_id = task_manager.add_task(app_name=app_name, params=metadata)
     start_worker(sync_mode=True)
     return task_manager.get_task_progress(task_id=task_id)
 

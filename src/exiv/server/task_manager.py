@@ -13,13 +13,9 @@ class ScriptStatus(ExtendedEnum):
     FAILED = 'failed'
     COMPLETED = 'completed'
 
-# -------------- Serializers -----------------
-class ScriptRequest(BaseModel):
-    filename: str
-    git_url: str | None = None
-    git_commit: str | None = None
-    metadata: Dict | None = None                # for saved settings / inputs
-    
+# -------------- Serializers ----------------- 
+
+
 class ServerResponse(BaseModel):
     status: int
     message: str
@@ -34,24 +30,30 @@ class ScriptResponse(BaseModel):
 
 @dataclass
 class TaskDetails:
-    payload: ScriptRequest
+    app_name: str
+    params: Any
     result: ScriptResponse
 # ---------------------------------------------
 
 class TaskManager:
     def __init__(self):
         # TODO: replace with a sqlite db maybe?
-        self.task_dict: Dict[str, TaskDetails] = {}     # status and res is updated in place for now
-        self.task_queue: Queue[ScriptRequest] = Queue()
+        self.task_dict: Dict[str, TaskDetails] = {}     # task_dict is like an in-mem db
+        self.task_queue: Queue[str] = Queue()
 
-    def add_task(self, script_request: ScriptRequest) -> str:
+    def add_task(self, app_name: str, params: Any) -> str:
         task_id = str(uuid.uuid4())
         self.task_dict[task_id] = TaskDetails(
-            payload=script_request,
+            app_name=app_name,
+            params=params,
             result=ScriptResponse()
         )
-        self.task_queue.put((task_id, script_request))
+        self.task_queue.put((task_id, app_name))
         return task_id
+    
+    def get_task(self, task_id):
+        if task_id == None: return None
+        return self.task_dict.get(task_id, None)
     
     def update_task(self, task_id, result: ScriptResponse):
         if not task_id in self.task_dict: raise RuntimeError(f"invalid task_id {task_id}")

@@ -1,15 +1,54 @@
+import json
 import os, sys, importlib
 import asyncio
 import threading
-import time
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from glob import glob
+import traceback
+from typing import Any, Dict
+from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 
-from .task_manager import ScriptRequest, ScriptResponse, ScriptStatus, TaskDetails, task_manager
+from .app_core import App
+
+from .task_manager import ScriptResponse, ScriptStatus, TaskDetails, task_manager
 from ..utils.logging import app_logger
 
+APP_REGISTRY = {} # stores all the loaded apps
 
-def process_task(task_id: str, script_request: ScriptRequest):
+def load_apps_from_directory(directory: str = "apps"):
+    """
+    Scans the given directory for .py files, loads them, 
+    and looks for an 'app' instance in them
+    """
+    apps_path = os.path.join(os.getcwd(), directory)
+    
+    if not os.path.exists(apps_path):
+        print(f"No 'apps' folder found at {apps_path}")
+        return
+
+    app_logger.debug(f"Scanning for apps in: {apps_path}")
+    py_files = glob(os.path.join(apps_path, "*.py"))
+
+    for file_path in py_files:
+        module_name = os.path.basename(file_path).replace(".py", "")
+        spec = importlib.util.spec_from_file_location(module_name, file_path)
+        if spec and spec.loader:
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            try:
+                spec.loader.exec_module(module)
+                if hasattr(module, "app") and isinstance(module.app, App):
+                    APP_REGISTRY[module.app.name] = module.app
+                    app_logger.debug(f"Loaded: {module.app.name}")
+            except Exception as e:
+                app_logger.error(f"Error loading {module_name}: {e}")
+
+load_apps_from_directory()
+app_logger.info(f"apps found: {[a for a, _ in APP_REGISTRY.items()]}")
+
+def process_task(task_id: str):
     def _update_task(status, progress, msg, output=None, data=None):
+        assert 'status' in msg, f"Missing status in {msg}"
+        msg = json.dumps(msg)
         task_manager.update_task(
             task_id,
             ScriptResponse(
@@ -21,42 +60,40 @@ def process_task(task_id: str, script_request: ScriptRequest):
             )
         )    
     
-    app_logger.info(f"Processing task {task_id[-5:]}: {script_request.filename}")
-    _update_task(ScriptStatus.PROCESSING.value, 0, "Task Started")
+    def report_progress(progress: float, message: str = "Processing"):
+        # to be used by the underlying script to report its progress
+        _update_task(ScriptStatus.PROCESSING.value, progress, message)
+    
     try:
-        # get script path
-        script_path = os.path.abspath(script_request.filename)
-        script_dir = os.path.dirname(script_path)
-        script_name = os.path.splitext(os.path.basename(script_path))[0]
+        task_details = task_manager.get_task(task_id)
+        app_name = task_details.app_name
+        params = task_details.params
+        app_def = APP_REGISTRY.get(app_name)
+        
+        app_logger.info(f"Processing task {task_id[-5:]}: {task_details.app_name}")
+        _update_task(ScriptStatus.PROCESSING.value, 0, {"status": "Task Started"})
 
-        # add the script's directory to the python path to handle relative imports
-        if script_dir not in sys.path:
-            sys.path.insert(0, script_dir)
+        if not app_def:
+            app_logger.error(f"Error: App '{app_name}' not found in registry.")
+            return {"error": "App definition missing"}
+        
+        params["report_progress"] = report_progress
 
-        # import the script as a module
-        spec = importlib.util.spec_from_file_location(script_name, script_path)
-        script_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(script_module)
-
-        # executing the 'main' function
-        if hasattr(script_module, 'main'):
-            script_module.main(script_request.metadata)
-        else:
-            raise RuntimeError(f"Script {script_request.filename} does not have a main function.")
-
+        result = app_def.handler(**params)
         _update_task(
             ScriptStatus.COMPLETED.value, 
             1, 
-            "Task finished successfully", 
-            output={"output1": "output_file.png"},
+            {"status": "Task finished successfully"},
+            output=result,
             data=None
         )
     except Exception as e:
         app_logger.error(f"Exception occured: {e}")
+        traceback.print_exc()
         _update_task(
             ScriptStatus.FAILED.value, 
             0,
-            "Task Failed", 
+            {"status": "Task Failed"}, 
             output=None,
             data={"err_message": str(e)}
         )
@@ -64,11 +101,10 @@ def process_task(task_id: str, script_request: ScriptRequest):
 def start_worker(sync_mode=False):
     while True:
         task_id: str
-        task_details: ScriptRequest
-        task_id, task_details = task_manager.task_queue.get()
+        task_id, _ = task_manager.task_queue.get()
         if task_id is None:     # for stopping (funny thing, this is called 'poison pill')
             break
-        process_task(task_id, task_details)
+        process_task(task_id)
         task_manager.task_queue.task_done()
         
         if sync_mode: break     # for cli, pkg import
@@ -76,10 +112,29 @@ def start_worker(sync_mode=False):
 
 app = FastAPI()
 
-@app.post("/queue")
-async def queue_script(script_request: ScriptRequest):
-    task_id = task_manager.add_task(script_request)
-    return {"message": "Task received", "task_id": task_id}
+@app.get("/api/apps")
+def get_apps():
+    return [app.model_dump(exclude={"handler"}) for app in APP_REGISTRY.values()]
+
+@app.post("/api/apps/{app_name}/run")
+async def run_app_endpoint(app_name: str, payload: Dict[str, Any] = Body(...)):
+    if app_name not in APP_REGISTRY:
+        raise HTTPException(status_code=404, detail="App not found")
+    
+    target_app = APP_REGISTRY[app_name]
+    
+    clean_data = {}
+    try:
+        for key, input_def in target_app.inputs.items():
+            val = payload["params"].get(key, input_def.default)
+            clean_data[key] = input_def.validate_value(val)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+    task_id = task_manager.add_task(app_name=app_name, params=clean_data)
+    
+    return {"status": "queued", "task_id": task_id}
 
 @app.get("/status/{task_id}")
 async def get_script_progress(task_id: str):

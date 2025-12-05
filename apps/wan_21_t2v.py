@@ -161,4 +161,3 @@ def main():
     out = wan_vae.decode(out, (height, width, output_frame_count))
     MediaProcessor.save_latents_to_media(out)
     
-main()
