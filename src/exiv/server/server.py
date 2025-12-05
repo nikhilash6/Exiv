@@ -128,7 +128,8 @@ async def run_app_endpoint(app_name: str, payload: Dict[str, Any] = Body(...)):
         for key, input_def in target_app.inputs.items():
             val = payload["params"].get(key, input_def.default)
             clean_data[key] = input_def.validate_value(val)
-    except ValueError as e:
+    except Exception as e:
+        traceback.print_exc()
         raise HTTPException(status_code=400, detail=str(e))
 
 

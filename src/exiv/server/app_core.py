@@ -31,15 +31,15 @@ class Input(BaseModel):
              try: value = float(value)
              except: raise ValueError(f"'{self.label}' must be a number.")
         
-        if value is not None:
-            if self.min is not None and value < self.min:
+        if value not in [None, ""]:
+            if self.min is not None and float(value) < self.min:
                 raise ValueError(f"'{self.label}' cannot be less than {self.min}")
             
-            if self.max is not None and value > self.max:
+            if self.max is not None and float(value) > self.max:
                 raise ValueError(f"'{self.label}' cannot be greater than {self.max}")
 
-            if self.options and value not in self.options:
-                raise ValueError(f"'{value}' is not a valid option for {self.label}")
+        if self.options and value is not None and value not in self.options:
+            raise ValueError(f"'{value}' is not a valid option for {self.label}")
 
         return value
 
