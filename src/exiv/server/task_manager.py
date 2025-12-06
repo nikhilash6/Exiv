@@ -15,6 +15,9 @@ class ScriptStatus(ExtendedEnum):
 
 # -------------- Serializers ----------------- 
 
+class RunRequest(BaseModel):
+    app_name: str
+    params: Dict[str, Any] = {}
 
 class ServerResponse(BaseModel):
     status: int

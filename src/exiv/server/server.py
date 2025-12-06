@@ -9,7 +9,7 @@ from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 
 from .app_core import App
 
-from .task_manager import ScriptResponse, ScriptStatus, TaskDetails, task_manager
+from .task_manager import RunRequest, ScriptResponse, ScriptStatus, TaskDetails, task_manager
 from ..utils.logging import app_logger
 
 APP_REGISTRY = {} # stores all the loaded apps
@@ -120,22 +120,26 @@ app = FastAPI()
 def get_apps():
     return [app.model_dump(exclude={"handler"}) for app in APP_REGISTRY.values()]
 
-@app.post("/api/apps/{app_name}/run")
-async def run_app_endpoint(app_name: str, payload: Dict[str, Any] = Body(...)):
+@app.post("/api/apps/run")
+async def run_app_endpoint(request: RunRequest):
+    app_name = request.app_name
+    user_params = request.params
+
     if app_name not in APP_REGISTRY:
-        raise HTTPException(status_code=404, detail="App not found")
+        traceback.print_exc()
+        raise HTTPException(status_code=404, detail=f"App '{app_name}' not found")
     
     target_app = APP_REGISTRY[app_name]
     
     clean_data = {}
     try:
         for key, input_def in target_app.inputs.items():
-            val = payload["params"].get(key, input_def.default)
+            val = user_params.get(key, input_def.default)
             clean_data[key] = input_def.validate_value(val)
+            
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=400, detail=str(e))
-
 
     task_id = task_manager.add_task(app_name=app_name, params=clean_data)
     
