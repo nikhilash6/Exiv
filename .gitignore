@@ -35,9 +35,9 @@ MANIFEST
 .venv
 env/
 venv/
+out/
 note.md
 temp.py
-apps/wani2v/assets/
 apps/dummy_test.py
 keygen.sh
 test.jpg

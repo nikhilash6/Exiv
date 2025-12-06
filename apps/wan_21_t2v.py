@@ -14,9 +14,11 @@ from exiv.config import LOADING_MODE
 from exiv.model_utils.common_classes import Latent
 from exiv.model_utils.common_classes import ModelWrapper
 from exiv.model_utils.helper_methods import move_model
+from exiv.server.app_core import App, AppOutputType, Input, Output
 from exiv.utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, MemoryManager, ProcDevice
 from exiv.utils.file import MediaProcessor, ensure_model_availability
 from exiv.utils.tensor import common_upscale
+from exiv.utils.logging import app_logger
 
 # TODO: move to the tensors file
 def conditioning_set_values(conditioning_list, new_values_dict = {}):
@@ -83,15 +85,30 @@ def preprocess_wan_conditionals(pos_embed_dict, neg_embed_dict, clip_embed_dict,
 
     return pos_embed, neg_embed, blank_latent
 
-def main():
-    positive_prompt = "a dog running in the park"
-    negative_prompt = "blurry, bad quality"
+def main(**params):
+    
+    report_progress = params.get("report_progress")
+    def progress_callback(progress_fraction, stage): 
+        app_logger.debug(f"Percent: {progress_fraction}  -- Stage: {stage}")
+        report_progress(progress_fraction, {"stage": stage, "status": "Processing"}) 
+    
+    # outside inputs
+    positive_prompt = params.get("positive")
+    negative_prompt = params.get("negative")
+    seed = params.get("seed")
+    steps = params.get("steps")
+    cfg = params.get("cfg")
+    sampler_name = params.get("sampler_name")
+    scheduler_name = params.get("scheduler_name")
+    
+    progress_callback(0.1, "Loading Images")
     input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/test.jpg")[0]
     height, width, output_frame_count = 512, 512, 81
     
     # resizing img
     input_img = common_upscale(input_img.unsqueeze(0), height, width)   # (B, C, H, W)
     
+    progress_callback(0.2, "Encoding prompts")
     # generate text embeddings
     model_path = "./tests/test_utils/assets/models/umt5_xxl_fp16.safetensors"
     download_url = "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp16.safetensors?download=true"
@@ -103,6 +120,7 @@ def main():
     del t5_xxl
     del wan_encoder
     
+    progress_callback(0.3, "Generating CLIP embeddings")
     # generate img embeddings
     clip_vision_model_path = "./tests/test_utils/assets/models/CLIP-ViT-H-fp16.safetensors"
     download_url = "https://huggingface.co/Kijai/CLIPVisionModelWithProjection_fp16/resolve/main/CLIP-ViT-H-fp16.safetensors?download=true"
@@ -123,7 +141,6 @@ def main():
                                             1
                                         )
     
-    print("here")
     MemoryManager.clear_memory()
     
     # create a model wrapper
@@ -134,30 +151,83 @@ def main():
     wan_dit_model = get_wan_21_instance(model_path, download_url, force_dtype=torch.float16)
     model_wrapper = ModelWrapper(model=wan_dit_model)
 
-    print("before sampling")
+    progress_callback(0.35, "Sampling loop")
     # the main sampling loop
     main_sampler = KSampler(
         wrapped_model=model_wrapper,
-        seed=-1,
-        steps=30,
-        cfg=6.0,
-        sampler_name=KSamplerType.EULER.value,
-        scheduler_name=SchedulerType.SIMPLE.value,
+        seed=seed,
+        steps=steps,
+        cfg=cfg,
+        sampler_name=sampler_name,
+        scheduler_name=scheduler_name,
         positive=pos_embed,
         negative=neg_embed,
         latent_image=blank_latent
     )
     
-    out = main_sampler.run_sampling()
+    out = main_sampler.run_sampling(callback=lambda i, s: progress_callback(0.35 + round(i * 0.6, 2), s))
     wan_dit_model.to("cpu")
     del wan_dit_model, model_wrapper
     MemoryManager.clear_memory()
     
-    print("final decode")
+    progress_callback(0.95, "Decoding output latents")
     model_path = "./tests/test_utils/assets/models/wan_2_1_vae.safetensors"
     wan_vae = Wan21VAE()
     wan_vae.load_model(model_path=model_path)
     move_model(wan_vae, VRAM_DEVICE)
     out = wan_vae.decode(out, (height, width, output_frame_count))
-    MediaProcessor.save_latents_to_media(out)
+    output_paths = MediaProcessor.save_latents_to_media(out)
     
+    return {"1": output_paths[0]}
+
+
+app = App(
+    name="Text to Video",
+    inputs={
+        'positive': Input(
+            label="Positive Prompt",
+            type="str",
+            default="a dog running in the park",
+            resizable=True,
+        ),
+        'negative': Input(
+            label="Negative Prompt",
+            type="str",
+            default="bad image, blurry, low quality",
+            resizable=True,
+        ),
+        'seed': Input(
+            label="Seed",
+            type="number",
+            default=-1,
+        ),
+        'steps': Input(
+            label="Steps",
+            type="number",
+            default=30,
+            increment_controls=True,
+            increment_step=2,
+        ),
+        'cfg': Input(
+            label="CFG",
+            type="number",
+            default=6,
+            increment_controls=True,
+            increment_step=0.2,
+        ),
+        'sampler_name': Input(
+            label="Sampler Name",
+            type="select",
+            options=KSamplerType.value_list(),
+            default=KSamplerType.EULER.value,
+        ),
+        'scheduler_name': Input(
+            label="Scheduler Name",
+            type="select",
+            options=SchedulerType.value_list(),
+            default=SchedulerType.SIMPLE.value,
+        )
+    },
+    outputs=[Output(id=1, type=AppOutputType.VIDEO.value)],
+    handler=main
+)

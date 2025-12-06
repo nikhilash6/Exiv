@@ -6,6 +6,7 @@ from glob import glob
 import traceback
 from typing import Any, Dict
 from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 
 from .app_core import App
 
@@ -152,6 +153,20 @@ async def get_script_progress(task_id: str):
         return status
     else:
         raise HTTPException(status_code=404, detail="Task not found")
+
+@app.get("/api/outputs/{filename}")
+async def get_output_file(filename: str):
+    out_dir = os.path.join(os.getcwd(), "out")
+    file_path = os.path.join(out_dir, filename)
+    
+    # prevent directory traversal (e.g. "../filename")
+    if not os.path.abspath(file_path).startswith(os.path.abspath(out_dir)):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not os.path.exists(file_path) or not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+        
+    return FileResponse(file_path)
 
 @app.websocket("/ws/status/{task_id}")
 async def websocket_endpoint(websocket: WebSocket, task_id: str):

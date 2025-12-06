@@ -13,6 +13,7 @@ from ...utils.tensor import fix_empty_latent_channels, prepare_noise
 from ...model_utils.common_classes import ModelWrapper
 from ...model_utils.common_classes import Latent
 from ...utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, ProcDevice
+from ...utils.common import null_func
 
 class KSampler:
     def __init__(
@@ -71,7 +72,7 @@ class KSampler:
                 self.sigmas = sigmas[-(steps + 1):]
     
     # TODO: allow for dynamic injection / overriding of variables such as sigma
-    def run_sampling(self, disable_noise = False):
+    def run_sampling(self, disable_noise = False, callback=null_func):
         latent_image = self.latent_image.samples
         latent_image = fix_empty_latent_channels(self.wrapped_model, latent_image)
         
@@ -97,7 +98,7 @@ class KSampler:
             ksampler_cls_impl,
             latent_image=latent_image,
             denoise_mask=self.latent_image.noise_mask,
-            callback=lambda *args, **kwargs: None,      # TODO: pass a null fn from the top
+            callback=callback,
             seed=self.seed,
         )
 

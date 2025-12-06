@@ -8,9 +8,9 @@ import glob
 import urllib.parse
 import requests
 from typing import List
-
 from tqdm import tqdm
 
+from .file_path import FilePaths
 from .logging import app_logger
 
 def create_sanitized_path(file_path):
@@ -29,6 +29,22 @@ def create_sanitized_path(file_path):
         idx = 0
 
     return os.path.join(file_path, f"img_{idx}.jpg")
+
+def get_numbered_filename(folder: str, filename: str) -> str:
+    """
+    Returns a unique full path. If 'folder/filename' exists, 
+    it appends a number (e.g., '_1', '_2') to the base name
+    """
+    base, ext = os.path.splitext(filename)
+    full_path = os.path.join(folder, filename)
+    
+    counter = 1
+    while os.path.exists(full_path):
+        new_filename = f"{base}_{counter}{ext}"
+        full_path = os.path.join(folder, new_filename)
+        counter += 1
+        
+    return full_path
 
 def ensure_model_availability(model_path: str, download_url: str = None, force_download: bool = False) -> str:
     """
@@ -108,16 +124,20 @@ class MediaProcessor:
         # rescale from [-1, 1] to [0, 255] and cast to uint8
         video_tensor = ((video_tensor.clamp(-1.0, 1.0) + 1.0) * 127.5).to(torch.uint8)
 
+        output_paths = []
         # current shape: (Batch, Channels, Time, Height, Width) -> e.g., (1, 3, 121, 512, 768)
         for i, video in enumerate(video_tensor):
             # (C, T, H, W) -> (T, H, W, C), for torchvision
             video_formatted = video.permute(1, 2, 3, 0).cpu()
             
             save_path = f"output_video_{i}.mp4"
+            save_path = get_numbered_filename(FilePaths.OUTPUT_DIRECTORY, save_path)
             torchvision.io.write_video(
                 save_path,
                 video_formatted,
                 fps=24,
                 options={"crf": "5"}  # 'Constant Rate Factor' for quality (lower is better)
             )
-            print(f"Saved {save_path}") 
+            output_paths.append(save_path)
+            
+        return output_paths

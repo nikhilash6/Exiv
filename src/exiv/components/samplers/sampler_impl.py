@@ -118,7 +118,12 @@ class Sampler:
         k_callback = None
         total_steps = len(sigmas) - 1
         if callback is not None:
-            k_callback = lambda x: callback(x["i"], x["denoised"], x["x"], total_steps)
+            # NOTE: enable and modify this for intermediate previews
+            # k_callback = lambda x: callback(x["i"], x["denoised"], x["x"], total_steps)
+            def progress_callback(*args, **kwargs):
+                total_steps = max(0, len(sigmas) - 1)
+                callback(kwargs["i"] / total_steps, "Sampling loop")
+            k_callback = progress_callback
 
         samples = self.sampler_function(denoising_fn, noise, sigmas, extra_args=extra_args, callback=k_callback, disable=disable_pbar, **self.extra_options)
         samples = wrapped_model.model_sampling.inverse_noise_scaling(sigmas[-1], samples)

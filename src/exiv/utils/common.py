@@ -103,3 +103,6 @@ def safe_check(value, expected_type):
         return True
     except TypeError:
         return False
+
+
+null_func = lambda *args, **kwargs: None
