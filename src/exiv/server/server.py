@@ -80,6 +80,10 @@ def process_task(task_id: str):
         params["report_progress"] = report_progress
 
         result = app_def.handler(**params)
+        for o in app_def.outputs:
+            if str(o.id) not in result.keys():
+                app_logger.warning(f"Output ID:{o.id} is not in the result")
+                
         _update_task(
             ScriptStatus.COMPLETED.value, 
             1, 

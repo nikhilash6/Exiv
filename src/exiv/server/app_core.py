@@ -31,7 +31,7 @@ class Input(BaseModel):
              try: value = float(value)
              except: raise ValueError(f"'{self.label}' must be a number.")
         
-        if value not in [None, ""]:
+        if isinstance(value, (int, float)):
             if self.min is not None and float(value) < self.min:
                 raise ValueError(f"'{self.label}' cannot be less than {self.min}")
             
@@ -50,8 +50,21 @@ def SliderInput(label, min, max, default=0):
 def FileInput(label, accept="*"):
     return Input(label=label, type="file", accept=accept)
 
+class AppOutputType(ExtendedEnum):
+    STRING = 'str'
+    NUMBER = 'number'
+    IMAGE  = 'image'
+    AUDIO  = 'audio'
+    VIDEO  = 'video'
+    THREE_D = '3D'
+
+class Output(BaseModel):
+    id: int
+    type: AppOutputType
+
 class App(BaseModel):
     name: str
     description: str = ""
     inputs: dict[str, Input]
+    outputs: List[Output]     
     handler: Any
