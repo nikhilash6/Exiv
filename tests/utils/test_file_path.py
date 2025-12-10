@@ -2,9 +2,9 @@ import unittest
 import os
 import shutil
 import tempfile
+from unittest.mock import patch
+import exiv.utils.file_path
 from exiv.utils.file_path import FilePaths
-
-
 
 class TestFilePaths(unittest.TestCase):
     def setUp(self):
@@ -68,20 +68,62 @@ class TestFilePaths(unittest.TestCase):
         self.assertEqual(FilePaths._search_roots[1]["map"]["special"], ["custom_folder/my_stuff"])
 
     def test_get_files_standard(self):
-        """Test retrieving files using the default mapping."""
+        """Test retrieving files using the default mapping, ensuring dict return format."""
+        # Patch map to empty to strictly test local discovery
+        with patch.dict(exiv.utils.file_path.DOWNLOAD_MAP, {}, clear=True):
+            FilePaths.add_search_path(self.test_dir)
+            
+            # Fetch Checkpoints
+            ckpts = FilePaths.get_files("checkpoint")
+            self.assertEqual(len(ckpts), 2)
+            # Check structure
+            self.assertTrue(all(isinstance(f, dict) for f in ckpts))
+            self.assertTrue(all(k in ckpts[0] for k in ["name", "path", "is_present", "url"]))
+            
+            # Check content
+            names = [f["name"] for f in ckpts]
+            self.assertIn("v1-5.ckpt", names)
+            self.assertIn("sdxl.safetensors", names)
+            
+            # Fetch LoRAs (Recursive check)
+            loras = FilePaths.get_files("lora")
+            # Should find 3: pixel_art, details, and nested/style
+            self.assertEqual(len(loras), 3)
+            lora_names = [f["name"] for f in loras]
+            self.assertIn("style.safetensors", lora_names)
+
+    def test_get_files_downloadable(self):
+        """Test that missing files in the DOWNLOAD_MAP are returned with is_present=False."""
         FilePaths.add_search_path(self.test_dir)
         
-        # Fetch Checkpoints
-        ckpts = FilePaths.get_files("checkpoint")
-        self.assertEqual(len(ckpts), 2)
-        self.assertTrue(any("v1-5.ckpt" in f for f in ckpts))
-        self.assertTrue(any("sdxl.safetensors" in f for f in ckpts))
+        mock_map = {
+            "flux1-dev.safetensors": {
+                "type": "checkpoint",
+                "url": "https://dummy.url/flux"
+            },
+            "sdxl.safetensors": {
+                "type": "checkpoint",
+                "url": "https://dummy.url/sdxl"
+            }
+        }
         
-        # Fetch LoRAs (Recursive check)
-        loras = FilePaths.get_files("lora")
-        # Should find 3: pixel_art, details, and nested/style
-        self.assertEqual(len(loras), 3)
-        self.assertTrue(any("style.safetensors" in f for f in loras))
+        with patch.dict(exiv.utils.file_path.DOWNLOAD_MAP, mock_map, clear=True):
+            ckpts = FilePaths.get_files("checkpoint")
+            
+            # Should have: v1-5.ckpt (local), sdxl.safetensors (local), flux1-dev (downloadable)
+            self.assertEqual(len(ckpts), 3)
+            
+            # Check existing local file with URL
+            sdxl = next(f for f in ckpts if f["name"] == "sdxl.safetensors")
+            self.assertTrue(sdxl["is_present"])
+            self.assertIsNotNone(sdxl["path"])
+            self.assertEqual(sdxl["url"], "https://dummy.url/sdxl")
+            
+            # Check missing downloadable file
+            flux = next(f for f in ckpts if f["name"] == "flux1-dev.safetensors")
+            self.assertFalse(flux["is_present"])
+            self.assertIsNone(flux["path"])
+            self.assertEqual(flux["url"], "https://dummy.url/flux")
 
     def test_get_files_extensions(self):
         """Test filtering by extension."""
@@ -90,7 +132,7 @@ class TestFilePaths(unittest.TestCase):
         # Only get .ckpt files
         ckpts = FilePaths.get_files("checkpoint", extensions=[".ckpt"])
         self.assertEqual(len(ckpts), 1)
-        self.assertTrue(ckpts[0].endswith("v1-5.ckpt"))
+        self.assertEqual(ckpts[0]["name"], "v1-5.ckpt")
 
     def test_get_path_exact_match(self):
         """Test resolving an exact filename."""
@@ -128,12 +170,15 @@ class TestFilePaths(unittest.TestCase):
             with open(os.path.join(root2, "models/checkpoints/model2.ckpt"), 'w') as f:
                 f.write("dummy")
             
-            FilePaths.add_search_path(self.test_dir)
-            FilePaths.add_search_path(root2)
-            
-            ckpts = FilePaths.get_files("checkpoint")
-            self.assertEqual(len(ckpts), 3) # 2 from test_dir, 1 from root2
-            self.assertTrue(any("model2.ckpt" in f for f in ckpts))
+            with patch.dict(exiv.utils.file_path.DOWNLOAD_MAP, {}, clear=True):
+                FilePaths.add_search_path(self.test_dir)
+                FilePaths.add_search_path(root2)
+                
+                ckpts = FilePaths.get_files("checkpoint")
+                self.assertEqual(len(ckpts), 3) # 2 from test_dir, 1 from root2
+                
+                names = [f["name"] for f in ckpts]
+                self.assertIn("model2.ckpt", names)
         finally:
             shutil.rmtree(root2)
 
@@ -148,4 +193,3 @@ class TestFilePaths(unittest.TestCase):
         # Add new path (even if same, it triggers logic)
         FilePaths.add_search_path(self.test_dir) 
         self.assertEqual(FilePaths._file_cache, {}) # Cache should be empty
-

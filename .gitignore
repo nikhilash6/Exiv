@@ -35,7 +35,9 @@ MANIFEST
 .venv
 env/
 venv/
-out/
+input/
+output/
+models/
 note.md
 temp.py
 apps/dummy_test.py

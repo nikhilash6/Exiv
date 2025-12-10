@@ -22,6 +22,15 @@ DEFAULT_MAPPING = {
         "output":          ["output"]
 }
 
+# TODO: separate this in a file if the list becomes large
+DOWNLOAD_MAP = {
+    "flux1-dev.safetensors": {
+        "type": "checkpoint",
+        "url": "https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/flux1-dev.safetensors"
+    },
+    # Add more models here
+}
+
 
 class FilePaths:
     # stores registered search paths
@@ -81,19 +90,18 @@ class FilePaths:
             cls._file_cache[root] = files_in_root
 
     @classmethod
-    def get_files(cls, file_type: str, extensions: List[str] = None) -> List[str]:
+    def get_files(cls, file_type: str, extensions: List[str] = None) -> List[Dict]:
         """
-        Retrieves files matching the given type from all registered paths
-        
-        Args:
-            file_type: The type of file to find (e.g., "lora", "embedding")
-            extensions: Optional list of allowed extensions (e.g. ['.pt', '.safetensors'])
+        Retrieves files matching the given type, including missing downloadable ones
+        Returns a list of dicts: {'name': str, 'path': str|None, 'is_present': bool, 'url': str|None}
         """
         if not cls._file_cache:
             cls.init_cache()
             
         results = []
+        found_names = set()
         
+        # existing files on disk
         for entry in cls._search_roots:
             root = entry["path"]
             mapping = entry["map"]
@@ -112,13 +120,34 @@ class FilePaths:
                         break
                 
                 if is_in_folder:
-                    if extensions:
-                        if any(f_path.lower().endswith(ext.lower()) for ext in extensions):
-                            results.append(f_path)
-                    else:
-                        results.append(f_path)
+                    if extensions and not any(f_path.lower().endswith(ext.lower()) for ext in extensions):
+                        continue
+                    
+                    name = os.path.basename(f_path)
+                    found_names.add(name)
+                    
+                    url = DOWNLOAD_MAP.get(name, {}).get("url") if name in DOWNLOAD_MAP and DOWNLOAD_MAP[name].get("type") == file_type else None
+                    results.append({
+                        "name": name,
+                        "path": f_path,
+                        "is_present": True,
+                        "url": url
+                    })
+
+        # missing downloadable files
+        for name, info in DOWNLOAD_MAP.items():
+            if info.get("type") == file_type and name not in found_names:
+                if extensions and not any(name.lower().endswith(ext.lower()) for ext in extensions):
+                    continue
+
+                results.append({
+                    "name": name,
+                    "path": None,
+                    "is_present": False,
+                    "url": info.get("url")
+                })
                         
-        return sorted(results)
+        return sorted(results, key=lambda x: x["name"])
 
     @classmethod
     def get_path(cls, filename: str, file_type: str) -> str:
