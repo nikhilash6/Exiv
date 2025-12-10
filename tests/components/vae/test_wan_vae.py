@@ -9,6 +9,7 @@ from parameterized import parameterized
 from exiv.components.vae.wan_vae import Wan21VAE
 from exiv.model_utils.helper_methods import move_model
 from exiv.utils.file import MediaProcessor, ensure_model_availability
+from exiv.utils.file_path import FilePathData, FilePaths
 from exiv.utils.tensor import common_upscale
 from exiv.utils.device import VRAM_DEVICE, MemoryManager
 from exiv.config import LOADING_MODE, global_config
@@ -46,9 +47,9 @@ class VisionEncoderTest(unittest.TestCase):
             # (T, H, W, C) -> (1, C, T, H, W)
             image = image.permute(3, 0, 1, 2).unsqueeze(0)
 
-            download_url = "https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-720P-Diffusers/resolve/main/vae/diffusion_pytorch_model.safetensors?download=true"
-            model_path = "./tests/test_utils/assets/models/wan_2_1_vae.safetensors"
-            model_path = ensure_model_availability(model_path=model_path, download_url=download_url)
+            cur_model = "wan_2_1_vae.safetensors"
+            model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vae")
+            model_path = ensure_model_availability(model_path=model_path_data.path, download_url=model_path_data.url)
             
             wan_vae = Wan21VAE()
             wan_vae.load_model(model_path=model_path)

@@ -1,6 +1,9 @@
+from dataclasses import dataclass
 import os
 from typing import List, Dict, Union, Optional
 
+
+# TODO: not properly tested in a multi root paths scenario
 
 # going with what everyone is using
 DEFAULT_MAPPING = {
@@ -16,21 +19,40 @@ DEFAULT_MAPPING = {
         "controlnet":      ["models/controlnet"],
         "upscale_model":   ["models/upscale_models"],
         "gligen":          ["models/gligen"],
-        "configs":         ["models/configs"],
-        "photomaker":      ["models/photomaker"],
         "input":           ["input"],
         "output":          ["output"]
 }
 
 # TODO: separate this in a file if the list becomes large
 DOWNLOAD_MAP = {
-    "flux1-dev.safetensors": {
-        "type": "checkpoint",
-        "url": "https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/flux1-dev.safetensors"
+    "umt5_xxl_fp16.safetensors": {
+        "type": "clip",
+        "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp16.safetensors?download=true"
     },
-    # Add more models here
+    "CLIP-ViT-H-fp16.safetensors": {
+        "type": "clip_vision",
+        "url": "https://huggingface.co/Kijai/CLIPVisionModelWithProjection_fp16/resolve/main/CLIP-ViT-H-fp16.safetensors?download=true"
+    },
+    "wan21_1_3B.safetensors": {
+        "type": "checkpoint",
+        "url": "https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B/resolve/main/diffusion_pytorch_model.safetensors?download=true"
+    },
+    "wan21_14B.safetensors": {
+        "type": "checkpoint",
+        "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_14B_fp16.safetensors?download=true"
+    },
+    "wan_2_1_vae.safetensors": {
+        "type": "vae",
+        "url": "https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-720P-Diffusers/resolve/main/vae/diffusion_pytorch_model.safetensors?download=true"
+    }
 }
 
+@dataclass
+class FilePathData:
+    name: str | None = None
+    path: str | None = None
+    is_present: bool = False
+    url: str | None = None
 
 class FilePaths:
     # stores registered search paths
@@ -90,7 +112,7 @@ class FilePaths:
             cls._file_cache[root] = files_in_root
 
     @classmethod
-    def get_files(cls, file_type: str, extensions: List[str] = None) -> List[Dict]:
+    def get_files(cls, file_type: str, extensions: List[str] = None) -> List[FilePathData]:
         """
         Retrieves files matching the given type, including missing downloadable ones
         Returns a list of dicts: {'name': str, 'path': str|None, 'is_present': bool, 'url': str|None}
@@ -127,40 +149,52 @@ class FilePaths:
                     found_names.add(name)
                     
                     url = DOWNLOAD_MAP.get(name, {}).get("url") if name in DOWNLOAD_MAP and DOWNLOAD_MAP[name].get("type") == file_type else None
-                    results.append({
-                        "name": name,
-                        "path": f_path,
-                        "is_present": True,
-                        "url": url
-                    })
+                    results.append(
+                        FilePathData(
+                            name=name,
+                            path=f_path,
+                            is_present=True,
+                            url=url
+                        )
+                    )
 
         # missing downloadable files
+        save_folder = cls.get_save_folder(file_type)
         for name, info in DOWNLOAD_MAP.items():
             if info.get("type") == file_type and name not in found_names:
                 if extensions and not any(name.lower().endswith(ext.lower()) for ext in extensions):
                     continue
-
-                results.append({
-                    "name": name,
-                    "path": None,
-                    "is_present": False,
-                    "url": info.get("url")
-                })
+                
+                target_path = os.path.join(save_folder, name)
+                results.append(
+                    FilePathData(
+                        name=name,
+                        path=target_path,
+                        is_present=False,
+                        url=info.get("url")
+                    )
+                )
                         
-        return sorted(results, key=lambda x: x["name"])
+        return sorted(results, key=lambda x: x.name)
 
     @classmethod
-    def get_path(cls, filename: str, file_type: str) -> str:
+    def get_path(cls, filename: str, file_type: str) -> FilePathData:
         """
-        - resolves the full path for a specific file name and type
-        - prioritizes exact matches, then stem matches (ignoring extension)
-        - validates that the file exists on disk
+        Resolves a file by name and type.
+        Prioritizes:
+        1. Local Exact match
+        2. Local Stem match
+        3. Download Map Exact match
+        4. Download Map Stem match
+        
+        Returns a dict: {'name': str, 'path': str, 'is_present': bool, 'url': str|None}
+        Raises FileNotFoundError if not found in local or downloadable.
         """
         if not cls._file_cache:
             cls.init_cache()
 
+        # local files
         candidates = []
-
         for entry in cls._search_roots:
             root = entry["path"]
             mapping = entry["map"]
@@ -187,17 +221,84 @@ class FilePaths:
                 # exact match
                 if f_name == filename:
                     if os.path.exists(f_path):
-                        return f_path
+                        url = DOWNLOAD_MAP.get(f_name, {}).get("url") if f_name in DOWNLOAD_MAP and DOWNLOAD_MAP[f_name].get("type") == file_type else None
+                        return FilePathData(
+                            name=f_name,
+                            path=f_path,
+                            is_present=True,
+                            url=url
+                        )
                 
                 # stem match (if input has no extension)
                 if os.path.splitext(f_name)[0] == filename:
                      if os.path.exists(f_path):
                         candidates.append(f_path)
 
+        # local stem candidates
         if candidates:
-            return candidates[0]
+            # Pick first candidate
+            f_path = candidates[0]
+            f_name = os.path.basename(f_path)
+            url = DOWNLOAD_MAP.get(f_name, {}).get("url") if f_name in DOWNLOAD_MAP and DOWNLOAD_MAP[f_name].get("type") == file_type else None
+            return FilePathData(
+                    name=f_name,
+                    path=f_path,
+                    is_present=True,
+                    url=url
+                )
 
-        raise FileNotFoundError(f"File '{filename}' of type '{file_type}' not found.")
+        save_folder = cls.get_save_folder(file_type)
+
+        # exact download map
+        if filename in DOWNLOAD_MAP:
+            info = DOWNLOAD_MAP[filename]
+            if info.get("type") == file_type:
+                target_path = os.path.join(save_folder, filename)
+                return FilePathData(
+                        name=filename,
+                        path=target_path,
+                        is_present=False,
+                        url=info.get("url")
+                    )
+
+        # steam download map
+        for name, info in DOWNLOAD_MAP.items():
+            if info.get("type") == file_type:
+                if os.path.splitext(name)[0] == filename:
+                    target_path = os.path.join(save_folder, name)
+                    return FilePathData(
+                        name=name,
+                        path=target_path,
+                        is_present=False,
+                        url=info.get("url")
+                    )
+
+        # raise FileNotFoundError(f"File '{filename}' of type '{file_type}' not found locally or in download map.")
+        return FilePathData()
+    
+    @classmethod
+    def get_save_folder(cls, file_type: str) -> str:
+        """
+        Returns the absolute path to the default save directory for a given file type.
+        Uses the first registered search root (primary).
+        Creates the directory if it does not exist.
+        """
+        if not cls._search_roots:
+            root = os.path.abspath(".")
+            mapping = DEFAULT_MAPPING
+        else:
+            root = cls._search_roots[0]["path"]
+            mapping = cls._search_roots[0]["map"]
+            
+        folders = mapping.get(file_type)
+        if not folders:
+            raise ValueError(f"Unknown file type: '{file_type}'")
+
+        save_dir = os.path.join(root, folders[0])
+        os.makedirs(save_dir, exist_ok=True)
+        return save_dir
 
 
+# NOTE: the first registered root is treated as the primary and 
+# will be used to save models and the outputs
 FilePaths.add_search_path(".")

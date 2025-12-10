@@ -21,10 +21,15 @@ def load_apps_from_directory(directory: str = "apps"):
     Scans the given directory for .py files, loads them, 
     and looks for an 'app' instance in them
     """
-    apps_path = os.path.join(os.getcwd(), directory)
+    # overriding via environment variable
+    custom_dir = os.environ.get("EXIV_APPS_DIR")
+    if custom_dir:
+        apps_path = os.path.abspath(custom_dir)
+    else:
+        apps_path = os.path.join(os.getcwd(), directory)
     
     if not os.path.exists(apps_path):
-        print(f"No 'apps' folder found at {apps_path}")
+        app_logger.warning(f"No 'apps' folder found at {apps_path}")
         return
 
     app_logger.debug(f"Scanning for apps in: {apps_path}")
@@ -64,7 +69,7 @@ def process_task(task_id: str):
     
     def report_progress(progress: float, message: str = "Processing"):
         # to be used by the underlying script to report its progress
-        _update_task(ScriptStatus.PROCESSING.value, progress, message)
+        _update_task(ScriptStatus.PROCESSING.value, progress, {"status": message})
     
     try:
         task_details = task_manager.get_task(task_id)
@@ -77,11 +82,19 @@ def process_task(task_id: str):
 
         if not app_def:
             app_logger.error(f"Error: App '{app_name}' not found in registry.")
-            return {"error": "App definition missing"}
+            _update_task(
+                ScriptStatus.FAILED.value, 
+                0, 
+                {"status": "Task Failed"}, 
+                data={"err_message": f"App '{app_name}' not found"}
+            )
+            return
         
         params["report_progress"] = report_progress
 
         result = app_def.handler(**params)
+        
+        safe_result = result if isinstance(result, dict) else {}
         for o in app_def.outputs:
             if str(o.id) not in result.keys():
                 app_logger.warning(f"Output ID:{o.id} is not in the result")
@@ -90,7 +103,7 @@ def process_task(task_id: str):
             ScriptStatus.COMPLETED.value, 
             1, 
             {"status": "Task finished successfully"},
-            output=result,
+            output=safe_result,
             data=None
         )
     except Exception as e:
@@ -107,13 +120,15 @@ def process_task(task_id: str):
 def start_worker(sync_mode=False):
     while True:
         task_id: str
-        task_id, _ = task_manager.task_queue.get()
-        if task_id is None:     # for stopping (funny thing, this is called 'poison pill')
+        task_item = task_manager.task_queue.get()
+        if task_item is None or task_item[0] is None:     # for stopping (funny thing, this is called 'poison pill')
             break
+        
+        task_id, _ = task_item
         process_task(task_id)
         task_manager.task_queue.task_done()
         
-        if sync_mode: break     # for cli, pkg import
+        if sync_mode: break                               # for cli, pkg import
 
 
 app = FastAPI()
@@ -190,7 +205,7 @@ async def list_output_files():
 
 @app.websocket("/ws/status/{task_id}")
 async def websocket_endpoint(websocket: WebSocket, task_id: str):
-    update_freq = 1     # seconds
+    update_freq = 0.5     # seconds
     await websocket.accept()
     if task_manager.get_task_progress(task_id) is None:
         await websocket.close(code=1008, reason="Task not found")
@@ -207,7 +222,9 @@ async def websocket_endpoint(websocket: WebSocket, task_id: str):
     except WebSocketDisconnect:
         app_logger.info(f"WebSocket client disconnected for task {task_id}")
     finally:
-        await websocket.close()
+        try:
+            await websocket.close()
+        except: pass
 
 def run_server():
     worker_thread = threading.Thread(target=start_worker)

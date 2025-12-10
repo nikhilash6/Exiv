@@ -1,22 +1,19 @@
 import torch
 
-from exiv.components.enum import KSamplerType, ModelType, SchedulerType
+from exiv.components.enum import KSamplerType, SchedulerType
 from exiv.components.models.wan.constructor import get_wan_21_instance
-from exiv.components.models.wan.main import Wan21Model, WanModelArchConfig
-from exiv.components.samplers.cfg_methods import default_cfg
 from exiv.components.samplers.model_sampling import KSampler
-from exiv.components.samplers.sampler_types import get_model_sampling
-from exiv.components.text_vision_encoder.te_t5 import T5XXL, UMT5XXL
+from exiv.components.text_vision_encoder.te_t5 import UMT5XXL
 from exiv.components.text_vision_encoder.text_encoder import WanEncoder
 from exiv.components.text_vision_encoder.vision_encoder import create_vision_encoder
 from exiv.components.vae.wan_vae import Wan21VAE
-from exiv.config import LOADING_MODE
 from exiv.model_utils.common_classes import Latent
 from exiv.model_utils.common_classes import ModelWrapper
 from exiv.model_utils.helper_methods import move_model
 from exiv.server.app_core import App, AppOutputType, Input, Output
-from exiv.utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, MemoryManager, ProcDevice
+from exiv.utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, MemoryManager
 from exiv.utils.file import MediaProcessor, ensure_model_availability
+from exiv.utils.file_path import FilePathData, FilePaths
 from exiv.utils.tensor import common_upscale
 from exiv.utils.logging import app_logger
 
@@ -61,9 +58,9 @@ def preprocess_wan_conditionals(pos_embed_dict, neg_embed_dict, clip_embed_dict,
         image = image.permute(3, 0, 1, 2).unsqueeze(0)
         
         # encode the entire sequence
-        download_url = "https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-720P-Diffusers/resolve/main/vae/diffusion_pytorch_model.safetensors?download=true"
-        model_path = "./tests/test_utils/assets/models/wan_2_1_vae.safetensors"
-        model_path = ensure_model_availability(model_path=model_path, download_url=download_url)
+        cur_model = "wan_2_1_vae.safetensors"
+        model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vae")
+        model_path = ensure_model_availability(model_path=model_path_data.path, download_url=model_path_data.url)
         
         image = image.to(VRAM_DEVICE)
         wan_vae = Wan21VAE()
@@ -110,11 +107,11 @@ def main(**params):
     
     progress_callback(0.2, "Encoding prompts")
     # generate text embeddings
-    model_path = "./tests/test_utils/assets/models/umt5_xxl_fp16.safetensors"
-    download_url = "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp16.safetensors?download=true"
-    t5_xxl = UMT5XXL(model_path=model_path, dtype=torch.float16)
+    cur_model = "umt5_xxl_fp16.safetensors"
+    model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="clip")
+    t5_xxl = UMT5XXL(model_path=model_path_data.path, dtype=torch.float16)
     wan_encoder = WanEncoder(t5_xxl=t5_xxl)
-    wan_encoder.load_model(t5_xxl_download_url=download_url)
+    wan_encoder.load_model(t5_xxl_download_url=model_path_data.url)
     pos_embed_dict = wan_encoder.encode(positive_prompt)
     neg_embed_dict = wan_encoder.encode(negative_prompt)
     del t5_xxl
@@ -122,9 +119,9 @@ def main(**params):
     
     progress_callback(0.3, "Generating CLIP embeddings")
     # generate img embeddings
-    clip_vision_model_path = "./tests/test_utils/assets/models/CLIP-ViT-H-fp16.safetensors"
-    download_url = "https://huggingface.co/Kijai/CLIPVisionModelWithProjection_fp16/resolve/main/CLIP-ViT-H-fp16.safetensors?download=true"
-    clip_model = create_vision_encoder(model_path=clip_vision_model_path, download_url=download_url, dtype=torch.float16)
+    cur_model = "CLIP-ViT-H-fp16.safetensors"
+    model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="clip_vision")
+    clip_model = create_vision_encoder(model_path=model_path_data.path, download_url=model_path_data.url, dtype=torch.float16)
     clip_model.load_model()
     clip_embed_dict = clip_model.encode_image(input_img)
     del clip_model
@@ -144,11 +141,9 @@ def main(**params):
     MemoryManager.clear_memory()
     
     # create a model wrapper
-    model_path = "./tests/test_utils/assets/models/wan21_1_3B.safetensors"
-    # model_path = "./tests/test_utils/assets/models/wan21_14B.safetensors"
-    download_url = "https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B/resolve/main/diffusion_pytorch_model.safetensors?download=true"
-    # download_url = "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_14B_fp16.safetensors?download=true"
-    wan_dit_model = get_wan_21_instance(model_path, download_url, force_dtype=torch.float16)
+    cur_model = "wan21_1_3B.safetensors"
+    model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
+    wan_dit_model = get_wan_21_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
     model_wrapper = ModelWrapper(model=wan_dit_model)
 
     progress_callback(0.35, "Sampling loop")
@@ -171,9 +166,10 @@ def main(**params):
     MemoryManager.clear_memory()
     
     progress_callback(0.95, "Decoding output latents")
-    model_path = "./tests/test_utils/assets/models/wan_2_1_vae.safetensors"
+    cur_model = "wan_2_1_vae.safetensors"
+    model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vae")
     wan_vae = Wan21VAE()
-    wan_vae.load_model(model_path=model_path)
+    wan_vae.load_model(model_path=model_path_data.path)
     move_model(wan_vae, VRAM_DEVICE)
     out = wan_vae.decode(out, (height, width, output_frame_count))
     output_paths = MediaProcessor.save_latents_to_media(out)
