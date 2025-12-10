@@ -169,6 +169,25 @@ async def get_output_file(filename: str):
         
     return FileResponse(file_path)
 
+@app.get("/api/outputs")
+async def list_output_files():
+    out_dir = FilePaths.OUTPUT_DIRECTORY
+    
+    if not os.path.exists(out_dir):
+        return []
+        
+    files = []
+    for filename in os.listdir(out_dir):
+        file_path = os.path.join(out_dir, filename)
+        if os.path.isfile(file_path):
+            _, ext = os.path.splitext(filename)
+            files.append({
+                "filename": filename, 
+                "extension": ext
+            })
+            
+    return files
+
 @app.websocket("/ws/status/{task_id}")
 async def websocket_endpoint(websocket: WebSocket, task_id: str):
     update_freq = 1     # seconds
