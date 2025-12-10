@@ -2,8 +2,10 @@ import os
 import logging
 from typing import Any
 
-from exiv.utils.enum import ExtendedEnum
+from .utils.enum import ExtendedEnum
+from .utils.file import FilePaths
 
+os.makedirs(FilePaths.OUTPUT_DIRECTORY, exist_ok=True)
 
 class LOADING_MODE(ExtendedEnum):
     NO_OOM = "no_oom"

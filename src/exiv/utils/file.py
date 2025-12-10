@@ -11,7 +11,7 @@ from typing import List
 from tqdm import tqdm
 
 from .file_path import FilePaths
-from .logging import app_logger
+
 
 def create_sanitized_path(file_path):
     # make sure directory exists
@@ -52,6 +52,7 @@ def ensure_model_availability(model_path: str, download_url: str = None, force_d
     - Works with absolute paths (internally converts relative to absolute)
     - Store stuff in .cache if download path is not provided
     """
+    from .logging import app_logger
     
     if download_url:  # It's a URL
         parsed = urllib.parse.urlparse(download_url)
@@ -89,6 +90,8 @@ def ensure_model_availability(model_path: str, download_url: str = None, force_d
 class MediaProcessor:
     @staticmethod
     def load_image_list(image_path_list: List[str]):
+        from .logging import app_logger
+        
         from PIL import Image
         
         if isinstance(image_path_list, str):

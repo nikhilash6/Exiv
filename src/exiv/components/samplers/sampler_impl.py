@@ -122,7 +122,7 @@ class Sampler:
             # k_callback = lambda x: callback(x["i"], x["denoised"], x["x"], total_steps)
             def progress_callback(*args, **kwargs):
                 total_steps = max(0, len(sigmas) - 1)
-                callback(kwargs["i"] / total_steps, "Sampling loop")
+                callback(args[0]["i"] / total_steps, "Sampling loop")
             k_callback = progress_callback
 
         samples = self.sampler_function(denoising_fn, noise, sigmas, extra_args=extra_args, callback=k_callback, disable=disable_pbar, **self.extra_options)

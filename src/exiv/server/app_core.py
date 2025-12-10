@@ -1,3 +1,4 @@
+import argparse
 from pydantic import BaseModel, ConfigDict
 from typing import Any, Optional, List
 
@@ -68,3 +69,19 @@ class App(BaseModel):
     inputs: dict[str, Input]
     outputs: List[Output]     
     handler: Any
+    
+    def run_standalone(self):
+        def mock_progress(p, msg):
+            print(f"[{p:.0%}] {msg}")
+
+        parser = argparse.ArgumentParser(description=self.name)
+        
+        for name, inp in self.inputs.items():
+            dtype = float if inp.type == "slider" else str
+            parser.add_argument(f"--{name}", default=inp.default, type=dtype, help=inp.label)
+
+        args = vars(parser.parse_args())
+        args["report_progress"] = mock_progress
+
+        result = self.handler(**args)
+        print("\nOutput:", result)

@@ -12,6 +12,7 @@ from .app_core import App
 
 from .task_manager import RunRequest, ScriptResponse, ScriptStatus, TaskDetails, task_manager
 from ..utils.logging import app_logger
+from ..utils.file_path import FilePaths
 
 APP_REGISTRY = {} # stores all the loaded apps
 
@@ -156,7 +157,7 @@ async def get_script_progress(task_id: str):
 
 @app.get("/api/outputs/{filename}")
 async def get_output_file(filename: str):
-    out_dir = os.path.join(os.getcwd(), "out")
+    out_dir = FilePaths.OUTPUT_DIRECTORY
     file_path = os.path.join(out_dir, filename)
     
     # prevent directory traversal (e.g. "../filename")
