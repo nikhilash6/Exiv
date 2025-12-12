@@ -222,10 +222,22 @@ def split_model_for_loading(model: 'ModelMixin', target_shape = None):
         
     return full_load_modules
 
+def remove_efficient_loading(model: 'ModelMixin'):
+    for m_name, m in model.named_modules():
+        if m is model or not should_preload(model, m):
+            continue
+        HookRegistry.remove_hook_from_module(m, HookType.EFFICIENT_MODULE_LOADER.value)
+
+    HookRegistry.remove_hook_from_module(model, HookType.EFFICIENT_MODEL_LOADER.value)
+    
+
 def enable_efficient_loading(model: 'ModelMixin', target_shape = None):
     """
     This patches the forward pass of modules to dynamically load / unload them
     """
+    # cleaning hooks from the previous runs
+    remove_efficient_loading(model)
+    
     model._fully_loaded = False
     full_load: List[Tuple[weakref.ref, str]] = []
     loading_mode = getattr(model, 'force_load_mode', None) or global_config.loading_mode

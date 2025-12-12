@@ -18,6 +18,9 @@ class HookType(ExtendedEnum):
     EFFICIENT_MODEL_LOADER = "efficient_model_loader"
     EFFICIENT_MODULE_LOADER = "efficient_module_loader"
     
+    # caching hooks
+    CACHE_STEPS_HOOK = "caching_steps_hook"
+    
     # pre-processing hooks
     INPAINT_HOOK = "inpaint_hook"
     
@@ -40,6 +43,12 @@ class ModelHook:
 
     def post_forward(self, module: torch.nn.Module, output: Any):
         return output
+    
+    # NOTE: this replaces the forward completely and thus needs to be applied
+    # first or else it will overwrite all other hooks applied before it
+    def new_forward(self, module: torch.nn.Module,*args, **kwargs):
+        return module.forward(*args, **kwargs)
+        # raise NotImplementedError("Base new_forward should not be called directly.")
 
 
 class HookRegistry:
@@ -52,6 +61,9 @@ class HookRegistry:
         self.tail = ModelHook()
         self.head.next_hook = self.tail
         self.tail.prev_hook = self.head
+        
+    def _has_new_forward(self, hook: ModelHook) -> bool:
+        return getattr(hook.__class__, "new_forward", None) is not ModelHook.new_forward
 
     def remove_hook(self, hook_type: str, recurse: bool = True) -> None:
         hook = self.hooks_lookup.get(hook_type, None)
@@ -72,25 +84,38 @@ class HookRegistry:
                 if hasattr(module, "hook_registry"):
                     module.hook_registry.remove_hook(hook_type, recurse=False)
 
-    def _add_to_front(self, hook: ModelHook):
-        # adds the new hook to the front (will be processed first)
-        hook.next_hook = self.head.next_hook
-        hook.prev_hook = self.head
-        self.head.next_hook.prev_hook = hook
-        self.head.next_hook = hook
-        
-        self.hooks_lookup[hook.hook_type] = hook
+    def _insert_hook_after(self, prev_node: ModelHook, new_hook: ModelHook):
+        next_node = prev_node.next_hook
+        new_hook.prev_hook = prev_node
+        new_hook.next_hook = next_node
+        prev_node.next_hook = new_hook
+        next_node.prev_hook = new_hook
+        self.hooks_lookup[new_hook.hook_type] = new_hook
 
     def register_hook(self, hook: ModelHook) -> None:
         if hook.hook_type in self.hooks_lookup.keys():
             raise ValueError(f"{hook.hook_type} already exists")
         
-        self._add_to_front(hook)
+        is_nf = self._has_new_forward(hook)
+        # hooks with new_forward go to the absolute start
+        curr = self.head.next_hook
+        last_nf = None
+        while curr != self.tail and self._has_new_forward(curr):
+            last_nf = curr
+            curr = curr.next_hook
+        
+        if is_nf and last_nf is not None:
+            app_logger.warning(f"{hook.hook_type} will overwrite all previous new_forward hooks")
+        
+        # always applying after the last_nf node (or head)
+        apply_after = last_nf or self.head
+        self._insert_hook_after(apply_after, hook)
+        
         self._cached_forward = None
         self._cached_call = None
     
     def get_modified_forward(self):
-        if self._cached_forward:
+        if getattr(self, "_cached_forward", None) is not None:
             return self._cached_forward
     
         cur_forward = self._module_ref._original_forward if \
@@ -100,7 +125,10 @@ class HookRegistry:
         def create_new_forward(hook, og_forward):
             def new_forward(*args, **kwargs):
                 args, kwargs = hook.pre_forward(self._module_ref, *args, **kwargs)
-                output = og_forward(*args, **kwargs)
+                if self._has_new_forward(hook):
+                    output = hook.new_forward(self._module_ref, *args, **kwargs)
+                else:
+                    output = og_forward(*args, **kwargs)
                 return hook.post_forward(self._module_ref, output)
 
             return new_forward
@@ -142,6 +170,7 @@ class HookRegistry:
     
     @staticmethod
     def apply_hook_to_module(module, hook):
+        # saves the original forward method, so it can be reverted later
         if not hasattr(module, "_original_forward"):
             module._original_forward = module.forward
             
@@ -149,30 +178,11 @@ class HookRegistry:
         registry.register_hook(hook)
         module.forward = registry.get_modified_forward()
         
-    def cleanup_and_remove(self):
-        # NOTE: not in use, added during dev, maybe needs to be removed
-        """
-        Restores the module's original state and breaks all
-        circular references to this registry.
-        """
-        if hasattr(self._module_ref, "_original_forward"):
-            self._module_ref.forward = self._module_ref._original_forward
-            try:
-                del self._module_ref._original_forward
-            except AttributeError:
-                pass
-
-        if hasattr(self._module_ref, "hook_registry"):
-            try:
-                del self._module_ref.hook_registry
-            except AttributeError:
-                pass
-        
-        self.hooks_lookup.clear()
-        self.head = None
-        self.tail = None
-        
-        self._module_ref = None
+    @staticmethod
+    def remove_hook_from_module(module, hook_type: str):
+        registry = HookRegistry.get_hook_registry(module)
+        registry.remove_hook(hook_type)
+        module.forward = registry.get_modified_forward()
 
     def get_hook(self, hook_type: str) -> Optional[ModelHook]:
         return self.hooks_lookup.get(hook_type, None)
@@ -187,29 +197,20 @@ class HookRegistry:
         
         return f"HookRegistry(\n" + "\n".join(parts) + "\n)"
 
-def cleanup_model(model: nn.Module):
-    # NOTE: not in use, added during dev, maybe needs to be removed
-    """
-    Completely cleans up a model and all its submodules by removing
-    all HookRegistry patches and breaking circular references.
-    """
+def clean_and_restore(module_ref):
+    # restores the original forward and deletes the registry
+    if hasattr(module_ref, "_original_forward"):
+        module_ref.forward = module_ref._original_forward
+        del module_ref._original_forward
+
+    if hasattr(module_ref, "hook_registry"):
+        del module_ref.hook_registry
+            
+def clear_hook_registry(model: nn.Module):
+    # completely deletes the hook registry and all
+    # associated data with it
     if model is None:
         return
 
-    app_logger.debug(f"--- Starting cleanup for model: {model.__class__.__name__} ---")
-    
-    modules_to_clean = list(model.modules())
-    for module in modules_to_clean:
-        registry = HookRegistry.get_hook_registry(module)
-        if registry:
-            registry.cleanup_and_remove()
-        
-        # safety measure
-        if hasattr(module, '_forward_hooks'):
-            module._forward_hooks.clear()
-        if hasattr(module, '_forward_pre_hooks'):
-            module._forward_pre_hooks.clear()
-        if hasattr(module, '_backward_hooks'):
-            module._backward_hooks.clear()
-
-    app_logger.debug("--- Model cleanup complete. Running GC. ---")
+    for module in model.modules():
+        clean_and_restore(module)
