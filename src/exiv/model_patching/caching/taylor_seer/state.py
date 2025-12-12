@@ -7,6 +7,8 @@ class TaylorSeerState:
         self.n_derivatives = n_derivatives
         self.order = n_derivatives + 1
         self.max_warmup_steps = max_warmup_steps
+        # computes how often the step is calculated, if skip_interval_steps = 2
+        # then it calculates 1 step and approximates 1 step (check the tests)
         self.skip_interval_steps = skip_interval_steps
         self.reset()
 

@@ -1,7 +1,7 @@
-import unittest
 import torch
 import torch.nn as nn
 
+import unittest
 from typing import Any, Callable
 
 from exiv.model_patching.hook_registry import HookRegistry, HookType, ModelHook, clear_hook_registry
