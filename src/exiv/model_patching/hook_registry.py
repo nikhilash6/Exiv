@@ -1,10 +1,7 @@
 import torch
 from torch import nn
 
-import gc
-import functools
-
-from typing import Callable, Tuple, Any, Dict, Optional
+from typing import Callable, Any, Dict, Optional
 
 from ..utils.enum import ExtendedEnum
 from ..utils.logging import app_logger
@@ -19,7 +16,8 @@ class HookType(ExtendedEnum):
     EFFICIENT_MODULE_LOADER = "efficient_module_loader"
     
     # caching hooks
-    CACHE_STEPS_HOOK = "caching_steps_hook"
+    TAYLOR_SEER_MODULE_HOOK = "taylor_seer_module_hook"
+    TAYLOR_SEER_MODEL_HOOK = "taylor_seer_model_hook"
     
     # pre-processing hooks
     INPAINT_HOOK = "inpaint_hook"
