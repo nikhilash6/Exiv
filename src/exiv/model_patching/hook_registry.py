@@ -19,6 +19,8 @@ class HookType(ExtendedEnum):
     TAYLOR_SEER_MODULE_HOOK = "taylor_seer_module_hook"
     TAYLOR_SEER_MODEL_HOOK = "taylor_seer_model_hook"
     
+    TAYLOR_SEER_LITE_MODEL_HOOK = "taylor_seer_lite_model_hook"
+    
     # pre-processing hooks
     INPAINT_HOOK = "inpaint_hook"
     
