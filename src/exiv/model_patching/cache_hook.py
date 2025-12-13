@@ -6,7 +6,8 @@ class CacheType(ExtendedEnum):
     TAYLOR_SEER = "taylor_seer"
 
 
-def add_cache_hooks(model, cache_type: str):
+def enable_step_caching(model, cache_type: str | None = None):
+    cache_type = cache_type or CacheType.TAYLOR_SEER.value
     assert cache_type in CacheType.value_list(), f"unsupported cache type {cache_type}"
     
     if cache_type == CacheType.TAYLOR_SEER.value:

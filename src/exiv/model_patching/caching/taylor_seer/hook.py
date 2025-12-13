@@ -1,13 +1,13 @@
 import torch
 
 from .state import TaylorSeerState
-from ...hook_registry import HookRegistry, HookType
+from ...hook_registry import HookRegistry, HookType, ModelHook
 from ....utils.logging import app_logger
 from ....components.enum import Model
 from ....components.models.wan.main import repeat_e, sinusoidal_embedding_1d
 from ....utils.tensor import pad_to_patch_size
 
-class TaylorSeerModuleHook:
+class TaylorSeerModuleHook(ModelHook):
     def __init__(self, n_derivatives=1, max_warmup_steps=3, skip_interval_steps=1):
         super().__init__()
         self.hook_type = HookType.TAYLOR_SEER_MODULE_HOOK.value
@@ -82,7 +82,7 @@ class TaylorSeerModuleHook:
             return self.seer_state.approximate()
 
 # --- 3. Model Hook ---
-class TaylorSeerModelHook:
+class TaylorSeerModelHook(ModelHook):
     def __init__(self):
         super().__init__()
         self.hook_type = HookType.TAYLOR_SEER_MODEL_HOOK.value
@@ -91,7 +91,7 @@ class TaylorSeerModelHook:
         # Extract Args matching Wan21Model.forward(x, timestep, context...)
         x = args[0]
         timestep = args[1]
-        context = args[2]
+        context = args[2] if len(args) > 2 else kwargs.get("context", None)
         clip_fea = args[3] if len(args) > 3 else kwargs.get("clip_fea", None)
 
         # Re-implement Wan21Model logic
@@ -164,8 +164,10 @@ def wan_module_filter(model):
 
 def enable_taylor_seer_cache(model):
     module_list = []
-    if model.type in [Model.WANT2V.value, Model.WANTI2V.value]:
+    if model.model_type in [Model.WANT2V.value, Model.WANTI2V.value]:
         module_list = wan_module_filter(model)
+    else:
+        raise Exception(f"{model.model_type} is not supported by Taylor Seer caching atm")
         
     for m in module_list:
         HookRegistry.apply_hook_to_module(m, TaylorSeerModuleHook())
