@@ -3,7 +3,7 @@ import torch
 from .state import TaylorSeerState
 from ...hook_registry import HookRegistry, HookType, ModelHook
 from ....utils.logging import app_logger
-from ....components.enum import Model
+
 from ....components.models.wan.main import repeat_e, sinusoidal_embedding_1d
 from ....utils.tensor import pad_to_patch_size
 
@@ -53,16 +53,12 @@ class TaylorSeerModuleHook(ModelHook):
         
         # --- VACE Fusion ---
         if control_hidden_states_list:
-            # Check if this block is targeted by VACE (using hook logic or config)
-            # Assuming 'vace_layers' logic handled by ModelHook sending explicit list
             control_hint, scale = control_hidden_states_list.pop()
             x = x + control_hint * scale
 
         return x
         
     def new_forward(self, module, *args, **kwargs):
-        
-        # Extract Arguments matching WanAttentionBlock.forward(x, e, freqs, context, context_img_len)
         x = args[0] if len(args) > 0 else kwargs.get("x")
         e = args[1] if len(args) > 1 else kwargs.get("e")
         freqs = args[2] if len(args) > 2 else kwargs.get("freqs")
@@ -80,20 +76,17 @@ class TaylorSeerModuleHook(ModelHook):
         else:
             return self.seer_state.approximate()
 
-# --- 3. Model Hook ---
 class TaylorSeerModelHook(ModelHook):
     def __init__(self):
         super().__init__()
         self.hook_type = HookType.TAYLOR_SEER_MODEL_HOOK.value
 
     def new_forward(self, module, *args, **kwargs):
-        # Extract Args matching Wan21Model.forward(x, timestep, context...)
         x = args[0]
         timestep = args[1]
         context = args[2] if len(args) > 2 else kwargs.get("context", None)
         clip_fea = args[3] if len(args) > 3 else kwargs.get("clip_fea", None)
 
-        # Re-implement Wan21Model logic
         bs, c, t, h, w = x.shape
         x = pad_to_patch_size(x, module.patch_size)
 
@@ -128,11 +121,9 @@ class TaylorSeerModelHook(ModelHook):
                 full_ref = module.ref_conv(full_ref).flatten(2).transpose(1, 2)
                 x = torch.concat((full_ref, x), dim=1)
 
-        # --- VACE Fusion Prep (Placeholder) ---
-        # populate this list using your VACE blocks logic
+        # TODO: add during the VACE integration
         vace_hints = []
         
-        # Run Blocks with Hints
         for i, block in enumerate(module.blocks):
             x = block(
                 x, 
@@ -140,7 +131,7 @@ class TaylorSeerModelHook(ModelHook):
                 freqs=freqs, 
                 context=context, 
                 context_img_len=context_img_len,
-                vace_hints=vace_hints # Passed to Module Hook
+                vace_hints=vace_hints
             )
 
         x = module.head(x, e)
@@ -150,26 +141,10 @@ class TaylorSeerModelHook(ModelHook):
         x = module.unpatchify(x, grid_sizes)
         return x[:, :, :t, :h, :w]
 
-# --- 4. Helpers ---
+
 def reset_taylor_seer_states(model):
     for module in model.modules():
         if hasattr(module, "hook_registry"):
             hook = module.hook_registry.get_hook(HookType.TAYLOR_SEER_MODULE_HOOK.value)
             if hook:
                 hook.reset()
-    
-def wan_module_filter(model):
-    return model.blocks
-
-def enable_taylor_seer_cache(model):
-    module_list = []
-    if model.model_type in [Model.WANT2V.value, Model.WANTI2V.value]:
-        module_list = wan_module_filter(model)
-    else:
-        raise Exception(f"{model.model_type} is not supported by Taylor Seer caching atm")
-        
-    for m in module_list:
-        HookRegistry.apply_hook_to_module(m, TaylorSeerModuleHook())
-        
-    HookRegistry.apply_hook_to_module(model, TaylorSeerModelHook())
-    app_logger.info("Taylor seer cache hooks applied")
