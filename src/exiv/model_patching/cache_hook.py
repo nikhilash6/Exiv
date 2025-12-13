@@ -6,7 +6,7 @@ from ..model_patching.hook_registry import HookRegistry, HookType
 
 class CacheType(ExtendedEnum):
     TAYLOR_SEER = "taylor_seer"                 # NOTE: holy shit, this takes crazy vram (almost 15 GB more in case of wan)
-    TAYLOR_SEER_LITE = "taylor_seer_lite"
+    TAYLOR_SEER_LITE = "taylor_seer_lite"       # almost 0 vram with same quality as the full method
 
 DEFAULT_CACHE_METHOD = CacheType.TAYLOR_SEER_LITE.value     # model agnostic, caches the entire output
 

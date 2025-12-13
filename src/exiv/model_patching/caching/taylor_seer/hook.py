@@ -141,10 +141,3 @@ class TaylorSeerModelHook(ModelHook):
         x = module.unpatchify(x, grid_sizes)
         return x[:, :, :t, :h, :w]
 
-
-def reset_taylor_seer_states(model):
-    for module in model.modules():
-        if hasattr(module, "hook_registry"):
-            hook = module.hook_registry.get_hook(HookType.TAYLOR_SEER_MODULE_HOOK.value)
-            if hook:
-                hook.reset()

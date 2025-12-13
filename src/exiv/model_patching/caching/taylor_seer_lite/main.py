@@ -1,3 +1,8 @@
+from .hook import TaylorSeerLiteModelHook
+
 
 def get_taylor_seer_lite_data(model):
-    pass
+    # model agnostic
+    module_list = []
+    
+    return module_list, [], TaylorSeerLiteModelHook()
