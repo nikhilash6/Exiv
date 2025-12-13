@@ -8,7 +8,7 @@ from ....components.models.wan.main import repeat_e, sinusoidal_embedding_1d
 from ....utils.tensor import pad_to_patch_size
 
 class TaylorSeerModuleHook(ModelHook):
-    def __init__(self, n_derivatives=1, max_warmup_steps=3, skip_interval_steps=1):
+    def __init__(self, n_derivatives=1, max_warmup_steps=3, skip_interval_steps=2):
         super().__init__()
         self.hook_type = HookType.TAYLOR_SEER_MODULE_HOOK.value
         self.seer_state = TaylorSeerState(
@@ -74,7 +74,6 @@ class TaylorSeerModuleHook(ModelHook):
         self.seer_state.mark_step_begin()
         
         if self.seer_state.should_compute():
-            # Pass 'module' to access .norm1, .attn1 etc.
             hidden_states = self._fused_operation(module, x, e, freqs, context, vace_hints, context_img_len)
             self.seer_state.update(hidden_states)
             return hidden_states

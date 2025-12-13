@@ -197,7 +197,8 @@ app = App(
         'seed': Input(
             label="Seed",
             type="number",
-            default=-1,
+            # default=-1,
+            default=256347,
         ),
         'steps': Input(
             label="Steps",
