@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from typing import Any, List, Dict
 from functools import partial
 
+# from .sdnq.sdnq import SDNQQuantizer
 from ..utils.enum import ExtendedEnum, QuantizationMethod
 from ..utils.common import validate_type
 
@@ -124,6 +125,26 @@ class BNBQuantizerConfig(QuantizationConfig):
             return "nf4"
         else:
             return None
+        
+@dataclass
+class SDNQQuantizerConfig(QuantizationConfig):
+    weights_dtype: str = "int8"
+    group_size: int = 0
+    svd_rank: int = 32
+    svd_steps: int = 8
+    use_svd: bool = False
+    quant_conv: bool = False
+    use_quantized_matmul: bool = False
+    use_stochastic_rounding: bool = False
+    dequantize_fp32: bool = False
+
+    @property
+    def quantization_method(self):
+        return QuantizationMethod.SDNQ.value
+
+    @property
+    def quantization_dtype(self):
+        return self.weights_dtype
 
 class Quantizer(ABC):
     def __init__(self, quantization_config: QuantizationConfig, **kwargs):
@@ -146,10 +167,11 @@ class Quantizer(ABC):
         pass
 
 class QuantType(ExtendedEnum):
-    BNB_NF4 = "bnb_nf4"
-    BNB_FP4 = "bnb_fp4"
-    BNB_INT8 = "bnb_int8"
-    GGUF    = "gguf"
+    BNB_NF4     = "bnb_nf4"
+    BNB_FP4     = "bnb_fp4"
+    BNB_INT8    = "bnb_int8"
+    GGUF        = "gguf"
+    SDNQ        = "sdnq"
 
     
 def get_quantizer(quant_type: QuantType) -> Quantizer:
@@ -166,6 +188,9 @@ def get_quantizer(quant_type: QuantType) -> Quantizer:
         
         quant_cls, quant_config = quant_dict[quant_type.value]
         quantizer = quant_cls(quantization_config=BNBQuantizerConfig(**quant_config))
+        
+    # elif quant_type == QuantType.SDNQ:
+    #      return SDNQQuantizer(quantization_config=SDNQQuantizerConfig())
         
     else:
         raise NotImplementedError(f"{quant_type.value} not implemented yet")
