@@ -40,7 +40,7 @@ def detect_wan_params(state_dict):
 # NOTE: these methods detect the model arch (dims, layer counts etc.) from the 
 # state dict and initialize the model cls appropriately
 
-def get_wan_21_instance(
+def get_wan_instance(
     model_path,
     download_url,
     force_load_mode=LOADING_MODE.LOW_VRAM.value,

@@ -1,7 +1,7 @@
 import torch
 
 from exiv.components.enum import KSamplerType, SchedulerType
-from exiv.components.models.wan.constructor import get_wan_21_instance
+from exiv.components.models.wan.constructor import get_wan_instance
 from exiv.components.samplers.model_sampling import KSampler
 from exiv.components.text_vision_encoder.te_t5 import UMT5XXL
 from exiv.components.text_vision_encoder.text_encoder import WanEncoder
@@ -144,7 +144,7 @@ def main(**params):
     # create a model wrapper
     cur_model = "wan21_1_3B.safetensors"
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
-    wan_dit_model = get_wan_21_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
+    wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
     enable_step_caching(wan_dit_model)
     model_wrapper = ModelWrapper(model=wan_dit_model)
 

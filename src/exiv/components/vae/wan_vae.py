@@ -225,6 +225,7 @@ class AttentionBlock(nn.Module):
         qkv = qkv.permute(0, 1, 3, 2).contiguous()
         q, k, v = qkv.chunk(3, dim=-1)
 
+        # TODO: replace with optimized_attention
         # apply attention
         x = F.scaled_dot_product_attention(q, k, v)
 

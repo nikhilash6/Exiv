@@ -11,7 +11,7 @@ from ...enum import Model, ModelType
 from ...attention import optimized_attention
 from ...positional_embeddings import EmbedND, apply_rope
 from ...conditionals import CONDCrossAttn, CONDNoiseShape, CONDRegular
-from ...latent_format import LatentFormat, Wan21VAELatentFormat
+from ...latent_format import LatentFormat, Wan21VAELatentFormat, Wan22VAELatentFormat
 from ....components.samplers.sampler_types import get_model_sampling
 from ....model_utils.helper_methods import get_state_dict
 from ....model_utils.model_mixin import ModelMixin
@@ -328,30 +328,10 @@ class MLPProj(torch.nn.Module):
 class Wan21ModelArchConfig(ModelArchConfig):
     latent_format: LatentFormat = Wan21VAELatentFormat()
 
-class Wan21Model(ModelMixin):
-    r"""
-    Wan diffusion backbone supporting both text-to-video and image-to-video.
-    14B config (will remove this junk after dynamic config loading) -- 
-    model_type=Model.WANT2V.value,
-        patch_size=(1, 2, 2),
-        text_len=512,
-        in_dim=16,
-        dim=5120,
-        ffn_dim=13824,
-        freq_dim=256,
-        text_dim=4096,
-        out_dim=16,
-        num_heads=40,
-        num_layers=40,
-        window_size=(-1, -1),
-        qk_norm=True,
-        cross_attn_norm=True,
-        eps=1e-6,
-        flf_pos_embed_token_number=None,
-        in_dim_ref_conv=None,
-        wan_attn_block_class=WanAttentionBlock,
-    """
+class Wan22ModelArchConfig(ModelArchConfig):
+    latent_format: LatentFormat = Wan22VAELatentFormat()
 
+class Wan21Model(ModelMixin):
     def __init__(
         self,
         model_type=Model.WANT2V.value,
@@ -738,3 +718,8 @@ class Wan21Model(ModelMixin):
         
     def get_model_sampling_obj(self):
         return get_model_sampling(ModelType.FLOW, {"sampling_settings": {"shift": 8}})
+    
+class Wan22Model(Wan21Model):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.model_arch_config: ModelArchConfig = Wan22ModelArchConfig()

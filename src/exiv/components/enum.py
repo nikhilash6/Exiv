@@ -108,3 +108,4 @@ class Model(ExtendedEnum):
     
 class VAEType(ExtendedEnum):
     WAN = "wan"
+    WAN22 = "wan22"

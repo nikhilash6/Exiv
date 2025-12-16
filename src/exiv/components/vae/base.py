@@ -204,9 +204,12 @@ class VAEBase(ModelMixin):
     
 def get_vae(vae_type: VAEType) -> VAEBase:
     from .wan_vae import Wan21VAE
+    from .wan_vae22 import Wan22VAE
     
     if vae_type == VAEType.WAN:
         return Wan21VAE()
+    elif vae_type == VAEType.WAN22:
+        return Wan22VAE()
     
     raise Exception(f"{vae_type} vae not supported")
 
