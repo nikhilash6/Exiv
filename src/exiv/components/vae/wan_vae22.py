@@ -486,7 +486,6 @@ class Encoder3d(nn.Module):
         )
 
     def forward(self, x, feat_cache=None, feat_idx=[0]):
-
         if feat_cache is not None:
             idx = feat_idx[0]
             cache_x = x[:, :, -CACHE_T:, :, :].clone()
@@ -564,7 +563,6 @@ class Decoder3d(nn.Module):
 
         # dimensions
         dims = [dim * u for u in [dim_mult[-1]] + dim_mult[::-1]]
-        scale = 1.0 / 2**(len(dim_mult) - 2)
         # init block
         self.conv1 = CausalConv3d(z_dim, dims[0], 3, padding=1)
 
@@ -602,6 +600,7 @@ class Decoder3d(nn.Module):
         if feat_cache is not None:
             idx = feat_idx[0]
             cache_x = x[:, :, -CACHE_T:, :, :].clone()
+            
             if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
                 cache_x = torch.cat(
                     [
@@ -651,7 +650,6 @@ class Decoder3d(nn.Module):
                 x = layer(x)
         return x
 
-
 def count_conv3d(model):
     count = 0
     for m in model.modules():
@@ -694,8 +692,8 @@ class Wan22VAE(VAEBase):
             dropout,
         )
         
-        self.quant_conv = CausalConv3d(z_dim * 2, z_dim * 2, 1)
-        self.post_quant_conv = CausalConv3d(z_dim, z_dim, 1)
+        self.conv1 = CausalConv3d(z_dim * 2, z_dim * 2, 1)
+        self.conv2 = CausalConv3d(z_dim, z_dim, 1)
         
         self.decoder = Decoder3d(
             dec_dim,
@@ -708,7 +706,7 @@ class Wan22VAE(VAEBase):
         )
         
         # every downsample layer does spatial compression
-        self.spatial_compression_ratio = 2 ** len(self.temperal_downsample)
+        self.spatial_compression_ratio = 2 ** len(self.temperal_downsample) * 2     # NOTE: patchify factor of 2
         
         # slicing config
         self.use_slicing = max_batch_size != None and max_batch_size >= 1
@@ -722,66 +720,29 @@ class Wan22VAE(VAEBase):
         x_recon = self.decode(mu, scale)
         return x_recon, mu
     
-    def _encode_tile(self, x):
-        self.clear_cache()
+    def _encode_tile(self, x, feat_cache=None, feat_idx=None):
         # NOTE: point of difference from WAN VAE2.1, this patchifies the inputs
         x = patchify(x, patch_size=2)
-        t = x.shape[2]
-        iter_ = 1 + (t - 1) // 4
-        out_list = []
-        
-        for i in range(iter_):
-            self._enc_conv_idx = [0]
-            if i == 0:
-                out = self.encoder(
-                    x[:, :, :1, :, :],
-                    feat_cache=self._enc_feat_map,
-                    feat_idx=self._enc_conv_idx,
-                )
-            else:
-                out = self.encoder(
-                    x[:, :, 1 + 4 * (i - 1):1 + 4 * i, :, :],
-                    feat_cache=self._enc_feat_map,
-                    feat_idx=self._enc_conv_idx,
-                )
-            out_list.append(out)
-            
-        out = torch.cat(out_list, 2)
+        out = self.encoder(x, feat_cache=feat_cache, feat_idx=feat_idx)
         mu, log_var = self.conv1(out).chunk(2, dim=1)
-        self.clear_cache()
         return mu
     
-    def _decode_tile(self, z):
-        """Internal helper to decode a single spatial tile."""
-        self.clear_cache()
-        iter_ = z.shape[2]
+    def _decode_tile(self, z, feat_cache=None, feat_idx=None):
         x = self.conv2(z)
-        out_list = []
-        
-        for i in range(iter_):
-            self._conv_idx = [0]
-            if i == 0:
-                out = self.decoder(
-                    x[:, :, i:i + 1, :, :],
-                    feat_cache=self._feat_map,
-                    feat_idx=self._conv_idx,
-                    first_chunk=True,
-                )
-            else:
-                out = self.decoder(
-                    x[:, :, i:i + 1, :, :],
-                    feat_cache=self._feat_map,
-                    feat_idx=self._conv_idx,
-                )
-            out_list.append(out)
-            
-        out = torch.cat(out_list, 2)
-        # Unpatchify happens INSIDE the tile processing
+        # if no cache is present yet, then this is the first video (tile)
+        # in this temporal row
+        is_video_start = (feat_cache[0] is None)
+        out = self.decoder(
+            x,
+            feat_cache=feat_cache,
+            feat_idx=feat_idx,
+            first_chunk=is_video_start,
+        )
         out = unpatchify(out, patch_size=2)
-        self.clear_cache()
         return out
 
-    def encode(self, x, scale=[0, 1]):
+    @torch.inference_mode
+    def encode(self, x):
         B, C, T, H, W = x.shape
         tile_width, tile_height, tile_temporal, overlap_width, overlap_height = self.get_tiling_config(input_shape=(W, H, T))
         
@@ -800,30 +761,14 @@ class Wan22VAE(VAEBase):
             mu = torch.cat(mu_slices)
         else:
             mu = encode_fn(x)
-
-        if isinstance(scale[0], torch.Tensor):
-            mu = (mu - scale[0].view(1, self.z_dim, 1, 1, 1)) * scale[1].view(
-                1, self.z_dim, 1, 1, 1)
-        else:
-            mu = (mu - scale[0]) * scale[1]
             
         return mu
 
-    def decode(self, z, scale=[0, 1]):
-        if isinstance(scale[0], torch.Tensor):
-            z = z / scale[1].view(1, self.z_dim, 1, 1, 1) + scale[0].view(
-                1, self.z_dim, 1, 1, 1)
-        else:
-            z = z / scale[1] + scale[0]
-            
+    @torch.inference_mode
+    def decode(self, z, input_shape: tuple):
         B, C, T, H, W = z.shape
-        # Input shape for tiling is the TARGET output shape (Pixel space)
-        # Wan22 VAE 2.2 output is 2x spatial patch size relative to input, 
-        # but here we calculate based on z. 
-        # Note: patchify=2 means z spatial dims are H/2, W/2 of pixels.
-        target_H, target_W = H * 2, W * 2 # Approximate for tiling config
         
-        tile_width, tile_height, tile_temporal, overlap_width, overlap_height = self.get_tiling_config(input_shape=(target_W, target_H, T))
+        tile_width, tile_height, tile_temporal, overlap_width, overlap_height = self.get_tiling_config(input_shape=input_shape)
         decode_fn = partial(
             self.tiled_decode_3d,
             tile_width=tile_width,
@@ -854,7 +799,7 @@ class Wan22VAE(VAEBase):
         std = torch.exp(0.5 * log_var.clamp(-30.0, 20.0))
         return mu + std * torch.randn_like(std)
 
-    def clear_cache(self):
+    def reset_causal_cache(self):
         self._conv_num = count_conv3d(self.decoder)
         self._conv_idx = [0]
         self._feat_map = [None] * self._conv_num
@@ -862,4 +807,3 @@ class Wan22VAE(VAEBase):
         self._enc_conv_num = count_conv3d(self.encoder)
         self._enc_conv_idx = [0]
         self._enc_feat_map = [None] * self._enc_conv_num
-
