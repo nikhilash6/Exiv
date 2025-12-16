@@ -1,4 +1,4 @@
-from .main import Wan21Model
+from .main import Wan21Model, Wan22Model
 from ...enum import Model
 from ....config import LOADING_MODE
 from ....model_utils.helper_methods import get_state_dict
@@ -29,13 +29,25 @@ def detect_wan_params(state_dict):
             except: pass
     config["num_layers"] = max_block + 1
     
-    # 3. Type (T2V vs I2V)
-    if "img_emb.proj.0.bias" in state_dict:
+    # 3. Model Version Detection
+    # 16 = Wan 2.1, 48 = Wan 2.2
+    if config["out_dim"] == 48:
+        cls = Wan22Model
+    else:
+        cls = Wan21Model
+
+    # 4. Type (T2V vs I2V)
+    # T2V usually has in_dim=16
+    # I2V usually has in_dim=36 (16 latent + 4 mask + 16 image)
+    input_channels = state_dict["patch_embedding.weight"].shape[1]
+    if "img_emb.proj.0.bias" in state_dict or input_channels > 16:
         config["model_type"] = Model.WANTI2V.value
+        config["in_dim"] = input_channels
     else:
         config["model_type"] = Model.WANT2V.value
+        config["in_dim"] = 16
         
-    return config, dtype
+    return cls, config, dtype
 
 # NOTE: these methods detect the model arch (dims, layer counts etc.) from the 
 # state dict and initialize the model cls appropriately
@@ -48,10 +60,10 @@ def get_wan_instance(
 ):
     model_path = ensure_model_availability(model_path, download_url)
     state_dict = get_state_dict(model_path)
-    config, dict_dtype = detect_wan_params(state_dict)
+    cls, config, dict_dtype = detect_wan_params(state_dict)
     del state_dict
     
     dtype = force_dtype or dict_dtype
-    wan_dit_model = Wan21Model(**config, force_load_mode=force_load_mode, dtype=dtype)
+    wan_dit_model = cls(**config, force_load_mode=force_load_mode, dtype=dtype)
     wan_dit_model.load_model(model_path=model_path, download_url=download_url)
     return wan_dit_model

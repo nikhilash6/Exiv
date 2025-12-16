@@ -21,7 +21,6 @@ class VAEBase(ModelMixin):
         super().__init__(*args, **kwargs)
         
     # ------- these methods must be overriden in the child ---------
-    # children must also define 'encoder' and 'decoder' properties (obviously)
     def get_tiling_config(self, input_shape, tile_x=256, tile_y=256, tile_z=4, overlap_x=64, overlap_y=64):
         assert input_shape is not None, "input shape is required to calc tile dims"
         
@@ -42,7 +41,15 @@ class VAEBase(ModelMixin):
 
     # TODO: make these methods generalized as more and more models are added
     # TODO: handle the case of no tiling (but temporal chunking)
-    def tiled_encode_3d(self, x: torch.Tensor, tile_width: int, tile_height: int, tile_temporal:int = 4, overlap_width=64, overlap_height=64) -> torch.Tensor:
+    def tiled_encode_3d(self, x: torch.Tensor, 
+        tile_width: int, 
+        tile_height: int, 
+        tile_temporal:int = 4, 
+        overlap_width=64, 
+        overlap_height=64,
+        encode_fn=None,
+    ) -> torch.Tensor:
+        assert encode_fn is not None, "encode_fn can't be None"
         # (bs, channels, num_frames, height, width)
         _, _, num_frames, height, width = x.shape
         
@@ -93,8 +100,7 @@ class VAEBase(ModelMixin):
                     
                     self._enc_conv_idx = [0]    # resetting each itr, all the layers of conv are passed again
                     tile = tile.to(VRAM_DEVICE)
-                    res_tile = self.encoder(tile, feat_cache=self._enc_feat_map, feat_idx=self._enc_conv_idx)
-                    res_tile = self.quant_conv(res_tile)
+                    res_tile = encode_fn(tile, feat_cache=self._enc_feat_map, feat_idx=self._enc_conv_idx)
                     temporal_tile.append(res_tile)                           # complete temporal latent given a starting x,y tile idx
                     del tile
                 cur_temporal_row.append(torch.cat(temporal_tile, dim=2))     # complete temporal latent given a starting x and all y tile idx
@@ -118,7 +124,16 @@ class VAEBase(ModelMixin):
         enc = torch.cat(result_temporal_latent_rows, dim=3)[:, :, :, :latent_height, :latent_width]
         return enc
 
-    def tiled_decode_3d(self, z: torch.Tensor, tile_width: int, tile_height: int, tile_temporal:int = 4,  overlap_width=64, overlap_height=64) -> torch.Tensor:
+    def tiled_decode_3d(
+        self, z: torch.Tensor, 
+        tile_width: int, 
+        tile_height: int, 
+        tile_temporal:int = 4, 
+        overlap_width=64, 
+        overlap_height=64,
+        decode_fn=None,
+    ) -> torch.Tensor:
+        assert decode_fn is not None, "encode_fn can't be None"
         # (bs, channels, num_frames, height, width)
         _, _, num_frames, height, width = z.shape
         
@@ -148,8 +163,7 @@ class VAEBase(ModelMixin):
                 for k in range(num_frames):
                     self._conv_idx = [0]
                     tile = z[:, :, k : k + 1, i : i + latent_tile_size_height, j : j + latent_tile_size_width]
-                    tile = self.post_quant_conv(tile)
-                    decoded = self.decoder(tile, feat_cache=self._feat_map, feat_idx=self._conv_idx)
+                    decoded = decode_fn(tile, feat_cache=self._feat_map, feat_idx=self._conv_idx)
                     time.append(decoded)
                 cur_temporal_row.append(torch.cat(time, dim=2))
             temporal_latent_rows.append(cur_temporal_row)

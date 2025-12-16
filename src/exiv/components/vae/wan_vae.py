@@ -574,6 +574,15 @@ class Wan21VAE(VAEBase):
         self._enc_conv_num = self._cached_conv_counts["encoder"]
         self._enc_conv_idx = [0]
         self._enc_feat_map = [None] * self._enc_conv_num
+        
+    def _encode_tile(self, tile, feat_cache, feat_idx):
+        res_tile = self.encoder(tile, feat_cache, feat_idx)
+        res_tile = self.quant_conv(res_tile)
+        return res_tile
+    
+    def _decode_tile(self, tile, feat_cache, feat_idx):
+        tile = self.post_quant_conv(tile)
+        return self.decoder(tile, feat_cache, feat_idx)
 
     @torch.inference_mode
     def encode(self, x: Tensor):
@@ -585,8 +594,9 @@ class Wan21VAE(VAEBase):
             tile_width=tile_width, 
             tile_height=tile_height, 
             tile_temporal=tile_temporal, 
-            overlap_width=overlap_width, 
-            overlap_height=overlap_height
+            overlap_width=overlap_width,
+            overlap_height=overlap_height,
+            encode_fn=self._encode_tile
         )   # this can be written in a much shorter way, but writing like this for readability 
         
         if self.use_slicing and x.shape[0] > self.slice_batch_size:
@@ -608,7 +618,8 @@ class Wan21VAE(VAEBase):
             tile_height=tile_height, 
             tile_temporal=tile_temporal, 
             overlap_width=overlap_width, 
-            overlap_height=overlap_height
+            overlap_height=overlap_height,
+            decode_fn=self._decode_tile
         )   # this can be written in a much shorter way, but writing like this for readability 
         
         if self.use_slicing and z.shape[0] > 1:

@@ -55,7 +55,7 @@ def move_module(model, module, module_name, target_device=None):
     module_class_name = module.__class__.__name__
     is_bnb_module = module_class_name in ["Linear8bitLt", "Linear4bit"]
 
-    if any(p.device.type == "meta" for p in module.parameters(recurse=False)):
+    if any(p.device.type == "meta" for p in module.parameters(recurse=True)):
         module.to_empty(device=target_device)
     
     elif is_bnb_module:

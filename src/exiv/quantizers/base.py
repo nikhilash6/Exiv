@@ -7,7 +7,6 @@ from typing import Any, List, Dict, Optional
 from functools import partial
 from safetensors import safe_open
 
-from .sdnq.sdnq import SDNQQuantizerRepack
 from .sdnq_lib.common import use_torch_compile, dtype_dict, sdnq_version, \
     accepted_weight_dtypes, accepted_matmul_dtypes
 from ..utils.enum import ExtendedEnum, QuantizationMethod
@@ -293,6 +292,7 @@ def load_quant_config(file_path: str, key: str = "quant_config_json"):
 
 def get_quantizer(quant_type: QuantType, quant_config: Dict | None = None) -> Quantizer:
     from .bnb.bnb import BnB4BitQuantizer, BnB8BitQuantizer
+    from .sdnq.sdnq import SDNQQuantizerRepack
     
     quantizer = None
     if quant_type == None: return quantizer
