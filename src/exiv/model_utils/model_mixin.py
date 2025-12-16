@@ -23,6 +23,7 @@ class ModuleMeta(type(nn.Module)):
     def __call__(cls, *args, **kwargs):
         model_dtype = kwargs.pop("dtype", torch.float32)
         quant_type = kwargs.get("quant_type", None)
+        quant_config = kwargs.get("quant_config", None)
         force_load_mode = kwargs.get("force_load_mode", None)
         original_dtype = torch.get_default_dtype()
         
@@ -32,7 +33,7 @@ class ModuleMeta(type(nn.Module)):
             # zero init weight load
             with torch.device("meta"):
                 instance = super().__call__(*args, **kwargs)
-                quantizer: Quantizer = get_quantizer(quant_type=quant_type)
+                quantizer: Quantizer = get_quantizer(quant_type=quant_type, quant_config=quant_config)
                 instance.quantizer = quantizer
                 if quantizer is not None:
                     quantizer.validate_environment()

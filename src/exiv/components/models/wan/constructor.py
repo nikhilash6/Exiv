@@ -1,5 +1,3 @@
-import torch
-
 from .main import Wan21Model
 from ...enum import Model
 from ....config import LOADING_MODE
