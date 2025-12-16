@@ -1,12 +1,18 @@
+import json
 import torch
 
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Optional
 from functools import partial
+from safetensors import safe_open
 
+from .sdnq.sdnq import SDNQQuantizerRepack
+from .sdnq_lib.common import use_torch_compile, dtype_dict, sdnq_version, \
+    accepted_weight_dtypes, accepted_matmul_dtypes
 from ..utils.enum import ExtendedEnum, QuantizationMethod
 from ..utils.common import validate_type
+from ..utils.logging import app_logger
 
 
 class QuantizationConfig(ABC):
@@ -124,6 +130,115 @@ class BNBQuantizerConfig(QuantizationConfig):
             return "nf4"
         else:
             return None
+        
+
+@dataclass
+class SDNQQuantizerConfig(QuantizationConfig):
+    def __init__(
+        self,
+        weights_dtype: str = "int8",
+        quantized_matmul_dtype: str = None,
+        group_size: int = 0,
+        svd_rank: int = 32,
+        svd_steps: int = 8,
+        use_svd: bool = False,
+        use_grad_ckpt: bool = True,
+        quant_conv: bool = False,
+        use_quantized_matmul: bool = False,
+        use_quantized_matmul_conv: bool = False,
+        use_static_quantization: bool = True,
+        use_stochastic_rounding: bool = False,
+        dequantize_fp32: bool = False,
+        non_blocking: bool = False,
+        add_skip_keys: bool = True,
+        quantization_device: Optional[torch.device] = None,
+        return_device: Optional[torch.device] = None,
+        modules_to_not_convert: Optional[List[str]] = None,
+        modules_dtype_dict: Optional[Dict[str, List[str]]] = None,
+        is_training: bool = False,
+        **kwargs, # pylint: disable=unused-argument
+    ):
+        self.weights_dtype = weights_dtype
+        self.quantized_matmul_dtype = quantized_matmul_dtype
+        self.is_training = is_training
+        if self.is_training:
+            self.quant_method = QuantizationMethod.SDNQ_TRAINING
+        else:
+            self.quant_method = QuantizationMethod.SDNQ
+        self.group_size = group_size
+        self.svd_rank = svd_rank
+        self.svd_steps = svd_steps
+        self.use_svd = use_svd
+        self.use_grad_ckpt = use_grad_ckpt
+        self.quant_conv = quant_conv
+        self.use_quantized_matmul = use_quantized_matmul
+        self.use_quantized_matmul_conv = use_quantized_matmul_conv
+        self.use_static_quantization = use_static_quantization
+        self.use_stochastic_rounding = use_stochastic_rounding
+        self.dequantize_fp32 = dequantize_fp32
+        self.non_blocking = non_blocking
+        self.add_skip_keys = add_skip_keys
+        self.quantization_device = quantization_device
+        self.return_device = return_device
+        self.modules_to_not_convert = modules_to_not_convert
+        self.modules_dtype_dict = modules_dtype_dict
+        self.is_integer = dtype_dict[self.weights_dtype]["is_integer"]
+        self.sdnq_version = sdnq_version
+        self.verify_integrity()
+
+    def verify_integrity(self):
+        r"""
+        Safety checker that arguments are correct
+        """
+        if self.use_quantized_matmul and not use_torch_compile:
+            raise RuntimeError("SDNQ Quantized MatMul requires a working Triton install.")
+        if self.weights_dtype not in accepted_weight_dtypes:
+            raise ValueError(f"SDNQ only support weight dtypes in {accepted_weight_dtypes} but found {self.weights_dtype}")
+        if self.quantized_matmul_dtype is not None and self.quantized_matmul_dtype not in accepted_matmul_dtypes:
+            raise ValueError(f"SDNQ only support quantized matmul dtypes in {accepted_matmul_dtypes} but found {self.quantized_matmul_dtype}")
+
+        if self.modules_to_not_convert is None:
+            self.modules_to_not_convert = []
+        elif isinstance(self.modules_to_not_convert, str):
+            self.modules_to_not_convert = [self.modules_to_not_convert]
+        elif isinstance(self.modules_to_not_convert, tuple):
+            self.modules_to_not_convert = list(self.modules_to_not_convert)
+        elif not isinstance(self.modules_to_not_convert, list):
+            raise ValueError(f"modules_to_not_convert must be a list but got {type(self.modules_to_not_convert)}")
+
+        if self.modules_dtype_dict is None:
+            self.modules_dtype_dict = {}
+        elif not isinstance(self.modules_dtype_dict, dict):
+            raise ValueError(f"modules_dtype_dict must be a dict but got {type(self.modules_dtype_dict)}")
+        elif len(self.modules_dtype_dict.keys()) > 0:
+            self.modules_dtype_dict = self.modules_dtype_dict.copy()
+            for key, value in self.modules_dtype_dict.items():
+                if isinstance(value, str):
+                    value = [value]
+                    self.modules_dtype_dict[key] = value
+                elif isinstance(value, tuple):
+                    value = list(value)
+                    self.modules_dtype_dict[key] = value
+                if not isinstance(key, str) or not isinstance(value, list):
+                    raise ValueError(f"modules_dtype_dict must be a dictionary of strings and lists but got {type(key)} and {type(value)}")
+
+        self.modules_to_not_convert = self.modules_to_not_convert.copy()
+        self.modules_dtype_dict = self.modules_dtype_dict.copy()
+
+    def to_dict(self):
+        dct = self.__dict__.copy() # make serializable
+        dct["quantization_device"] = str(dct["quantization_device"]) if dct["quantization_device"] is not None else None
+        dct["return_device"] = str(dct["return_device"]) if dct["return_device"] is not None else None
+        return dct
+
+
+    @property
+    def quantization_method(self):
+        return QuantizationMethod.SDNQ.value
+
+    @property
+    def quantization_dtype(self):
+        return self.weights_dtype
 
 class Quantizer(ABC):
     def __init__(self, quantization_config: QuantizationConfig, **kwargs):
@@ -146,13 +261,37 @@ class Quantizer(ABC):
         pass
 
 class QuantType(ExtendedEnum):
-    BNB_NF4 = "bnb_nf4"
-    BNB_FP4 = "bnb_fp4"
-    BNB_INT8 = "bnb_int8"
-    GGUF    = "gguf"
+    BNB_NF4     = "bnb_nf4"
+    BNB_FP4     = "bnb_fp4"
+    BNB_INT8    = "bnb_int8"
+    GGUF        = "gguf"
+    SDNQ        = "sdnq"
 
+
+def load_quant_config(file_path: str, key: str = "quant_config_json"):
+    # loads quant config from safetensors metadata
     
-def get_quantizer(quant_type: QuantType) -> Quantizer:
+    # NOTE: this type of config loading is specific to this library and model names 
+    # contain 'ec' -> embedded config, to identify these models
+    
+    # only support safetensors for now
+    if not file_path.endswith('.safetensors'):
+        return None
+
+    try:
+        with safe_open(file_path, framework="pt") as f:
+            metadata = f.metadata()
+            if metadata and key in metadata:
+                json_string = metadata[key]
+                return json.loads(json_string)
+            else:
+                return None
+    except Exception as e:
+        app_logger.warning(f"Exception while parsing state dict config: {str(e)}")
+        return None
+
+
+def get_quantizer(quant_type: QuantType, quant_config: Dict | None = None) -> Quantizer:
     from .bnb.bnb import BnB4BitQuantizer, BnB8BitQuantizer
     
     quantizer = None
@@ -164,8 +303,15 @@ def get_quantizer(quant_type: QuantType) -> Quantizer:
             QuantType.BNB_INT8.value: (BnB8BitQuantizer, {'load_in_8bit': True}),
         }
         
-        quant_cls, quant_config = quant_dict[quant_type.value]
+        quant_cls, quant_config_dummy = quant_dict[quant_type.value]
+        # if original config is not provided then using makeshift config
+        quant_config = quant_config or quant_config_dummy                
         quantizer = quant_cls(quantization_config=BNBQuantizerConfig(**quant_config))
+        
+    elif quant_type == QuantType.SDNQ:
+        if quant_config is None:
+            raise Exception("Model safetensors doesn't contain quant config in the metadata. Aborting operation.")
+        return SDNQQuantizerRepack(quantization_config=SDNQQuantizerConfig(**quant_config))
         
     else:
         raise NotImplementedError(f"{quant_type.value} not implemented yet")

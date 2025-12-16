@@ -18,3 +18,4 @@ class QuantizationMethod(ExtendedEnum):
     BITSANDBYTES = "bitsandbytes"
     QUANTO = "quanto"
     TORCHAO = "torchao"
+    SDNQ = "sdnq"
