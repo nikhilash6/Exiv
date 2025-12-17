@@ -131,7 +131,6 @@ There are three modes for loading the model:
                 loaded / unloaded dynamically
 3. NORMAL   => This loads the entire model in one go and keeps it in VRAM for the entire inference
 """
-
 def estimate_peak_activation_size(model, target_shape):
     """
     A rough estimation of what peak mem use could be. Mostly focused
@@ -144,11 +143,9 @@ def estimate_peak_activation_size(model, target_shape):
         # NOTE: update this normalization logic as more models are added
         # ------------------------------
         safe_shape = list(target_shape)
-        
         # image (B, C, H, W) -> insert time=1 -> (B, C, 1, H, W)
         if len(safe_shape) == 4:
             safe_shape.insert(2, 1)
-            
         # text/latents (B, L, D) -> pad spatial dims with 1 -> (B, L, D, 1, 1)
         while len(safe_shape) < 5:
             safe_shape.append(1)
@@ -170,25 +167,27 @@ def estimate_peak_activation_size(model, target_shape):
         num_tokens = target_shape[0] * t_tokens * h_tokens * w_tokens
         
         # attn calculation
-        attn_peak = params["hidden_dim"] * params.get("attn_factor", 6.0)
-        ffn_peak  = params["ffn_dim"]    * params.get("ffn_factor", 2.0)
+        attn_peak = params["hidden_dim"] * params.get("attn_factor", 2.5)
+        ffn_peak  = params["ffn_dim"]    * params.get("ffn_factor", 1.0)
         peak_width = max(attn_peak, ffn_peak)
         
         dtype_size = params.get("dtype_size", 2)
-        total_bytes = num_tokens * peak_width * dtype_size * 2
+        total_bytes = num_tokens * peak_width * dtype_size
         
         return total_bytes / BYTES_IN_MB
     else:
         return default_mem_estimate
-    
+
 def split_model_for_loading(model: 'ModelMixin', target_shape = None):
+    MemoryManager.clear_memory()
+    
     # this determines which modules can be fully loaded permanently on the vram
     # and which has to be dynamically loaded
     full_load_modules: List[Tuple[weakref.ref, str]] = []
     
     current_mem_used = 0
     act_mb = estimate_peak_activation_size(model, target_shape)
-    available_mem = MemoryManager.available_memory(model.gpu_device) - (RESERVED_MEM + act_mb)
+    available_mem = MemoryManager.available_memory(model.gpu_device) - max(RESERVED_MEM, act_mb)
     
     module_by_size = []     # contains modules sorted by size (asc)
     for m_name, m in model.named_modules():

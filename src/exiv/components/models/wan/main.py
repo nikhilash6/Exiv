@@ -690,6 +690,12 @@ class Wan21Model(ModelMixin):
     def get_memory_footprint_params(self):
         """
         Returns architectural constants for memory estimation.
+        
+        attn_factor: 
+            ~2.0 - 2.5 (Optimized/Flash Attention): We only store Q,K,V and Output. The huge N×N attention matrix is never fully materialized.
+            ~4.0 - 6.0 (Vanilla/Old Attention): Calculates and stores the full N×N attention map (memory intensive for long sequences).
+        ffn_factor:
+            normally 1.0, extra 0.5 for any overhead involved
         """
         try:
              dtype_size = torch.tensor([], dtype=self.dtype).element_size()
@@ -700,20 +706,9 @@ class Wan21Model(ModelMixin):
             "patch_size": self.patch_size,      # (1, 2, 2)
             "hidden_dim": self.dim,             # 5120
             "ffn_dim": self.ffn_dim,            # 13824
-            # TODO: optimize this memory usage
-            # 1. Query
-            # 2. Key  
-            # 3. Value
-            # 4. RoPE Q
-            # 5. RoPE K
-            # 6. Attention Output / Buffer
-            "attn_factor": 6.0, 
-            
-            # 1. Up Project
-            # 2. Gate/Act  
-            "ffn_factor": 2.0,
-            
-            "dtype_size": dtype_size
+            "attn_factor": 2.0,
+            "ffn_factor": 1.5,
+            "dtype_size": dtype_size,
         }
         
     def get_model_sampling_obj(self):

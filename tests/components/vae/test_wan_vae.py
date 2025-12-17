@@ -132,7 +132,7 @@ class VisionEncoderTest(unittest.TestCase):
         
         # Preprocess: (T, H, W, C) -> (B, C, T, H, W) and Normalize to [0, 1]
         video = video_frames.permute(3, 0, 1, 2).unsqueeze(0) # (1, C, T, H, W)
-        video = video.to(device=VRAM_DEVICE, dtype=torch.float32) / 255.0
+        video = video.to(device=VRAM_DEVICE, dtype=torch.float16) / 255.0
         
         # Resize if necessary (optional, ensures 512x512)
         # video = torch.nn.functional.interpolate(video, size=(video.shape[2], 512, 512))
@@ -142,10 +142,9 @@ class VisionEncoderTest(unittest.TestCase):
         model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vae")
         model_path = ensure_model_availability(model_path=model_path_data.path, download_url=model_path_data.url)
         
-        wan_vae = Wan22VAE()
+        wan_vae = Wan22VAE(dtype=torch.float16)
         wan_vae.load_model(model_path=model_path)
         move_model(wan_vae, VRAM_DEVICE)
-        
         # Encode
         concat_latent_image = wan_vae.encode(video)
         MemoryManager.clear_memory()

@@ -1,3 +1,6 @@
+import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
 import torch
 
 from exiv.components.enum import KSamplerType, SchedulerType
@@ -53,7 +56,7 @@ def preprocess_wan_conditionals(pos_embed_dict, neg_embed_dict, clip_embed_dict,
     blank_latent.samples = torch.zeros([batch_size, 16, ((frame_count - 1) // 4) + 1, height // 8, width // 8], device=OFFLOAD_DEVICE)
     if input_img is not None:
         # empty image latent (T, H, W, C)
-        image = torch.ones((frame_count, height, width, input_img.shape[1]), device=input_img.device, dtype=input_img.dtype) * 0.5
+        image = torch.ones((frame_count, height, width, input_img.shape[1]), device=input_img.device, dtype=torch.float16) * 0.5
         image[0] = input_img[0].permute(1, 2, 0)     # first conditionals are replaced by the input_img
 
         # (T, H, W, C) -> (B, C, T, H, W)
@@ -65,7 +68,7 @@ def preprocess_wan_conditionals(pos_embed_dict, neg_embed_dict, clip_embed_dict,
         model_path = ensure_model_availability(model_path=model_path_data.path, download_url=model_path_data.url)
         
         image = image.to(VRAM_DEVICE)
-        wan_vae = Wan22VAE()
+        wan_vae = Wan22VAE(dtype=torch.float16)
         wan_vae.load_model(model_path=model_path)
         move_model(wan_vae, VRAM_DEVICE)
         concat_latent_image = wan_vae.encode(image)
@@ -127,6 +130,7 @@ def main(**params):
     clip_model.load_model()
     clip_embed_dict = clip_model.encode_image(input_img)
     del clip_model
+    MemoryManager.clear_memory()
     
     # preprocess conditionals
     pos_embed, neg_embed, blank_latent = preprocess_wan_conditionals(
@@ -204,7 +208,7 @@ app = App(
         'steps': Input(
             label="Steps",
             type="number",
-            default=30,
+            default=20,
             increment_controls=True,
             increment_step=2,
         ),
