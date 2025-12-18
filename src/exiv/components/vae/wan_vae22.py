@@ -1,6 +1,5 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
 from functools import partial
-import logging
 from typing import Union
 
 import torch
@@ -9,8 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 
-from exiv.components.vae.base import VAEBase
-
+from .base import VAEBase, VAEImageProcessor
 from .wan_vae import CausalConv3d, RMS_norm, Upsample
 
 
@@ -743,6 +741,8 @@ class Wan22VAE(VAEBase):
 
     @torch.inference_mode
     def encode(self, x):
+        assert hasattr(self, "spatial_compression_ratio"), "spatial_compression_ratio attribute is missing from the VAE instance"
+        x = VAEImageProcessor(self.spatial_compression_ratio).process_image(x)  # TODO: move this inside VAEBase and use the template pattern
         B, C, T, H, W = x.shape
         tile_width, tile_height, tile_temporal, overlap_width, overlap_height = self.get_tiling_config(input_shape=(W, H, T))
         

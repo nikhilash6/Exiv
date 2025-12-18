@@ -4,7 +4,6 @@
 import torch
 from torch import Tensor
 
-import hashlib
 import psutil
 import gc
 import sys
@@ -164,7 +163,7 @@ def print_model_params(model: torch.nn.Module, break_dtype=None):
         if param.dtype == break_dtype:
             break
 
-        
+import hashlib
 def get_tensor_hash(t):
     data = t.detach().cpu().contiguous().numpy()
     hash = hashlib.sha256(data.tobytes()).hexdigest()[:8] # First 8 chars are usually enough
