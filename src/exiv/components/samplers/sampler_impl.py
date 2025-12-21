@@ -1,3 +1,4 @@
+from functools import partial
 import torch
 from torch import nn, Tensor
 import torchsde
@@ -44,25 +45,6 @@ def ksampler_factory(sampler_name, extra_options={}, inpaint_options={}):
 
     return Sampler(sampler_function, extra_options, inpaint_options)
 
-# TODO: method is moved into the hooks, not deleting rn as it is required for testing
-# def inpaint_preprocessing(self, x: Tensor, sigma, denoise_mask: Tensor, model_options={}, seed=None):
-#     # self: instance of Callable[..., Any] class
-#     # x: current step latent
-#     # denoise_mask: denoise everything except the masked area (0s)
-#     if denoise_mask is not None:
-#         latent_mask = 1. - denoise_mask
-#         # sigma is defined for each batch, for a latent image of size [batch_size, channels, height, width]
-#         # so reshaping sigma from [4] -> [4, 1, 1, 1]   (assuming batch_size = 4)
-#         reshaped_sigma = sigma.reshape([sigma.shape[0]] + [1] * (len(self.noise.shape) - 1))
-#         scaled_noise = self.model_sampling.noise_scaling(reshaped_sigma, self.noise, self.latent_image)
-#         x = x * denoise_mask + scaled_noise * latent_mask
-    
-#     out = self(x, sigma, model_options=model_options, seed=seed)
-    
-#     if denoise_mask is not None:
-#         out = out * denoise_mask + self.latent_image * latent_mask
-#     return out
-
 
 class Sampler:
     def __init__(self, sampler_function: Callable[..., Tensor], extra_options={}, inpaint_options={}):
@@ -88,10 +70,23 @@ class Sampler:
         disable_pbar: bool = False
     ):
         extra_args["denoise_mask"] = denoise_mask
-        # TODO: remove after testing the inpainting hook
-        # adding inpaint preprocessing
-        # patched_method = types.MethodType(inpaint_preprocessing, wrapped_model)
-        # wrapped_model.__call__ = patched_method
+
+        def mask_preprocessing(x: Tensor, sigma, denoise_mask, model_options={}, seed=None):
+            if denoise_mask is not None:
+                latent_mask = 1. - denoise_mask
+                # sigma is defined for each batch, for a latent image of size [batch_size, channels, height, width]
+                # so reshaping sigma from [4] -> [4, 1, 1, 1]   (assuming batch_size = 4)
+                reshaped_sigma = sigma.reshape([sigma.shape[0]] + [1] * (len(noise.shape) - 1))
+                scaled_noise = wrapped_model.model_sampling.noise_scaling(reshaped_sigma, noise, latent_image)
+                x = x * denoise_mask + scaled_noise * latent_mask
+            
+            out = denoising_fn(x, sigma, model_options=model_options, seed=seed)
+            
+            if denoise_mask is not None:
+                out = out * denoise_mask + latent_image * latent_mask
+            return out
+
+        mod_denoising_fn = mask_preprocessing
         
         # ------- moving tensors (messy logic)
         device = wrapped_model.model.gpu_device
@@ -125,7 +120,7 @@ class Sampler:
                 callback(args[0]["i"] / total_steps, "Sampling loop")
             k_callback = progress_callback
 
-        samples = self.sampler_function(denoising_fn, noise, sigmas, extra_args=extra_args, callback=k_callback, disable=disable_pbar, **self.extra_options)
+        samples = self.sampler_function(mod_denoising_fn, noise, sigmas, extra_args=extra_args, callback=k_callback, disable=disable_pbar, **self.extra_options)
         samples = wrapped_model.model_sampling.inverse_noise_scaling(sigmas[-1], samples)
         return samples
 

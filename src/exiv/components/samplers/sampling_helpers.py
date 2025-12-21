@@ -36,13 +36,39 @@ def preprocess_cond_per_step(conds, x_in):
     return cond_obj(x_in, mult, conditioning, control)
 
 
-def prepare_mask(noise_mask, shape, device):
-    """ensures noise mask is of proper dimensions"""
-    noise_mask = torch.nn.functional.interpolate(noise_mask.reshape((-1, 1, noise_mask.shape[-2], noise_mask.shape[-1])), size=(shape[2], shape[3]), mode="bilinear")
-    noise_mask = torch.cat([noise_mask] * shape[1], dim=1)
-    noise_mask = repeat_to_batch_size(noise_mask, shape[0])
-    noise_mask = noise_mask.to(device)
-    return noise_mask
+def prepare_mask(mask, shape, device):
+    """
+    Ensures the mask is of the proper dimensions.
+    - Matches the number of dimensions of the target shape.
+    - Interpolates the spatial dimensions (last two).
+    - Adjusts the batch and channel dimensions to match the target shape.
+    """
+    mask = mask.to(device)
+    
+    # Ensure mask has the same number of dimensions as shape
+    while mask.ndim < len(shape):
+        mask = mask.unsqueeze(0)
+    
+    # Spatial interpolation on the last two dimensions
+    if mask.shape[-2:] != shape[-2:]:
+        mask = common_upscale(mask, shape[-1], shape[-2], upscale_method="bilinear", crop="none")
+
+    # Adjust channel dimension (shape[1])
+    if mask.shape[1] != shape[1]:
+        if mask.shape[1] == 1:
+            # Expand works for both 4D [B, C, H, W] and 5D [B, C, T, H, W]
+            mask = mask.expand(mask.shape[0], shape[1], *mask.shape[2:])
+        else:
+            mask = repeat_to_batch_size(mask, shape[1], dim=1)
+
+    # Adjust batch dimension (shape[0])
+    mask = repeat_to_batch_size(mask, shape[0])
+    
+    # Adjust temporal dimension if 5D
+    if mask.ndim == 5 and shape[2] != mask.shape[2]:
+        mask = repeat_to_batch_size(mask, shape[2], dim=2)
+
+    return mask
 
 
 def prepare_model_conds(wrapped_model: ModelWrapper, grouped_conds: dict, noise: Tensor, latent_image: Tensor, denoise_mask: Tensor, seed: Any):
@@ -85,20 +111,17 @@ def process_masks(grouped_conds: dict, latent_dims, device):
         for cond in cond_list:
             if 'mask' in cond:
                 mask = cond['mask']
-                mask = mask.to(device=device)
-
-                # adding a batch dimension
-                if len(mask.shape) == len(latent_dims):
-                    mask = mask.unsqueeze(0)
-
-                if mask.shape[1:] != latent_dims:
-                    if mask.ndim < 4:
-                        # adding the channel dim then removing it
-                        mask = common_upscale(mask.unsqueeze(1), latent_dims[-1], latent_dims[-2], 'bilinear', 'none').squeeze(1)
-                    else:
-                        mask = common_upscale(mask, latent_dims[-1], latent_dims[-2], 'bilinear', 'none')
-
-                cond['mask'] = mask
+                
+                # if mask is [H, W], batch becomes 1 and if its [B, H, W], batch is preserved
+                batch_size = mask.shape[0] if mask.ndim > len(latent_dims) else 1
+                target_shape = (batch_size, 1) + latent_dims
+                
+                # if it's [B, H, W] or [B, T, H, W], unsqueeze the channel dim 
+                # so prepare_mask handles it as [B, C, ...] correctly
+                if mask.ndim == len(latent_dims) + 1:
+                    mask = mask.unsqueeze(1)
+                
+                cond['mask'] = prepare_mask(mask, target_shape, device)
                 
     return grouped_conds
 

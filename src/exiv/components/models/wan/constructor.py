@@ -40,13 +40,15 @@ def detect_wan_params(state_dict):
     # T2V usually has in_dim=16
     # I2V usually has in_dim=36 (16 latent + 4 mask + 16 image)
     input_channels = state_dict["patch_embedding.weight"].shape[1]
-    if "img_emb.proj.0.bias" in state_dict or input_channels > 16:
-        config["model_type"] = Model.WANTI2V.value
-        config["in_dim"] = input_channels
-    else:
+    if cls == Wan22Model:
         config["model_type"] = Model.WANT2V.value
-        config["in_dim"] = 16
-        
+    else:
+        if "img_emb.proj.0.bias" in state_dict or input_channels > 16:
+            config["model_type"] = Model.WANTI2V.value
+        else:
+            config["model_type"] = Model.WANT2V.value
+    
+    config["in_dim"] = input_channels
     return cls, config, dtype
 
 # NOTE: these methods detect the model arch (dims, layer counts etc.) from the 

@@ -1,10 +1,11 @@
 import os
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
 import torch
 
 from exiv.components.enum import KSamplerType, SchedulerType
 from exiv.components.models.wan.constructor import get_wan_instance
+from exiv.components.models.wan.main import Wan22ModelArchConfig
 from exiv.components.samplers.model_sampling import KSampler
 from exiv.components.text_vision_encoder.te_t5 import UMT5XXL
 from exiv.components.text_vision_encoder.text_encoder import WanEncoder
@@ -51,40 +52,42 @@ def preprocess_wan_conditionals(pos_embed_dict, neg_embed_dict, clip_embed_dict,
     pos_embed = [[pos_embed_dict.pop("output"), pos_embed_dict]]
     neg_embed = [[neg_embed_dict.pop("output"), neg_embed_dict]]
     
+    # encode the entire sequence
+    cur_model = "wan_2_2_vae.safetensors"
+    model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vae")
+    model_path = ensure_model_availability(model_path=model_path_data.path, download_url=model_path_data.url)
+    wan_vae = Wan22VAE(dtype=torch.float16)
+    wan_vae.load_model(model_path=model_path)
+    move_model(wan_vae, VRAM_DEVICE)
+    
     # empty tensor
     blank_latent = Latent()
-    blank_latent.samples = torch.zeros([batch_size, 16, ((frame_count - 1) // 4) + 1, height // 8, width // 8], device=OFFLOAD_DEVICE)
+    compression_factor = wan_vae.spatial_compression_ratio
+    latent = torch.zeros([1, 48, ((frame_count - 1) // 4) + 1, height // compression_factor, width // compression_factor], device=input_img.device)     # B, C, T, H, W
+
+    # NOTE: this is a divergence from the original repo to aim for 100% perfect first frame
+    # insteads of passing the image as a hint, we pass it directly attached to the latent with mask 
+    # that tells not to touch the attached image part
+    if input_img is None:
+        blank_latent.samples = latent
+        return blank_latent
+
+    mask = torch.ones([latent.shape[0], 1, ((frame_count - 1) // 4) + 1, latent.shape[-2], latent.shape[-1]], device=input_img.device)
     if input_img is not None:
-        # empty image latent (T, H, W, C)
-        image = torch.ones((frame_count, height, width, input_img.shape[1]), device=input_img.device, dtype=torch.float16) * 0.5
-        image[0] = input_img[0].permute(1, 2, 0)     # first conditionals are replaced by the input_img
+        input_img = common_upscale(input_img[:frame_count], width, height, "bilinear", "center").movedim(1, -1)
+        # B, H, W, C -> B, C, H, W -> B, C, 1, H, W
+        input_img = input_img.permute(0, 3, 1, 2).unsqueeze(2)
+        input_img = input_img.to(torch.float16)
+        latent_temp = wan_vae.encode(input_img)                 # requires  (B, C, T, H, W)
+        latent[:, :, :latent_temp.shape[2]] = latent_temp
+        mask[:, :, :latent_temp.shape[2]] *= 0.0                # setting mask to zero for the first concatenated latent
 
-        # (T, H, W, C) -> (B, C, T, H, W)
-        image = image.permute(3, 0, 1, 2).unsqueeze(0)
-        
-        # encode the entire sequence
-        cur_model = "wan_2_2_vae.safetensors"
-        model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vae")
-        model_path = ensure_model_availability(model_path=model_path_data.path, download_url=model_path_data.url)
-        
-        image = image.to(VRAM_DEVICE)
-        wan_vae = Wan22VAE(dtype=torch.float16)
-        wan_vae.load_model(model_path=model_path)
-        move_model(wan_vae, VRAM_DEVICE)
-        concat_latent_image = wan_vae.encode(image)
-        del wan_vae, image
-
-        mask = torch.ones((1, 1, blank_latent.samples.shape[2], concat_latent_image.shape[-2], concat_latent_image.shape[-1]), device=input_img.device, dtype=input_img.dtype)
-        mask[:, :, :((input_img.shape[0] - 1) // 4) + 1] = 0.0      # setting the mask to 0 for the conditioning image
-
-        # following comfy's flow of just adding the conditionals to the dict
-        pos_embed = conditioning_set_values(pos_embed, {"concat_latent_image": concat_latent_image, "concat_mask": mask})
-        neg_embed = conditioning_set_values(neg_embed, {"concat_latent_image": concat_latent_image, "concat_mask": mask})
-
-    if clip_embed_dict:
-        pos_embed = conditioning_set_values(pos_embed, {"clip_vision_output": clip_embed_dict})
-        neg_embed = conditioning_set_values(neg_embed, {"clip_vision_output": clip_embed_dict})
-
+    latent_format = Wan22ModelArchConfig().latent_format
+    latent = latent_format.process_out(latent) * mask + latent * (1.0 - mask)
+    blank_latent.samples = latent.repeat((batch_size, ) + (1,) * (latent.ndim - 1))
+    blank_latent.samples = blank_latent.samples.to(torch.float16)                           # TODO: auto convert these (should be auto converting ?)
+    blank_latent.noise_mask = mask.repeat((batch_size, ) + (1,) * (mask.ndim - 1))
+    blank_latent.noise_mask = blank_latent.noise_mask.to(torch.float16)
     return pos_embed, neg_embed, blank_latent
 
 def main(**params):
@@ -105,10 +108,10 @@ def main(**params):
     
     progress_callback(0.1, "Loading Images")
     input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/test.jpg")[0]
-    height, width, output_frame_count = 512, 512, 81
+    height, width, output_frame_count = 768, 1024, 81
     
     # resizing img
-    input_img = common_upscale(input_img.unsqueeze(0), height, width)   # (B, C, H, W)
+    input_img = common_upscale(input_img.unsqueeze(0), width, height)   # (B, C, H, W)
     
     progress_callback(0.2, "Encoding prompts")
     # generate text embeddings
@@ -167,6 +170,9 @@ def main(**params):
         latent_image=blank_latent
     )
     
+    from torch_tracer import TorchTracer
+    
+    # with TorchTracer("./exiv_2.pkl"):
     out = main_sampler.run_sampling(callback=lambda i, s: progress_callback(0.35 + round(i * 0.6, 2), s))
     wan_dit_model.to("cpu")
     del wan_dit_model, model_wrapper

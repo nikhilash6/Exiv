@@ -1,6 +1,5 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
 from functools import partial
-import logging
 from typing import Union
 
 import torch
@@ -9,8 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 
-from exiv.components.vae.base import VAEBase
-
+from .base import VAEBase, VAEImageProcessor
 from .wan_vae import CausalConv3d, RMS_norm, Upsample
 
 
@@ -741,8 +739,7 @@ class Wan22VAE(VAEBase):
         out = unpatchify(out, patch_size=2)
         return out
 
-    @torch.inference_mode
-    def encode(self, x):
+    def _encode(self, x):
         B, C, T, H, W = x.shape
         tile_width, tile_height, tile_temporal, overlap_width, overlap_height = self.get_tiling_config(input_shape=(W, H, T))
         
@@ -761,11 +758,11 @@ class Wan22VAE(VAEBase):
             mu = torch.cat(mu_slices)
         else:
             mu = encode_fn(x)
-            
+        
+        # NOTE: point of difference from wan2.1 vae, it doesn't need to sample diagonalgaussian
         return mu
 
-    @torch.inference_mode
-    def decode(self, z, input_shape: tuple):
+    def _decode(self, z, input_shape: tuple):
         B, C, T, H, W = z.shape
         
         tile_width, tile_height, tile_temporal, overlap_width, overlap_height = self.get_tiling_config(input_shape=input_shape)

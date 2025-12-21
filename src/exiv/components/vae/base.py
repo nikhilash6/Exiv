@@ -1,16 +1,12 @@
 import torch
 
-import math
-import numpy as np
-
-from typing import Optional, Tuple
-
+from .helper_methods import VAEImageProcessor
 from ..enum import VAEType
 from ...config import LOADING_MODE
 from ...utils.logging import app_logger
-from ...utils.tensor import random_tensor
 from ...utils.device import VRAM_DEVICE
 from ...model_utils.model_mixin import ModelMixin
+
 
 class VAEBase(ModelMixin):
     def __init__(self, *args, **kwargs):
@@ -38,10 +34,25 @@ class VAEBase(ModelMixin):
     def reset_causal_cache(self):
         pass
     # ---------------------------------------------------------------
+    @torch.inference_mode
+    def encode(self, x):
+        assert hasattr(self, "_encode"), "core encoding logic is NOT defined"
+        assert hasattr(self, "spatial_compression_ratio"), "spatial_compression_ratio attribute is missing from the VAE instance"
+        x = VAEImageProcessor(self.spatial_compression_ratio).process_image(x)
+        return self._encode(x)
+    
+    @torch.inference_mode
+    def decode(self, z, input_shape):
+        assert hasattr(self, "_decode"), "core decoding logic is NOT defined"
+        return self._decode(z, input_shape)
+    
+    # ---------------------------------------------------------------
 
     # TODO: make these methods generalized as more and more models are added
     # TODO: handle the case of no tiling (but temporal chunking)
-    def tiled_encode_3d(self, x: torch.Tensor, 
+    def tiled_encode_3d(
+        self, 
+        x: torch.Tensor, 
         tile_width: int, 
         tile_height: int, 
         tile_temporal:int = 4, 
@@ -227,60 +238,3 @@ def get_vae(vae_type: VAEType) -> VAEBase:
     
     raise Exception(f"{vae_type} vae not supported")
 
-
-class DiagonalGaussianDistribution:
-    def __init__(self, parameters: torch.Tensor, deterministic: bool = False):
-        self.parameters = parameters
-        # incase of wan vae, the encoder output has z_dim * 2 as dim 1
-        self.mean, self.logvar = torch.chunk(parameters, 2, dim=1)
-        self.logvar = torch.clamp(self.logvar, -30.0, 20.0)
-        self.deterministic = deterministic
-        self.std = torch.exp(0.5 * self.logvar)     # resolves to sqrt(var)
-        self.var = torch.exp(self.logvar)
-        if self.deterministic:
-            # zero variance
-            self.var = self.std = torch.zeros_like(
-                self.mean, device=self.parameters.device, dtype=self.parameters.dtype
-            )
-
-    def sample(self, generator: Optional[torch.Generator] = None) -> torch.Tensor:
-        sample = random_tensor(
-            self.mean.shape,
-            generator=generator,
-            device=self.parameters.device,
-            dtype=self.parameters.dtype,
-        )
-        x = self.mean + self.std * sample
-        return x
-
-    def mode(self) -> torch.Tensor:
-        return self.mean
-    
-    # these methods are not needed in inference
-    def kl(self, other: "DiagonalGaussianDistribution" = None) -> torch.Tensor:
-        if self.deterministic:
-            return torch.Tensor([0.0])
-        else:
-            if other is None:
-                return 0.5 * torch.sum(
-                    torch.pow(self.mean, 2) + self.var - 1.0 - self.logvar,
-                    dim=[1, 2, 3],
-                )
-            else:
-                return 0.5 * torch.sum(
-                    torch.pow(self.mean - other.mean, 2) / other.var
-                    + self.var / other.var
-                    - 1.0
-                    - self.logvar
-                    + other.logvar,
-                    dim=[1, 2, 3],
-                )
-
-    def nll(self, sample: torch.Tensor, dims: Tuple[int, ...] = [1, 2, 3]) -> torch.Tensor:
-        if self.deterministic:
-            return torch.Tensor([0.0])
-        logtwopi = np.log(2.0 * np.pi)
-        return 0.5 * torch.sum(
-            logtwopi + self.logvar + torch.pow(sample - self.mean, 2) / self.var,
-            dim=dims,
-        )
