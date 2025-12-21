@@ -146,6 +146,7 @@ def sample(
             neg_conds,
             pos_conds,
             cfg,
+            denoise_mask=denoise_mask,
             seed=kwargs.get("seed")
         )
     
@@ -153,7 +154,7 @@ def sample(
     return wrapped_model.model.process_latent_out(samples.to(torch.float32))
 
 
-def model_sampling_step(wrapped_model: ModelWrapper, x, sigma, uncond, cond, cond_scale, seed=None):
+def model_sampling_step(wrapped_model: ModelWrapper, x, sigma, uncond, cond, cond_scale, denoise_mask=None, seed=None):
     '''
     Single sampling step for a given model. 
     - scales input using calculate_input
@@ -170,7 +171,7 @@ def model_sampling_step(wrapped_model: ModelWrapper, x, sigma, uncond, cond, con
 
     # **** main model run ****
     conds = [cond, uncond]
-    out = calc_cond_batch(wrapped_model, conds, x_in, timestep)
+    out = calc_cond_batch(wrapped_model, conds, x_in, timestep, denoise_mask=denoise_mask)
     # TODO: streamline this as more cfg methods are added
     cond_pred, uncond_pred = out[0], out[1]
     kwargs = {
@@ -203,7 +204,7 @@ def cond_cat(conds):
 
 # TODO: support multi batch conditionals, like multiple conditionals applied to different frames, that require
 # the model to be run multiple times
-def calc_cond_batch(wrapped_model: ModelWrapper, conds: List[List], x_in: Tensor, timestep: Tensor):
+def calc_cond_batch(wrapped_model: ModelWrapper, conds: List[List], x_in: Tensor, timestep: Tensor, denoise_mask=None):
     """
     It batches all conditioning (pos, neg, others etc..) together, runs the
     model once, and then returns the separated results. (for now)
@@ -231,6 +232,10 @@ def calc_cond_batch(wrapped_model: ModelWrapper, conds: List[List], x_in: Tensor
     num_tasks = len(applied_cond)
     batched_input_x = x_in.repeat(num_tasks, *[1] * (x_in.ndim - 1))
     batched_timestep = timestep.repeat(num_tasks)
+
+    if denoise_mask is not None:
+         temp_ts = (torch.mean(denoise_mask[:, :, :, :, :], dim=(1, 3, 4), keepdim=True) * timestep.view([timestep.shape[0]] + [1] * (denoise_mask.ndim - 1))).reshape(timestep.shape[0], -1)
+         batched_timestep = temp_ts.repeat(num_tasks, 1)
     conditioning_to_cat = [t.conditioning for t in applied_cond]
 
     batched_conditioning = cond_cat(conditioning_to_cat)

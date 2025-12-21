@@ -139,7 +139,7 @@ class MediaProcessor:
                 save_path,
                 video_formatted,
                 fps=24,
-                options={"crf": "5"}  # 'Constant Rate Factor' for quality (lower is better)
+                options={"crf": "25"}  # 'Constant Rate Factor' for quality (lower is better)
             )
             output_paths.append(save_path)
             
