@@ -739,10 +739,7 @@ class Wan22VAE(VAEBase):
         out = unpatchify(out, patch_size=2)
         return out
 
-    @torch.inference_mode
-    def encode(self, x):
-        assert hasattr(self, "spatial_compression_ratio"), "spatial_compression_ratio attribute is missing from the VAE instance"
-        x = VAEImageProcessor(self.spatial_compression_ratio).process_image(x)  # TODO: move this inside VAEBase and use the template pattern
+    def _encode(self, x):
         B, C, T, H, W = x.shape
         tile_width, tile_height, tile_temporal, overlap_width, overlap_height = self.get_tiling_config(input_shape=(W, H, T))
         
@@ -761,11 +758,11 @@ class Wan22VAE(VAEBase):
             mu = torch.cat(mu_slices)
         else:
             mu = encode_fn(x)
-            
+        
+        # NOTE: point of difference from wan2.1 vae, it doesn't need to sample diagonalgaussian
         return mu
 
-    @torch.inference_mode
-    def decode(self, z, input_shape: tuple):
+    def _decode(self, z, input_shape: tuple):
         B, C, T, H, W = z.shape
         
         tile_width, tile_height, tile_temporal, overlap_width, overlap_height = self.get_tiling_config(input_shape=input_shape)

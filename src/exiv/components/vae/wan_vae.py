@@ -6,9 +6,9 @@ from torch import Tensor
 
 from typing import Union, Tuple, Optional, List
 
-from .base import DiagonalGaussianDistribution, VAEBase
+from .base import VAEBase
+from .helper_methods import DiagonalGaussianDistribution
 from ..activations import get_activation
-from ...config import LOADING_MODE
 
 
 CACHE_T = 2
@@ -584,8 +584,7 @@ class Wan21VAE(VAEBase):
         tile = self.post_quant_conv(tile)
         return self.decoder(tile, feat_cache, feat_idx)
 
-    @torch.inference_mode
-    def encode(self, x: Tensor):
+    def _encode(self, x: Tensor):
         B, C, T, H, W = x.shape
         # (T, H, W, C) -> (W, H, T)
         tile_width, tile_height, tile_temporal, overlap_width, overlap_height = self.get_tiling_config(input_shape=(W, H, T))
@@ -609,8 +608,7 @@ class Wan21VAE(VAEBase):
 
         return posterior.sample()
     
-    @torch.inference_mode
-    def decode(self, z: Tensor, input_shape: Tuple):
+    def _decode(self, z: Tensor, input_shape: Tuple):
         tile_width, tile_height, tile_temporal, overlap_width, overlap_height = self.get_tiling_config(input_shape=input_shape)
         decode_fn = partial(
             self.tiled_decode_3d, 

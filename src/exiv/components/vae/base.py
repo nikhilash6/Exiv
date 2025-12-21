@@ -1,154 +1,12 @@
 import torch
-import torch.nn.functional as F
 
-import math
-import numpy as np
-from PIL import Image
-
-from typing import Optional, Tuple
-
+from .helper_methods import VAEImageProcessor
 from ..enum import VAEType
 from ...config import LOADING_MODE
 from ...utils.logging import app_logger
-from ...utils.tensor import random_tensor
 from ...utils.device import VRAM_DEVICE
 from ...model_utils.model_mixin import ModelMixin
 
-# NOTE: keeping this method outside of VAEBase for now, but will merge later
-class VAEImageProcessor:
-    def __init__(self, vae_scale_factor=8, crop_mode="center"):
-        self.vae_scale_factor = vae_scale_factor
-        self.crop_mode = crop_mode
-
-    def process_image(self, image, width=None, height=None):
-        # 1. Normalize input to a standard [N, C, H, W] layout
-        # This handles 4D (Images) and 5D (Video) transparently.
-        packed_image, restore_info = self._pack_to_nchw(image)
-
-        # 2. Apply operations on the standardized tensor
-        if width is not None and height is not None:
-            packed_image = self.resize(packed_image, width, height)
-
-        packed_image = self.ensure_rgb_channels(packed_image)
-        packed_image = self.crop_to_multiples(packed_image)
-
-        # 3. Restore original layout (Sequence/Batch structure)
-        return self._unpack_from_nchw(packed_image, restore_info)
-
-    def _pack_to_nchw(self, image):
-        """
-        Converts generic inputs to [N, C, H, W] for processing.
-        Returns the packed tensor and info needed to restore the original layout.
-        """
-        # --- Type Handling ---
-        if isinstance(image, Image.Image):
-            image = np.array(image).astype(np.float32) / 255.0
-            image = torch.from_numpy(image).unsqueeze(0)
-        elif isinstance(image, np.ndarray):
-            image = torch.from_numpy(image).float()
-            if image.ndim == 3: image = image.unsqueeze(0)
-        
-        if not isinstance(image, torch.Tensor):
-            raise ValueError("Input must be PIL, NumPy, or Tensor")
-
-        # --- Dimension & Layout Detection ---
-        orig_shape = image.shape
-        ndim = image.ndim
-        
-        # Heuristic: Find Channel Dimension (1, 3, or 4)
-        # We prefer dim 1 (BCHW/BCTHW) or dim -1 (BHWC).
-        c_dim = -1
-        if ndim == 4:
-            if image.shape[3] in [1, 3, 4]: c_dim = 3 # BHWC (Comfy Default)
-            elif image.shape[1] in [1, 3, 4]: c_dim = 1 # BCHW
-        elif ndim == 5: # Video [B, C, T, H, W] or [B, T, H, W, C]
-            if image.shape[1] in [1, 3, 4]: c_dim = 1 # BCTHW
-            elif image.shape[4] in [1, 3, 4]: c_dim = 4 # BTHWC
-        
-        if c_dim == -1:
-            # Fallback: Assume dim 1 if we can't guess (Standard PyTorch)
-            c_dim = 1 if image.shape[1] < image.shape[-1] else -1
-
-        # --- Normalization Logic ---
-        if ndim == 4:
-            if c_dim == 3: # BHWC -> BCHW
-                image = image.permute(0, 3, 1, 2)
-            # BCHW is already good
-            restore_layout = "BHWC" if c_dim == 3 else "BCHW"
-            return image, {"layout": restore_layout, "orig_shape": orig_shape}
-
-        elif ndim == 5:
-            # Handle Video: Merge Batch and Time into 'N'
-            # [B, C, T, H, W] -> [B*T, C, H, W]
-            if c_dim == 1: # BCTHW
-                b, c, t, h, w = image.shape
-                image = image.permute(0, 2, 1, 3, 4).reshape(b*t, c, h, w)
-                restore_layout = "BCTHW"
-            elif c_dim == 4: # BTHWC
-                b, t, h, w, c = image.shape
-                image = image.reshape(b*t, h, w, c).permute(0, 3, 1, 2)
-                restore_layout = "BTHWC"
-            else:
-                raise ValueError(f"Unsupported 5D layout. Shape: {image.shape}")
-            
-            return image, {"layout": restore_layout, "orig_shape": orig_shape, "batch": b, "frames": t}
-
-        return image, {"layout": "UNKNOWN", "orig_shape": orig_shape}
-
-    def _unpack_from_nchw(self, image, info):
-        layout = info["layout"]
-        n, c, h, w = image.shape
-
-        if layout == "BHWC":
-            return image.permute(0, 2, 3, 1) # BCHW -> BHWC
-        elif layout == "BCHW":
-            return image
-        elif layout == "BCTHW":
-            # [N, C, H, W] -> [B, T, C, H, W] -> [B, C, T, H, W]
-            b, t = info["batch"], info["frames"]
-            return image.reshape(b, t, c, h, w).permute(0, 2, 1, 3, 4)
-        elif layout == "BTHWC":
-            # [N, C, H, W] -> [B, T, C, H, W] -> [B, T, H, W, C]
-            b, t = info["batch"], info["frames"]
-            return image.reshape(b, t, c, h, w).permute(0, 1, 3, 4, 2)
-            
-        return image
-
-    def resize(self, image, width, height):
-        # image is guaranteed [N, C, H, W]
-        return F.interpolate(image, size=(height, width), mode="bilinear", align_corners=False)
-
-    def ensure_rgb_channels(self, image):
-        # image is guaranteed [N, C, H, W]
-        c = image.shape[1]
-        target = 3
-        
-        if c == target: return image
-        
-        if c > target: # RGBA -> RGB
-            return image[:, :target, :, :]
-        elif c < target: # Grayscale -> RGB
-            return image[:, :1, :, :].repeat(1, target, 1, 1)
-            
-        return image
-
-    def crop_to_multiples(self, image):
-        # image is guaranteed [N, C, H, W]
-        h, w = image.shape[2], image.shape[3]
-        
-        new_h = (h // self.vae_scale_factor) * self.vae_scale_factor
-        new_w = (w // self.vae_scale_factor) * self.vae_scale_factor
-
-        if new_h == h and new_w == w:
-            return image
-
-        if self.crop_mode == "center":
-            y = (h - new_h) // 2
-            x = (w - new_w) // 2
-        else: # topleft
-            y, x = 0, 0
-
-        return image[:, :, y:y+new_h, x:x+new_w]
 
 class VAEBase(ModelMixin):
     def __init__(self, *args, **kwargs):
@@ -175,6 +33,19 @@ class VAEBase(ModelMixin):
     
     def reset_causal_cache(self):
         pass
+    # ---------------------------------------------------------------
+    @torch.inference_mode
+    def encode(self, x):
+        assert hasattr(self, "_encode"), "core encoding logic is NOT defined"
+        assert hasattr(self, "spatial_compression_ratio"), "spatial_compression_ratio attribute is missing from the VAE instance"
+        x = VAEImageProcessor(self.spatial_compression_ratio).process_image(x)
+        return self._encode(x)
+    
+    @torch.inference_mode
+    def decode(self, z, input_shape):
+        assert hasattr(self, "_decode"), "core decoding logic is NOT defined"
+        return self._decode(z, input_shape)
+    
     # ---------------------------------------------------------------
 
     # TODO: make these methods generalized as more and more models are added
@@ -367,60 +238,3 @@ def get_vae(vae_type: VAEType) -> VAEBase:
     
     raise Exception(f"{vae_type} vae not supported")
 
-
-class DiagonalGaussianDistribution:
-    def __init__(self, parameters: torch.Tensor, deterministic: bool = False):
-        self.parameters = parameters
-        # incase of wan vae, the encoder output has z_dim * 2 as dim 1
-        self.mean, self.logvar = torch.chunk(parameters, 2, dim=1)
-        self.logvar = torch.clamp(self.logvar, -30.0, 20.0)
-        self.deterministic = deterministic
-        self.std = torch.exp(0.5 * self.logvar)     # resolves to sqrt(var)
-        self.var = torch.exp(self.logvar)
-        if self.deterministic:
-            # zero variance
-            self.var = self.std = torch.zeros_like(
-                self.mean, device=self.parameters.device, dtype=self.parameters.dtype
-            )
-
-    def sample(self, generator: Optional[torch.Generator] = None) -> torch.Tensor:
-        sample = random_tensor(
-            self.mean.shape,
-            generator=generator,
-            device=self.parameters.device,
-            dtype=self.parameters.dtype,
-        )
-        x = self.mean + self.std * sample
-        return x
-
-    def mode(self) -> torch.Tensor:
-        return self.mean
-    
-    # these methods are not needed in inference
-    def kl(self, other: "DiagonalGaussianDistribution" = None) -> torch.Tensor:
-        if self.deterministic:
-            return torch.Tensor([0.0])
-        else:
-            if other is None:
-                return 0.5 * torch.sum(
-                    torch.pow(self.mean, 2) + self.var - 1.0 - self.logvar,
-                    dim=[1, 2, 3],
-                )
-            else:
-                return 0.5 * torch.sum(
-                    torch.pow(self.mean - other.mean, 2) / other.var
-                    + self.var / other.var
-                    - 1.0
-                    - self.logvar
-                    + other.logvar,
-                    dim=[1, 2, 3],
-                )
-
-    def nll(self, sample: torch.Tensor, dims: Tuple[int, ...] = [1, 2, 3]) -> torch.Tensor:
-        if self.deterministic:
-            return torch.Tensor([0.0])
-        logtwopi = np.log(2.0 * np.pi)
-        return 0.5 * torch.sum(
-            logtwopi + self.logvar + torch.pow(sample - self.mean, 2) / self.var,
-            dim=dims,
-        )
