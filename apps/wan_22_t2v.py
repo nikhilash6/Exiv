@@ -1,5 +1,5 @@
 import os
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
 import torch
 
@@ -74,9 +74,9 @@ def preprocess_wan_conditionals(pos_embed_dict, neg_embed_dict, clip_embed_dict,
 
     mask = torch.ones([latent.shape[0], 1, ((frame_count - 1) // 4) + 1, latent.shape[-2], latent.shape[-1]], device=input_img.device)
     if input_img is not None:
-        input_img = common_upscale(input_img[:frame_count], height, width, "bilinear", "center").movedim(1, -1)
-        # B, W, H, C -> B, C, H, W -> B, C, 1, H, W
-        input_img = input_img.permute(0, 3, 2, 1).unsqueeze(2)
+        input_img = common_upscale(input_img[:frame_count], width, height, "bilinear", "center").movedim(1, -1)
+        # B, H, W, C -> B, C, H, W -> B, C, 1, H, W
+        input_img = input_img.permute(0, 3, 1, 2).unsqueeze(2)
         input_img = input_img.to(torch.float16)
         latent_temp = wan_vae.encode(input_img)                 # requires  (B, C, T, H, W)
         latent[:, :, :latent_temp.shape[2]] = latent_temp
@@ -111,7 +111,7 @@ def main(**params):
     height, width, output_frame_count = 768, 1024, 81
     
     # resizing img
-    input_img = common_upscale(input_img.unsqueeze(0), height, width)   # (B, C, H, W)
+    input_img = common_upscale(input_img.unsqueeze(0), width, height)   # (B, C, H, W)
     
     progress_callback(0.2, "Encoding prompts")
     # generate text embeddings
@@ -172,8 +172,8 @@ def main(**params):
     
     from torch_tracer import TorchTracer
     
-    with TorchTracer("./exiv_2.pkl"):
-        out = main_sampler.run_sampling(callback=lambda i, s: progress_callback(0.35 + round(i * 0.6, 2), s))
+    # with TorchTracer("./exiv_2.pkl"):
+    out = main_sampler.run_sampling(callback=lambda i, s: progress_callback(0.35 + round(i * 0.6, 2), s))
     wan_dit_model.to("cpu")
     del wan_dit_model, model_wrapper
     MemoryManager.clear_memory()

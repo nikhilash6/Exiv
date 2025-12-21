@@ -36,13 +36,42 @@ def preprocess_cond_per_step(conds, x_in):
     return cond_obj(x_in, mult, conditioning, control)
 
 
-def prepare_mask(noise_mask, shape, device):
-    """ensures noise mask is of proper dimensions"""
-    noise_mask = torch.nn.functional.interpolate(noise_mask.reshape((-1, 1, noise_mask.shape[-2], noise_mask.shape[-1])), size=(shape[2], shape[3]), mode="bilinear")
-    noise_mask = torch.cat([noise_mask] * shape[1], dim=1)
-    noise_mask = repeat_to_batch_size(noise_mask, shape[0])
-    noise_mask = noise_mask.to(device)
-    return noise_mask
+def prepare_mask(mask, shape, device):
+    """
+    Ensures the mask is of the proper dimensions.
+    - Matches the number of dimensions of the target shape.
+    - Interpolates the spatial dimensions (last two).
+    - Adjusts the batch and channel dimensions to match the target shape.
+    """
+    mask = mask.to(device)
+    
+    # Ensure mask has the same number of dimensions as shape
+    while mask.ndim < len(shape):
+        mask = mask.unsqueeze(0)
+    
+    # Spatial interpolation on the last two dimensions
+    if mask.shape[-2:] != shape[-2:]:
+        # Collapse all leading dimensions for interpolate compatibility (needs 4D or 5D)
+        # However, interpolate supports 4D (bilinear) and 5D (trilinear).
+        # We want bilinear on the last two dims regardless of T if present.
+        # So we collapse leading dims to (N, C, H, W) anyway.
+        leading_dims = list(mask.shape[:-2])
+        mask = mask.reshape(-1, 1, mask.shape[-2], mask.shape[-1])
+        mask = torch.nn.functional.interpolate(mask, size=shape[-2:], mode="bilinear")
+        mask = mask.reshape(leading_dims + list(shape[-2:]))
+
+    # Adjust channel dimension (shape[1])
+    if mask.shape[1] != shape[1]:
+        if mask.shape[1] == 1:
+            # Expand works for both 4D [B, C, H, W] and 5D [B, C, T, H, W]
+            mask = mask.expand(mask.shape[0], shape[1], *mask.shape[2:])
+        else:
+            mask = repeat_to_batch_size(mask, shape[1], dim=1)
+
+    # Adjust batch dimension (shape[0])
+    mask = repeat_to_batch_size(mask, shape[0])
+    
+    return mask
 
 
 def prepare_model_conds(wrapped_model: ModelWrapper, grouped_conds: dict, noise: Tensor, latent_image: Tensor, denoise_mask: Tensor, seed: Any):
