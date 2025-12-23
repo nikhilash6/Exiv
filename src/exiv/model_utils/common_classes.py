@@ -39,3 +39,7 @@ class ModelWrapper:
         
         self.disable_cfg: bool = disable_cfg
         self.cfg_func: Callable = cfg_func
+    
+    # TODO: very bad practice, this should be in the modelmixin
+    def scale_latent_inpaint(self, sigma, noise, latent_image, **kwargs):
+        return self.model_sampling.noise_scaling(sigma.reshape([sigma.shape[0]] + [1] * (len(noise.shape) - 1)), noise, latent_image)

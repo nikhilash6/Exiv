@@ -141,7 +141,6 @@ def print_zombie(model_type_name):
         )
         print("--- LEAK GRAPH SAVED to 'zombie_model_leak.png'. Open this file to see the leak. ---")
 
-
 def print_tensor_size(t: Tensor):
     num_elements = t.numel()
     element_size = t.element_size()  # Size in bytes (e.g., float32 is 4)
@@ -151,7 +150,6 @@ def print_tensor_size(t: Tensor):
 
     print(f"Tensor VRAM: {total_mb:.2f} MB")
     print(f"Tensor VRAM: {total_bytes:.2f} B")
-    
 
 def print_model_params(model: torch.nn.Module, break_dtype=None):
     # break_dtype - loop breaks if this dtype is encountered
@@ -163,8 +161,117 @@ def print_model_params(model: torch.nn.Module, break_dtype=None):
         if param.dtype == break_dtype:
             break
 
+import numpy as np
+from PIL import Image, ImageDraw
+import math
+def visualize_latents_pca(tensor):
+    if tensor.ndim == 3: tensor = tensor.unsqueeze(0)
+    elif tensor.ndim == 4: pass 
+    elif tensor.ndim == 5: 
+        b, c, t, h, w = tensor.shape
+        tensor = tensor.permute(0, 2, 1, 3, 4).reshape(-1, c, h, w)
+    else: raise ValueError(f"Unsupported shape: {tensor.shape}")
+
+    n, c, h, w = tensor.shape
+    tensor = tensor.float().cpu() 
+    
+    flat_tensor = tensor.permute(0, 2, 3, 1).reshape(-1, c)
+    num_samples = min(flat_tensor.size(0), 5000)
+    indices = torch.randperm(flat_tensor.size(0))[:num_samples]
+    sampled_data = flat_tensor[indices]
+    
+    mean = sampled_data.mean(dim=0)
+    centered = sampled_data - mean
+    try:
+        U, S, V = torch.svd(centered)
+        components = V[:, :3] 
+        rgb_flat = (flat_tensor - mean) @ components
+        rgb_tensor = rgb_flat.reshape(n, h, w, 3).permute(0, 3, 1, 2)
+    except Exception as e:
+        print(f"PCA failed: {e}. Falling back to first 3 channels.")
+        padding = torch.zeros(n, max(0, 3-c), h, w)
+        rgb_tensor = torch.cat([tensor[:, :3, :, :], padding], dim=1)[:, :3, :, :]
+
+    rgb_images = []
+    for i in range(n):
+        img = rgb_tensor[i]
+        flat_img = img.flatten()
+        low = torch.quantile(flat_img, 0.01)
+        high = torch.quantile(flat_img, 0.99)
+        if (high - low) > 1e-5:
+            img = (img - low) / (high - low)
+        img = img.clamp(0, 1)
+        img_np = (img.permute(1, 2, 0).numpy() * 255).astype(np.uint8)
+        rgb_images.append(Image.fromarray(img_np))
+
+    return rgb_images
+
+# --- 2. Updated Grid Helper Function with Styled Borders ---
+def create_styled_image_grid(images, black_gap=3, white_border=1):
+    """
+    Arranges images into a grid separated by black lines with a white center frame.
+    
+    Args:
+        images: List of PIL images.
+        black_gap: Thickness of black padding around the white frame.
+        white_border: Thickness of white frame immediately surrounding the image.
+    """
+    num_frames = len(images)
+    if num_frames == 0: return None
+
+    n = math.ceil(math.sqrt(num_frames))
+    w_frame, h_frame = images[0].size
+
+    # Calculate offsets
+    total_pad = black_gap + white_border
+    # The full size of one "cell" in the grid including its borders
+    stride_w = w_frame + (total_pad * 2)
+    stride_h = h_frame + (total_pad * 2)
+
+    # 1. Create Base Canvas: Solid Black
+    canvas_w = n * stride_w
+    canvas_h = n * stride_h
+    grid_img = Image.new('RGB', (canvas_w, canvas_h), color=(0, 0, 0))
+    draw = ImageDraw.Draw(grid_img)
+
+    for i, img in enumerate(images):
+        row = i // n
+        col = i % n
+
+        # Top-left coordinate for this grid cell
+        cell_x = col * stride_w
+        cell_y = row * stride_h
+
+        # 2. Draw White Rectangle (Layer 2)
+        # It starts after the black gap and ends before the next black gap
+        white_rect_coords = (
+            cell_x + black_gap,
+            cell_y + black_gap,
+            cell_x + stride_w - black_gap - 1, # -1 required for PIL rectangle math
+            cell_y + stride_h - black_gap - 1
+        )
+        draw.rectangle(white_rect_coords, fill=(255, 255, 255))
+
+        # 3. Paste Image (Layer 3)
+        # Centered inside the white rectangle
+        img_x = cell_x + total_pad
+        img_y = cell_y + total_pad
+        grid_img.paste(img, (img_x, img_y))
+
+    return grid_img
+
 import hashlib
-def get_tensor_hash(t):
+def get_tensor_hash(t, visualize_latent=False):
     data = t.detach().cpu().contiguous().numpy()
     hash = hashlib.sha256(data.tobytes()).hexdigest()[:8] # First 8 chars are usually enough
     print(f"[Probe] | Shape: {tuple(t.shape)} | Mean: {t.mean():.4f} | Std: {t.std():.4f} | Min: {t.min():.4f} | Max: {t.max():.4f} | Hash: {hash}")
+    
+    if visualize_latent:
+        try:
+            frames_list = visualize_latents_pca(t)
+            grid_image = create_styled_image_grid(frames_list, black_gap=3, white_border=1)
+            output_filename = "preview_grid_styled.png"
+            grid_image.save(output_filename)
+            print(f"Saved styled grid to {output_filename}")
+        except Exception as e:
+            print(f"unable to visualize {str(e)}")

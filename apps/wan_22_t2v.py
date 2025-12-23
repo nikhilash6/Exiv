@@ -74,11 +74,15 @@ def preprocess_wan_conditionals(pos_embed_dict, neg_embed_dict, clip_embed_dict,
 
     mask = torch.ones([latent.shape[0], 1, ((frame_count - 1) // 4) + 1, latent.shape[-2], latent.shape[-1]], device=input_img.device)
     if input_img is not None:
-        input_img = common_upscale(input_img[:frame_count], width, height, "bilinear", "center").movedim(1, -1)
-        # B, H, W, C -> B, C, H, W -> B, C, 1, H, W
-        input_img = input_img.permute(0, 3, 1, 2).unsqueeze(2)
+        # B, C, H, W -> B, C, 1, H, W
+        input_img = input_img.unsqueeze(2)
+        # input_img = input_img.to(torch.float16)
+        # input_img = torch.load("si.pt")
+        # if input_img.shape[-1] == 3:
+        #     input_img = input_img.movedim(-1, 1).unsqueeze(2)
         input_img = input_img.to(torch.float16)
         latent_temp = wan_vae.encode(input_img)                 # requires  (B, C, T, H, W)
+        latent_temp = latent_temp.to(torch.float16)
         latent[:, :, :latent_temp.shape[2]] = latent_temp
         mask[:, :, :latent_temp.shape[2]] *= 0.0                # setting mask to zero for the first concatenated latent
 
@@ -208,8 +212,8 @@ app = App(
         'seed': Input(
             label="Seed",
             type="number",
-            # default=-1,
-            default=256347,
+            default=-1,
+            # default=256347,
         ),
         'steps': Input(
             label="Steps",

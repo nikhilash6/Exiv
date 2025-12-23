@@ -667,7 +667,7 @@ class Wan22VAE(VAEBase):
         attn_scales=[],
         temperal_downsample=[False, True, True],
         dropout=0.0,
-        use_tiling: bool = True,
+        use_tiling: bool = True,                        # TOOD: enable this option !!!!!
         max_batch_size: Union[int, None] = 4,
     ):
         super().__init__()
@@ -720,6 +720,7 @@ class Wan22VAE(VAEBase):
     
     def _encode_tile(self, x, feat_cache=None, feat_idx=None):
         # NOTE: point of difference from WAN VAE2.1, this patchifies the inputs
+        x = x * 2 - 1
         x = patchify(x, patch_size=2)
         out = self.encoder(x, feat_cache=feat_cache, feat_idx=feat_idx)
         mu, log_var = self.conv1(out).chunk(2, dim=1)
