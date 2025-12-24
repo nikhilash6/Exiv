@@ -18,6 +18,7 @@ from exiv.utils.file_path import FilePathData, FilePaths
 from exiv.utils.tensor import common_upscale
 from exiv.utils.logging import app_logger
 
+
 # TODO: move to the tensors file
 def conditioning_set_values(conditioning_list, new_values_dict = {}):
     is_list = lambda x : isinstance(x, list)

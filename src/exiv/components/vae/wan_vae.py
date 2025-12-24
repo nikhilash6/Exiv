@@ -511,6 +511,7 @@ class Decoder3d(nn.Module):
             x = self.conv_out(x)
         return x
 
+# TODO: use_tiling = False is NOT implemented yet
 class Wan21VAE(VAEBase):
     def __init__(
         self,
@@ -522,8 +523,9 @@ class Wan21VAE(VAEBase):
         temporal_downsample: List[bool] = [False, True, True],
         use_tiling: bool = True,
         max_batch_size: Union[int, None] = 4,
+        **kwargs
     ):
-        super().__init__()
+        super().__init__(**kwargs)
         
         self.z_dim = z_dim
         self.temporal_downsample = temporal_downsample
@@ -576,6 +578,7 @@ class Wan21VAE(VAEBase):
         self._enc_feat_map = [None] * self._enc_conv_num
         
     def _encode_tile(self, tile, feat_cache, feat_idx):
+        tile = self.normalize_encoder_inputs(tile)
         res_tile = self.encoder(tile, feat_cache, feat_idx)
         res_tile = self.quant_conv(res_tile)
         return res_tile

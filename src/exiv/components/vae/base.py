@@ -1,4 +1,5 @@
 import torch
+from torch import Tensor
 
 from .helper_methods import VAEImageProcessor
 from ..enum import VAEType
@@ -15,6 +16,9 @@ class VAEBase(ModelMixin):
         app_logger.info("VAE loading mode changed to normal")
         self.force_load_mode = LOADING_MODE.NORMAL_LOAD.value
         super().__init__(*args, **kwargs)
+        
+    def normalize_encoder_inputs(self, x: Tensor):
+        return x * 2.0 - 1.0
         
     # ------- these methods must be overriden in the child ---------
     def get_tiling_config(self, input_shape, tile_x=256, tile_y=256, tile_z=4, overlap_x=64, overlap_y=64):

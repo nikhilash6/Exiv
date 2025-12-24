@@ -1,5 +1,5 @@
 # ad-hoc methods used during development
-# TODO: delete these before making the final release
+# NOTE: these are strictly for dev use only
 
 import torch
 from torch import Tensor
@@ -262,7 +262,9 @@ def create_styled_image_grid(images, black_gap=3, white_border=1):
 
 import hashlib
 def get_tensor_hash(t, visualize_latent=False):
-    data = t.detach().cpu().contiguous().numpy()
+    # Fix: cast to float() immediately to avoid bf16 numpy errors
+    t = t.detach().float().cpu()
+    data = t.contiguous().numpy()
     hash = hashlib.sha256(data.tobytes()).hexdigest()[:8] # First 8 chars are usually enough
     print(f"[Probe] | Shape: {tuple(t.shape)} | Mean: {t.mean():.4f} | Std: {t.std():.4f} | Min: {t.min():.4f} | Max: {t.max():.4f} | Hash: {hash}")
     

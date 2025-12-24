@@ -63,39 +63,46 @@ class Resample(nn.Module):
                 idx = feat_idx[0]
                 if feat_cache[idx] is None:
                     feat_cache[idx] = "Rep"
-                    feat_idx[0] += 1
+                
+                # --- code below now runs for both new and existing caches ---
+                # NOTE: this has been added after the commit 38b3b6c9fd12344e62c94f6720043f4994b53550
+                # if there are issues, then revert back to that commit
+                cache_x = x[:, :, -CACHE_T:, :, :].clone()
+                
+                # context from previous chunks
+                if (cache_x.shape[2] < 2 and feat_cache[idx] is not None and
+                        feat_cache[idx] != "Rep"):
+                    cache_x = torch.cat(
+                        [
+                            feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(
+                                cache_x.device),
+                            cache_x,
+                        ],
+                        dim=2,
+                    )
+                
+                # padding for the very first chunk
+                if (cache_x.shape[2] < 2 and feat_cache[idx] is not None and
+                        feat_cache[idx] == "Rep"):
+                    cache_x = torch.cat(
+                        [
+                            torch.zeros_like(cache_x).to(cache_x.device),
+                            cache_x
+                        ],
+                        dim=2,
+                    )
+                
+                if feat_cache[idx] == "Rep":
+                    x = self.time_conv(x)
                 else:
-                    cache_x = x[:, :, -CACHE_T:, :, :].clone()
-                    if (cache_x.shape[2] < 2 and feat_cache[idx] is not None and
-                            feat_cache[idx] != "Rep"):
-                        # cache last frame of last two chunk
-                        cache_x = torch.cat(
-                            [
-                                feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(
-                                    cache_x.device),
-                                cache_x,
-                            ],
-                            dim=2,
-                        )
-                    if (cache_x.shape[2] < 2 and feat_cache[idx] is not None and
-                            feat_cache[idx] == "Rep"):
-                        cache_x = torch.cat(
-                            [
-                                torch.zeros_like(cache_x).to(cache_x.device),
-                                cache_x
-                            ],
-                            dim=2,
-                        )
-                    if feat_cache[idx] == "Rep":
-                        x = self.time_conv(x)
-                    else:
-                        x = self.time_conv(x, feat_cache[idx])
-                    feat_cache[idx] = cache_x
-                    feat_idx[0] += 1
-                    x = x.reshape(b, 2, c, t, h, w)
-                    x = torch.stack((x[:, 0, :, :, :, :], x[:, 1, :, :, :, :]),
-                                    3)
-                    x = x.reshape(b, c, t * 2, h, w)
+                    x = self.time_conv(x, feat_cache[idx])
+                
+                feat_cache[idx] = cache_x
+                feat_idx[0] += 1
+                x = x.reshape(b, 2, c, t, h, w)
+                x = torch.stack((x[:, 0, :, :, :, :], x[:, 1, :, :, :, :]), 3)
+                x = x.reshape(b, c, t * 2, h, w)
+        
         t = x.shape[2]
         x = rearrange(x, "b c t h w -> (b t) c h w")
         x = self.resample(x)
@@ -350,7 +357,6 @@ class Down_ResidualBlock(nn.Module):
                  down_flag=False):
         super().__init__()
 
-        # Shortcut path with downsample
         self.avg_shortcut = AvgDown3D(
             in_dim,
             out_dim,
@@ -358,13 +364,11 @@ class Down_ResidualBlock(nn.Module):
             factor_s=2 if down_flag else 1,
         )
 
-        # Main path with residual blocks and downsample
         downsamples = []
         for _ in range(mult):
             downsamples.append(ResidualBlock(in_dim, out_dim, dropout))
             in_dim = out_dim
 
-        # Add the final downsample block
         if down_flag:
             mode = "downsample3d" if temperal_downsample else "downsample2d"
             downsamples.append(Resample(out_dim, mode=mode))
@@ -389,7 +393,6 @@ class Up_ResidualBlock(nn.Module):
                  temperal_upsample=False,
                  up_flag=False):
         super().__init__()
-        # Shortcut path with upsample
         if up_flag:
             self.avg_shortcut = DupUp3D(
                 in_dim,
@@ -400,13 +403,11 @@ class Up_ResidualBlock(nn.Module):
         else:
             self.avg_shortcut = None
 
-        # Main path with residual blocks and upsample
         upsamples = []
         for _ in range(mult):
             upsamples.append(ResidualBlock(in_dim, out_dim, dropout))
             in_dim = out_dim
 
-        # Add the final upsample block
         if up_flag:
             mode = "upsample3d" if temperal_upsample else "upsample2d"
             upsamples.append(Resample(out_dim, mode=mode))
@@ -419,6 +420,9 @@ class Up_ResidualBlock(nn.Module):
             x_main = module(x_main, feat_cache, feat_idx)
         if self.avg_shortcut is not None:
             x_shortcut = self.avg_shortcut(x, first_chunk)
+            if x_main.shape[2] != x_shortcut.shape[2]:
+                # slice x_main to match x_shortcut (removes the extra padding frame from the front)
+                x_main = x_main[:, :, -x_shortcut.shape[2]:, :, :]
             return x_main + x_shortcut
         else:
             return x_main
@@ -656,6 +660,7 @@ def count_conv3d(model):
     return count
 
 
+# TODO: use_tiling = False is NOT properly tested and may break
 class Wan22VAE(VAEBase):
     def __init__(
         self,
@@ -669,8 +674,9 @@ class Wan22VAE(VAEBase):
         dropout=0.0,
         use_tiling: bool = True,                        # TOOD: enable this option !!!!!
         max_batch_size: Union[int, None] = 4,
+        **kwargs
     ):
-        super().__init__()
+        super().__init__(**kwargs)
         self.dim = dim
         self.z_dim = z_dim
         self.dim_mult = dim_mult
@@ -720,7 +726,7 @@ class Wan22VAE(VAEBase):
     
     def _encode_tile(self, x, feat_cache=None, feat_idx=None):
         # NOTE: point of difference from WAN VAE2.1, this patchifies the inputs
-        x = x * 2 - 1
+        x = self.normalize_encoder_inputs(x)
         x = patchify(x, patch_size=2)
         out = self.encoder(x, feat_cache=feat_cache, feat_idx=feat_idx)
         mu, log_var = self.conv1(out).chunk(2, dim=1)
@@ -742,17 +748,23 @@ class Wan22VAE(VAEBase):
 
     def _encode(self, x):
         B, C, T, H, W = x.shape
-        tile_width, tile_height, tile_temporal, overlap_width, overlap_height = self.get_tiling_config(input_shape=(W, H, T))
-        
-        encode_fn = partial(
-            self.tiled_encode_3d,
-            tile_width=tile_width,
-            tile_height=tile_height,
-            tile_temporal=tile_temporal,
-            overlap_width=overlap_width,
-            overlap_height=overlap_height,
-            encode_fn=self._encode_tile
-        )
+        if self.use_tiling:
+            tile_width, tile_height, tile_temporal, overlap_width, overlap_height = self.get_tiling_config(input_shape=(W, H, T))
+            
+            encode_fn = partial(
+                self.tiled_encode_3d,
+                tile_width=tile_width,
+                tile_height=tile_height,
+                tile_temporal=tile_temporal,
+                overlap_width=overlap_width,
+                overlap_height=overlap_height,
+                encode_fn=self._encode_tile
+            )
+        else:
+            def encode_fn(x):
+                self.reset_causal_cache()
+                self._enc_conv_idx = [0]
+                return self._encode_tile(x, feat_cache=self._enc_feat_map, feat_idx=self._enc_conv_idx)
 
         if self.use_slicing and B > self.slice_batch_size:
             mu_slices = [encode_fn(x_slice) for x_slice in x.split(self.slice_batch_size)]
@@ -766,16 +778,22 @@ class Wan22VAE(VAEBase):
     def _decode(self, z, input_shape: tuple):
         B, C, T, H, W = z.shape
         
-        tile_width, tile_height, tile_temporal, overlap_width, overlap_height = self.get_tiling_config(input_shape=input_shape)
-        decode_fn = partial(
-            self.tiled_decode_3d,
-            tile_width=tile_width,
-            tile_height=tile_height,
-            tile_temporal=tile_temporal,
-            overlap_width=overlap_width,
-            overlap_height=overlap_height,
-            decode_fn=self._decode_tile
-        )
+        if self.use_tiling:
+            tile_width, tile_height, tile_temporal, overlap_width, overlap_height = self.get_tiling_config(input_shape=input_shape)
+            decode_fn = partial(
+                self.tiled_decode_3d,
+                tile_width=tile_width,
+                tile_height=tile_height,
+                tile_temporal=tile_temporal,
+                overlap_width=overlap_width,
+                overlap_height=overlap_height,
+                decode_fn=self._decode_tile
+            )
+        else:
+            def decode_fn(z):
+                self.reset_causal_cache()
+                self._conv_idx = [0]
+                return self._decode_tile(z, feat_cache=self._feat_map, feat_idx=self._conv_idx)
 
         if self.use_slicing and B > 1:
             decoded_slices = [decode_fn(z_slice) for z_slice in z.split(1)]

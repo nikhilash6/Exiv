@@ -23,6 +23,8 @@ from exiv.utils.file_path import FilePathData, FilePaths
 from exiv.utils.tensor import common_upscale
 from exiv.utils.logging import app_logger
 
+
+
 # TODO: move to the tensors file
 def conditioning_set_values(conditioning_list, new_values_dict = {}):
     is_list = lambda x : isinstance(x, list)
@@ -81,6 +83,7 @@ def preprocess_wan_conditionals(pos_embed_dict, neg_embed_dict, clip_embed_dict,
         # if input_img.shape[-1] == 3:
         #     input_img = input_img.movedim(-1, 1).unsqueeze(2)
         input_img = input_img.to(torch.float16)
+        input_img = input_img.to(VRAM_DEVICE)
         latent_temp = wan_vae.encode(input_img)                 # requires  (B, C, T, H, W)
         latent_temp = latent_temp.to(torch.float16)
         latent[:, :, :latent_temp.shape[2]] = latent_temp
@@ -185,7 +188,8 @@ def main(**params):
     progress_callback(0.95, "Decoding output latents")
     cur_model = "wan_2_2_vae.safetensors"
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vae")
-    wan_vae = Wan22VAE()
+    out = out.to(torch.float16)
+    wan_vae = Wan22VAE(dtype=torch.float16)
     wan_vae.load_model(model_path=model_path_data.path)
     move_model(wan_vae, VRAM_DEVICE)
     out = wan_vae.decode(out, (height, width, output_frame_count))
