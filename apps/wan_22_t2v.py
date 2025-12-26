@@ -65,14 +65,14 @@ def preprocess_wan_conditionals(pos_embed_dict, neg_embed_dict, clip_embed_dict,
     # empty tensor
     blank_latent = Latent()
     compression_factor = wan_vae.spatial_compression_ratio
-    latent = torch.zeros([1, 48, ((frame_count - 1) // 4) + 1, height // compression_factor, width // compression_factor], device=input_img.device)     # B, C, T, H, W
+    latent = torch.zeros([1, 48, ((frame_count - 1) // 4) + 1, height // compression_factor, width // compression_factor], device=VRAM_DEVICE)     # B, C, T, H, W
 
     # NOTE: this is a divergence from the original repo to aim for 100% perfect first frame
     # insteads of passing the image as a hint, we pass it directly attached to the latent with mask 
     # that tells not to touch the attached image part
     if input_img is None:
         blank_latent.samples = latent
-        return blank_latent
+        return pos_embed, neg_embed, blank_latent
 
     mask = torch.ones([latent.shape[0], 1, ((frame_count - 1) // 4) + 1, latent.shape[-2], latent.shape[-1]], device=input_img.device)
     if input_img is not None:
@@ -115,7 +115,7 @@ def main(**params):
     
     progress_callback(0.1, "Loading Images")
     input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/test.jpg")[0]
-    height, width, output_frame_count = 768, 1024, 81
+    height, width, output_frame_count = 720, 1280, 81
     
     # resizing img
     input_img = common_upscale(input_img.unsqueeze(0), width, height)   # (B, C, H, W)
@@ -147,7 +147,7 @@ def main(**params):
                                             pos_embed_dict, 
                                             neg_embed_dict, 
                                             clip_embed_dict,
-                                            input_img, 
+                                            None, 
                                             height, 
                                             width, 
                                             output_frame_count, 
@@ -177,7 +177,7 @@ def main(**params):
         latent_image=blank_latent
     )
     
-    from torch_tracer import TorchTracer
+    # from torch_tracer import TorchTracer
     
     # with TorchTracer("./exiv_2.pkl"):
     out = main_sampler.run_sampling(callback=lambda i, s: progress_callback(0.35 + round(i * 0.6, 2), s))

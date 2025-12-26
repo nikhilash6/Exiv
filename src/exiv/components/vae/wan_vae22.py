@@ -63,45 +63,38 @@ class Resample(nn.Module):
                 idx = feat_idx[0]
                 if feat_cache[idx] is None:
                     feat_cache[idx] = "Rep"
-                
-                # --- code below now runs for both new and existing caches ---
-                # NOTE: this has been added after the commit 38b3b6c9fd12344e62c94f6720043f4994b53550
-                # if there are issues, then revert back to that commit
-                cache_x = x[:, :, -CACHE_T:, :, :].clone()
-                
-                # context from previous chunks
-                if (cache_x.shape[2] < 2 and feat_cache[idx] is not None and
-                        feat_cache[idx] != "Rep"):
-                    cache_x = torch.cat(
-                        [
-                            feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(
-                                cache_x.device),
-                            cache_x,
-                        ],
-                        dim=2,
-                    )
-                
-                # padding for the very first chunk
-                if (cache_x.shape[2] < 2 and feat_cache[idx] is not None and
-                        feat_cache[idx] == "Rep"):
-                    cache_x = torch.cat(
-                        [
-                            torch.zeros_like(cache_x).to(cache_x.device),
-                            cache_x
-                        ],
-                        dim=2,
-                    )
-                
-                if feat_cache[idx] == "Rep":
-                    x = self.time_conv(x)
+                    feat_idx[0] += 1
                 else:
-                    x = self.time_conv(x, feat_cache[idx])
-                
-                feat_cache[idx] = cache_x
-                feat_idx[0] += 1
-                x = x.reshape(b, 2, c, t, h, w)
-                x = torch.stack((x[:, 0, :, :, :, :], x[:, 1, :, :, :, :]), 3)
-                x = x.reshape(b, c, t * 2, h, w)
+                    cache_x = x[:, :, -CACHE_T:, :, :].clone()
+                    if (cache_x.shape[2] < 2 and feat_cache[idx] is not None and
+                            feat_cache[idx] != "Rep"):
+                        # cache last frame of last two chunk
+                        cache_x = torch.cat(
+                            [
+                                feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(
+                                    cache_x.device),
+                                cache_x,
+                            ],
+                            dim=2,
+                        )
+                    if (cache_x.shape[2] < 2 and feat_cache[idx] is not None and
+                            feat_cache[idx] == "Rep"):
+                        cache_x = torch.cat(
+                            [
+                                torch.zeros_like(cache_x).to(cache_x.device),
+                                cache_x
+                            ],
+                            dim=2,
+                        )
+                    if feat_cache[idx] == "Rep":
+                        x = self.time_conv(x)
+                    else:
+                        x = self.time_conv(x, feat_cache[idx])
+                    feat_cache[idx] = cache_x
+                    feat_idx[0] += 1
+                    x = x.reshape(b, 2, c, t, h, w)
+                    x = torch.stack((x[:, 0, :, :, :, :], x[:, 1, :, :, :, :]), 3)
+                    x = x.reshape(b, c, t * 2, h, w)
         
         t = x.shape[2]
         x = rearrange(x, "b c t h w -> (b t) c h w")

@@ -22,7 +22,7 @@ def rope(pos: Tensor, dim: int, theta: int) -> Tensor:
     # Create a scale for the frequencies. This corresponds to the 'i' in the RoPE formula's
     # denominator, ensuring each pair of dimensions gets a different frequency.
     # Example: if dim=4, scale will be [0/4, 2/4] = [0.0, 0.5]
-    scale = torch.arange(0, dim, 2, dtype=pos.dtype, device=pos.device) / dim
+    scale = torch.linspace(0, (dim - 2) / dim, steps=dim//2, dtype=torch.float64, device=pos.device)    # FIX: going for higher precision
 
     # Calculate the rotational frequencies (omega) for each pair of dimensions.
     # This creates a geometric progression of frequencies.
@@ -32,7 +32,7 @@ def rope(pos: Tensor, dim: int, theta: int) -> Tensor:
     # Calculate the angle for each position and frequency pair by multiplying them.
     # This is equivalent to 'm * θ_i' from the formula.
     # pos - [b, n] , omega - [d/2], out - [b, n, d/2] (batch, sequence_len, d/2)
-    out = torch.einsum("...n,d->...nd", pos, omega)
+    out = torch.einsum("...n,d->...nd", pos.to(dtype=torch.float32, device=pos.device), omega.to(dtype=torch.float32))      # FIX: higher precision
 
     # Create the 2x2 rotation matrix elements: [cos(angle), -sin(angle), sin(angle), cos(angle)]
     # This prepares the values for the final matrix.

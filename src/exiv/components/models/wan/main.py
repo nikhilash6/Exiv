@@ -639,6 +639,9 @@ class Wan21Model(ModelMixin):
         if steps_w is None:
             steps_w = w_len
 
+        # FIX: doing higher precision calc for now
+        # (this has marginal benefits on multi object scenes)
+        dtype = torch.float32
         img_ids = torch.zeros((steps_t, steps_h, steps_w, 3), device=device, dtype=dtype)
         img_ids[:, :, :, 0] = img_ids[:, :, :, 0] + torch.linspace(t_start, t_start + (t_len - 1), steps=steps_t, device=device, dtype=dtype).reshape(-1, 1, 1)
         img_ids[:, :, :, 1] = img_ids[:, :, :, 1] + torch.linspace(0, h_len - 1, steps=steps_h, device=device, dtype=dtype).reshape(1, -1, 1)
