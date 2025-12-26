@@ -71,8 +71,7 @@ class Resample(nn.Module):
                         # cache last frame of last two chunk
                         cache_x = torch.cat(
                             [
-                                feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(
-                                    cache_x.device),
+                                feat_cache[idx][:, :, -1, :, :].unsqueeze(2),
                                 cache_x,
                             ],
                             dim=2,
@@ -81,7 +80,7 @@ class Resample(nn.Module):
                             feat_cache[idx] == "Rep"):
                         cache_x = torch.cat(
                             [
-                                torch.zeros_like(cache_x).to(cache_x.device),
+                                torch.zeros_like(cache_x),
                                 cache_x
                             ],
                             dim=2,
@@ -147,8 +146,7 @@ class ResidualBlock(nn.Module):
                     # cache last frame of last two chunk
                     cache_x = torch.cat(
                         [
-                            feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(
-                                cache_x.device),
+                            feat_cache[idx][:, :, -1, :, :].unsqueeze(2),
                             cache_x,
                         ],
                         dim=2,
@@ -487,8 +485,7 @@ class Encoder3d(nn.Module):
             if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
                 cache_x = torch.cat(
                     [
-                        feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(
-                            cache_x.device),
+                        feat_cache[idx][:, :, -1, :, :].unsqueeze(2),
                         cache_x,
                     ],
                     dim=2,
@@ -521,8 +518,7 @@ class Encoder3d(nn.Module):
                 if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
                     cache_x = torch.cat(
                         [
-                            feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(
-                                cache_x.device),
+                            feat_cache[idx][:, :, -1, :, :].unsqueeze(2),
                             cache_x,
                         ],
                         dim=2,
@@ -599,8 +595,7 @@ class Decoder3d(nn.Module):
             if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
                 cache_x = torch.cat(
                     [
-                        feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(
-                            cache_x.device),
+                        feat_cache[idx][:, :, -1, :, :].unsqueeze(2),
                         cache_x,
                     ],
                     dim=2,
@@ -632,8 +627,7 @@ class Decoder3d(nn.Module):
                 if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
                     cache_x = torch.cat(
                         [
-                            feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(
-                                cache_x.device),
+                            feat_cache[idx][:, :, -1, :, :].unsqueeze(2),
                             cache_x,
                         ],
                         dim=2,
