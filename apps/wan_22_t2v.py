@@ -24,6 +24,8 @@ from exiv.utils.tensor import common_upscale
 from exiv.utils.logging import app_logger
 
 
+use_vae_tiling = False
+vae_dtype = torch.bfloat16
 
 # TODO: move to the tensors file
 def conditioning_set_values(conditioning_list, new_values_dict = {}):
@@ -58,7 +60,7 @@ def preprocess_wan_conditionals(pos_embed_dict, neg_embed_dict, clip_embed_dict,
     cur_model = "wan_2_2_vae.safetensors"
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vae")
     model_path = ensure_model_availability(model_path=model_path_data.path, download_url=model_path_data.url)
-    wan_vae = Wan22VAE(dtype=torch.float16)
+    wan_vae = Wan22VAE(dtype=vae_dtype, use_tiling=use_vae_tiling)
     wan_vae.load_model(model_path=model_path)
     move_model(wan_vae, VRAM_DEVICE)
     
@@ -74,27 +76,23 @@ def preprocess_wan_conditionals(pos_embed_dict, neg_embed_dict, clip_embed_dict,
         blank_latent.samples = latent
         return pos_embed, neg_embed, blank_latent
 
-    mask = torch.ones([latent.shape[0], 1, ((frame_count - 1) // 4) + 1, latent.shape[-2], latent.shape[-1]], device=input_img.device)
+    mask = torch.ones([latent.shape[0], 1, ((frame_count - 1) // 4) + 1, latent.shape[-2], latent.shape[-1]], device=VRAM_DEVICE)
     if input_img is not None:
         # B, C, H, W -> B, C, 1, H, W
         input_img = input_img.unsqueeze(2)
-        # input_img = input_img.to(torch.float16)
-        # input_img = torch.load("si.pt")
-        # if input_img.shape[-1] == 3:
-        #     input_img = input_img.movedim(-1, 1).unsqueeze(2)
-        input_img = input_img.to(torch.float16)
+        input_img = input_img.to(vae_dtype)
         input_img = input_img.to(VRAM_DEVICE)
         latent_temp = wan_vae.encode(input_img)                 # requires  (B, C, T, H, W)
-        latent_temp = latent_temp.to(torch.float16)
+        latent_temp = latent_temp.to(vae_dtype)
         latent[:, :, :latent_temp.shape[2]] = latent_temp
         mask[:, :, :latent_temp.shape[2]] *= 0.0                # setting mask to zero for the first concatenated latent
 
     latent_format = Wan22ModelArchConfig().latent_format
     latent = latent_format.process_out(latent) * mask + latent * (1.0 - mask)
     blank_latent.samples = latent.repeat((batch_size, ) + (1,) * (latent.ndim - 1))
-    blank_latent.samples = blank_latent.samples.to(torch.float16)                           # TODO: auto convert these (should be auto converting ?)
+    blank_latent.samples = blank_latent.samples.to(vae_dtype)                           # TODO: auto convert these (should be auto converting ?)
     blank_latent.noise_mask = mask.repeat((batch_size, ) + (1,) * (mask.ndim - 1))
-    blank_latent.noise_mask = blank_latent.noise_mask.to(torch.float16)
+    blank_latent.noise_mask = blank_latent.noise_mask.to(vae_dtype)
     return pos_embed, neg_embed, blank_latent
 
 def main(**params):
@@ -114,8 +112,8 @@ def main(**params):
     scheduler_name = params.get("scheduler_name")
     
     progress_callback(0.1, "Loading Images")
-    input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/test.jpg")[0]
-    height, width, output_frame_count = 720, 1280, 81
+    input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/dog_realistic.jpg")[0]
+    height, width, output_frame_count = 480, 832, 81
     
     # resizing img
     input_img = common_upscale(input_img.unsqueeze(0), width, height)   # (B, C, H, W)
@@ -147,7 +145,7 @@ def main(**params):
                                             pos_embed_dict, 
                                             neg_embed_dict, 
                                             clip_embed_dict,
-                                            None, 
+                                            input_img, 
                                             height, 
                                             width, 
                                             output_frame_count, 
@@ -188,12 +186,24 @@ def main(**params):
     progress_callback(0.95, "Decoding output latents")
     cur_model = "wan_2_2_vae.safetensors"
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vae")
-    out = out.to(torch.float16)
-    wan_vae = Wan22VAE(dtype=torch.float16)
+    out = out.to(vae_dtype)
+    wan_vae = Wan22VAE(dtype=vae_dtype, use_tiling=use_vae_tiling)
     wan_vae.load_model(model_path=model_path_data.path)
     move_model(wan_vae, VRAM_DEVICE)
     out = wan_vae.decode(out, (height, width, output_frame_count))
-    output_paths = MediaProcessor.save_latents_to_media(out)
+    
+    metadata = {
+        "seed": seed,
+        "positive_prompt": positive_prompt,
+        "negative_prompt": negative_prompt,
+        "resolution": f"{width}x{height}",
+        "frame_count": output_frame_count,
+        "steps": steps,
+        "cfg": cfg,
+        "sampler_name": sampler_name,
+        "scheduler_name": scheduler_name
+    }
+    output_paths = MediaProcessor.save_latents_to_media(out, metadata=metadata)
     
     return {"1": output_paths[0]}
 
@@ -204,7 +214,7 @@ app = App(
         'positive': Input(
             label="Positive Prompt",
             type="str",
-            default="a dog running in the park",
+            default="a dog running in the park then rolling over",
             resizable=True,
         ),
         'negative': Input(
@@ -216,8 +226,8 @@ app = App(
         'seed': Input(
             label="Seed",
             type="number",
-            default=-1,
-            # default=256347,
+            # default=-1,
+            default=256347,
         ),
         'steps': Input(
             label="Steps",

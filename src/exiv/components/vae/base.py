@@ -63,6 +63,7 @@ class VAEBase(ModelMixin):
         overlap_width=64, 
         overlap_height=64,
         encode_fn=None,
+        use_tiling: bool = True,
     ) -> torch.Tensor:
         assert encode_fn is not None, "encode_fn can't be None"
         # (bs, channels, num_frames, height, width)
@@ -71,6 +72,12 @@ class VAEBase(ModelMixin):
         # final latent dims
         latent_height = height // self.spatial_compression_ratio
         latent_width = width // self.spatial_compression_ratio
+        
+        if not use_tiling:
+            tile_width = width
+            tile_height = height
+            overlap_width = 0
+            overlap_height = 0
         
         # latent tile and blend calc.
         og_stride_height = tile_height - overlap_height
@@ -147,6 +154,7 @@ class VAEBase(ModelMixin):
         overlap_width=64, 
         overlap_height=64,
         decode_fn=None,
+        use_tiling: bool = True,
     ) -> torch.Tensor:
         assert decode_fn is not None, "encode_fn can't be None"
         # (bs, channels, num_frames, height, width)
@@ -155,6 +163,12 @@ class VAEBase(ModelMixin):
         # final sample dims
         sample_height = height * self.spatial_compression_ratio
         sample_width = width * self.spatial_compression_ratio
+
+        if not use_tiling:
+            tile_width = sample_width
+            tile_height = sample_height
+            overlap_width = 0
+            overlap_height = 0
 
         # doing the exact same calc. as the encoder
         # latent tile and blend calc.
