@@ -8,6 +8,7 @@ import re
 import glob
 import urllib.parse
 import requests
+import json
 from typing import List, Dict
 from tqdm import tqdm
 
@@ -145,18 +146,38 @@ class MediaProcessor:
             
             try:
                 if metadata:
-                    temp_path = save_path + ".temp.mp4"
-                    cmd = ["ffmpeg", "-y", "-i", save_path, "-c", "copy"]
-                    for k, v in metadata.items():
-                        cmd.extend(["-metadata", f"{k}={v}"])
-                    cmd.append(temp_path)
-                    
-                    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    os.replace(temp_path, save_path)
+                    MediaProcessor.save_metadata(save_path, metadata)
             except Exception as e:
                 from ..utils.logging import app_logger
-                app_logger.warning(f"Unable to write metadata in {save_path}")
+                app_logger.warning(f"Unable to write metadata in {save_path}: {e}")
             
             output_paths.append(save_path)
             
         return output_paths
+
+    @staticmethod
+    def save_metadata(file_path: str, metadata: Dict):
+        temp_path = file_path + ".temp.mp4"
+        cmd = ["ffmpeg", "-y", "-i", file_path, "-c", "copy"]
+        for k, v in metadata.items():
+            cmd.extend(["-metadata", f"{k}={v}"])
+        cmd.append(temp_path)
+        
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        os.replace(temp_path, file_path)
+
+    @staticmethod
+    def get_metadata(file_path: str) -> Dict:
+        """
+        Returns the metadata dictionary from the file using ffprobe.
+        """
+        try:
+            # -v quiet: suppress logs
+            # -print_format json: output JSON
+            # -show_format: show container format info (includes metadata)
+            cmd = ["ffprobe", "-v", "quiet", "-show_format", "-print_format", "json", file_path]
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            data = json.loads(result.stdout)
+            return data.get("format", {}).get("tags", {})
+        except (subprocess.CalledProcessError, json.JSONDecodeError):
+            return {}
