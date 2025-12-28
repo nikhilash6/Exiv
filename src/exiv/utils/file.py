@@ -126,8 +126,9 @@ class MediaProcessor:
         # rn it is only for video
         video_tensor = out.sample if hasattr(out, "sample") else out
 
-        # rescale from [-1, 1] to [0, 255] and cast to uint8
-        video_tensor = ((video_tensor.clamp(-1.0, 1.0) + 1.0) * 127.5).to(torch.uint8)
+        # IMPORTANT: VAE outputs should always be in [0, 1]
+        # rescale to [0, 255] and cast to uint8
+        video_tensor = (video_tensor.clamp(0, 1) * 255).to(torch.uint8)
 
         output_paths = []
         # current shape: (Batch, Channels, Time, Height, Width) -> e.g., (1, 3, 121, 512, 768)

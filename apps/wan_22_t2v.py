@@ -214,7 +214,7 @@ app = App(
         'positive': Input(
             label="Positive Prompt",
             type="str",
-            default="a dog running in the park then rolling over",
+            default="a dog running in the park",
             resizable=True,
         ),
         'negative': Input(

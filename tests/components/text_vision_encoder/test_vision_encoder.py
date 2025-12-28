@@ -33,7 +33,7 @@ class VisionEncoderTest(unittest.TestCase):
         print("-- device: ", expected_device)
         with check_memory_usage(expected_mem=expected_mem, device=expected_device):
             height, width = 512, 512
-            input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/test.jpg")
+            input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/boy_anime.jpg")
             input_img = common_upscale(input_img, height, width)
 
             cur_model = "CLIP-ViT-H-fp16.safetensors"

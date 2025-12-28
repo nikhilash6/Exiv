@@ -3,6 +3,7 @@ from functools import partial
 from typing import Union
 
 import torch
+from torch import Tensor
 import torch.cuda.amp as amp
 import torch.nn as nn
 import torch.nn.functional as F
@@ -709,6 +710,12 @@ class Wan22VAE(VAEBase):
         mu = self.encode(x, scale)
         x_recon = self.decode(mu, scale)
         return x_recon, mu
+
+    def normalize_encoder_inputs(self, x: Tensor):
+        return x * 2.0 - 1.0
+        
+    def denormalize_decoder_outputs(self, x: Tensor):
+        return (x + 1.0) / 2.0
     
     def _encode_tile(self, x, feat_cache=None, feat_idx=None):
         # NOTE: point of difference from WAN VAE2.1, this patchifies the inputs
@@ -730,7 +737,7 @@ class Wan22VAE(VAEBase):
             first_chunk=is_video_start,
         )
         out = unpatchify(out, patch_size=2)
-        return out
+        return self.denormalize_decoder_outputs(out)
 
     def _encode(self, x):
         B, C, T, H, W = x.shape

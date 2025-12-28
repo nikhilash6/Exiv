@@ -29,16 +29,17 @@ class VisionEncoderTest(unittest.TestCase):
         MemoryManager.clear_memory()
     
     LOADING_PARAMS = [
-        ("no_oom",   {"no_oom": True,  "low_vram": False, "normal_load": False}, 2106,  VRAM_DEVICE),       # this will force revert to normal_load mode
-        ("normal",   {"no_oom": False, "low_vram": False, "normal_load": True},  2106, VRAM_DEVICE),        # TODO: decoding cache increases vram, look into how this can be reduced
+        ("no_oom",   {"no_oom": True,  "low_vram": False, "normal_load": False}, 2106, VRAM_DEVICE, True),       # this will force revert to normal_load mode
+        ("normal",   {"no_oom": False, "low_vram": False, "normal_load": True},  2106, VRAM_DEVICE, True),
+        ("normal",   {"no_oom": False, "low_vram": False, "normal_load": True},  5997, VRAM_DEVICE, False),
     ]
     @parameterized.expand(LOADING_PARAMS)
-    def test_wan_vae(self, load_mode, config, expected_mem, expected_device):
+    def test_wan21_vae(self, load_mode, config, expected_mem, expected_device, use_tiling):
         global_config.update_config(config)
         
         with check_memory_usage(expected_mem=expected_mem, device=expected_device):
             height, width, frame_count = 512, 512, 81
-            input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/test.jpg")
+            input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/boy_anime.jpg")
             input_img = common_upscale(input_img, height, width)    # B, C, H, W
             
             image = torch.ones((frame_count, height, width, input_img.shape[1]), device=input_img.device, dtype=input_img.dtype) * 0.5
@@ -52,7 +53,7 @@ class VisionEncoderTest(unittest.TestCase):
             model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vae")
             model_path = ensure_model_availability(model_path=model_path_data.path, download_url=model_path_data.url)
             
-            wan_vae = Wan21VAE()
+            wan_vae = Wan21VAE(use_tiling=use_tiling)
             wan_vae.load_model(model_path=model_path)
             move_model(wan_vae, VRAM_DEVICE)
             
@@ -64,6 +65,7 @@ class VisionEncoderTest(unittest.TestCase):
             decoded_image = wan_vae.decode(concat_latent_image, input_shape=(W, H, T))
             MemoryManager.clear_memory()
             app_logger.debug("decoding complete")
+            
             del wan_vae
             
             image = image.to(VRAM_DEVICE)
@@ -73,16 +75,17 @@ class VisionEncoderTest(unittest.TestCase):
 
 
     LOADING_PARAMS = [
-        ("no_oom",   {"no_oom": True,  "low_vram": False, "normal_load": False}, 2106,  VRAM_DEVICE),       # this will force revert to normal_load mode
-        # ("normal",   {"no_oom": False, "low_vram": False, "normal_load": True},  2106, VRAM_DEVICE),        # TODO: decoding cache increases vram, look into how this can be reduced
+        ("no_oom",   {"no_oom": True,  "low_vram": False, "normal_load": False}, 4407, VRAM_DEVICE, True),       # this will force revert to normal_load mode
+        ("normal",   {"no_oom": False, "low_vram": False, "normal_load": True},  4407, VRAM_DEVICE, True),       # TODO: decoding cache increases vram, look into how this can be reduced
+        ("normal",   {"no_oom": False, "low_vram": False, "normal_load": True},  8595, VRAM_DEVICE, False),      # TODO: cross check the vram usage with the original implementation
     ]
     @parameterized.expand(LOADING_PARAMS)
-    def test_wan22_vae(self, load_mode, config, expected_mem, expected_device):
+    def test_wan22_vae(self, load_mode, config, expected_mem, expected_device, use_tiling):
         global_config.update_config(config)
         
         with check_memory_usage(expected_mem=expected_mem, device=expected_device):
             height, width, frame_count = 512, 512, 81
-            input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/test.jpg")
+            input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/boy_anime.jpg")
             input_img = common_upscale(input_img, height, width)    # B, C, H, W
             
             image = torch.ones((frame_count, height, width, input_img.shape[1]), device=input_img.device, dtype=input_img.dtype) * 0.5
@@ -96,7 +99,7 @@ class VisionEncoderTest(unittest.TestCase):
             model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vae")
             model_path = ensure_model_availability(model_path=model_path_data.path, download_url=model_path_data.url)
             
-            wan_vae = Wan22VAE()
+            wan_vae = Wan22VAE(use_tiling=use_tiling)
             wan_vae.load_model(model_path=model_path)
             move_model(wan_vae, VRAM_DEVICE)
             

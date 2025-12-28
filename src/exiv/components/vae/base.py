@@ -18,7 +18,12 @@ class VAEBase(ModelMixin):
         super().__init__(*args, **kwargs)
         
     def normalize_encoder_inputs(self, x: Tensor):
-        return x * 2.0 - 1.0
+        # overriden in child implementations
+        return x
+
+    def denormalize_decoder_outputs(self, x: Tensor):
+        # overriden in child implementations
+        return x
         
     # ------- these methods must be overriden in the child ---------
     def get_tiling_config(self, input_shape, tile_x=256, tile_y=256, tile_z=4, overlap_x=64, overlap_y=64):

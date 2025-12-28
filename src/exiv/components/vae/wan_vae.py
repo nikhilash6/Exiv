@@ -577,6 +577,12 @@ class Wan21VAE(VAEBase):
         self._enc_conv_idx = [0]
         self._enc_feat_map = [None] * self._enc_conv_num
         
+    def normalize_encoder_inputs(self, x: Tensor):
+        return x * 2.0 - 1.0
+        
+    def denormalize_decoder_outputs(self, x: Tensor):
+        return (x + 1.0) / 2.0
+
     def _encode_tile(self, tile, feat_cache, feat_idx):
         tile = self.normalize_encoder_inputs(tile)
         res_tile = self.encoder(tile, feat_cache, feat_idx)
@@ -585,7 +591,8 @@ class Wan21VAE(VAEBase):
     
     def _decode_tile(self, tile, feat_cache, feat_idx):
         tile = self.post_quant_conv(tile)
-        return self.decoder(tile, feat_cache, feat_idx)
+        out = self.decoder(tile, feat_cache, feat_idx)
+        return self.denormalize_decoder_outputs(out)
 
     def _encode(self, x: Tensor):
         B, C, T, H, W = x.shape
@@ -598,7 +605,8 @@ class Wan21VAE(VAEBase):
             tile_temporal=tile_temporal, 
             overlap_width=overlap_width,
             overlap_height=overlap_height,
-            encode_fn=self._encode_tile
+            encode_fn=self._encode_tile,
+            use_tiling=self.use_tiling,
         )   # this can be written in a much shorter way, but writing like this for readability 
         
         if self.use_slicing and x.shape[0] > self.slice_batch_size:
@@ -620,7 +628,8 @@ class Wan21VAE(VAEBase):
             tile_temporal=tile_temporal, 
             overlap_width=overlap_width, 
             overlap_height=overlap_height,
-            decode_fn=self._decode_tile
+            decode_fn=self._decode_tile,
+            use_tiling=self.use_tiling,
         )   # this can be written in a much shorter way, but writing like this for readability 
         
         if self.use_slicing and z.shape[0] > 1:

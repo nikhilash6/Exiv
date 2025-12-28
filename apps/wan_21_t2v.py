@@ -101,7 +101,7 @@ def main(**params):
     scheduler_name = params.get("scheduler_name")
     
     progress_callback(0.1, "Loading Images")
-    input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/test.jpg")[0]
+    input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/boy_anime.jpg")[0]
     height, width, output_frame_count = 512, 512, 81
     
     # resizing img
