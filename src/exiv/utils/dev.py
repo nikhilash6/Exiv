@@ -1,6 +1,8 @@
 # ad-hoc methods used during development
 # NOTE: these are strictly for dev use only
 
+import json
+import subprocess
 import torch
 from torch import Tensor
 
@@ -277,3 +279,9 @@ def get_tensor_hash(t, visualize_latent=False):
             print(f"Saved styled grid to {output_filename}")
         except Exception as e:
             print(f"unable to visualize {str(e)}")
+            
+def get_video_metadata(filepath):
+    cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", filepath]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    data = json.loads(result.stdout)
+    return data['format'].get('tags', {})

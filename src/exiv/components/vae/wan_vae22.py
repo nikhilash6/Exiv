@@ -71,7 +71,7 @@ class Resample(nn.Module):
                         # cache last frame of last two chunk
                         cache_x = torch.cat(
                             [
-                                feat_cache[idx][:, :, -1, :, :].unsqueeze(2),
+                                feat_cache[idx][:, :, -1:, :, :],
                                 cache_x,
                             ],
                             dim=2,
@@ -146,7 +146,7 @@ class ResidualBlock(nn.Module):
                     # cache last frame of last two chunk
                     cache_x = torch.cat(
                         [
-                            feat_cache[idx][:, :, -1, :, :].unsqueeze(2),
+                            feat_cache[idx][:, :, -1:, :, :],
                             cache_x,
                         ],
                         dim=2,
@@ -485,7 +485,7 @@ class Encoder3d(nn.Module):
             if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
                 cache_x = torch.cat(
                     [
-                        feat_cache[idx][:, :, -1, :, :].unsqueeze(2),
+                        feat_cache[idx][:, :, -1:, :, :],
                         cache_x,
                     ],
                     dim=2,
@@ -518,7 +518,7 @@ class Encoder3d(nn.Module):
                 if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
                     cache_x = torch.cat(
                         [
-                            feat_cache[idx][:, :, -1, :, :].unsqueeze(2),
+                            feat_cache[idx][:, :, -1:, :, :],
                             cache_x,
                         ],
                         dim=2,
@@ -595,7 +595,7 @@ class Decoder3d(nn.Module):
             if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
                 cache_x = torch.cat(
                     [
-                        feat_cache[idx][:, :, -1, :, :].unsqueeze(2),
+                        feat_cache[idx][:, :, -1:, :, :],
                         cache_x,
                     ],
                     dim=2,
@@ -627,7 +627,7 @@ class Decoder3d(nn.Module):
                 if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
                     cache_x = torch.cat(
                         [
-                            feat_cache[idx][:, :, -1, :, :].unsqueeze(2),
+                            feat_cache[idx][:, :, -1:, :, :],
                             cache_x,
                         ],
                         dim=2,
@@ -647,7 +647,6 @@ def count_conv3d(model):
     return count
 
 
-# TODO: use_tiling = False is NOT properly tested and may break
 class Wan22VAE(VAEBase):
     def __init__(
         self,
@@ -735,23 +734,18 @@ class Wan22VAE(VAEBase):
 
     def _encode(self, x):
         B, C, T, H, W = x.shape
-        if self.use_tiling:
-            tile_width, tile_height, tile_temporal, overlap_width, overlap_height = self.get_tiling_config(input_shape=(W, H, T))
-            
-            encode_fn = partial(
-                self.tiled_encode_3d,
-                tile_width=tile_width,
-                tile_height=tile_height,
-                tile_temporal=tile_temporal,
-                overlap_width=overlap_width,
-                overlap_height=overlap_height,
-                encode_fn=self._encode_tile
-            )
-        else:
-            def encode_fn(x):
-                self.reset_causal_cache()
-                self._enc_conv_idx = [0]
-                return self._encode_tile(x, feat_cache=self._enc_feat_map, feat_idx=self._enc_conv_idx)
+        tile_width, tile_height, tile_temporal, overlap_width, overlap_height = self.get_tiling_config(input_shape=(W, H, T))
+        
+        encode_fn = partial(
+            self.tiled_encode_3d,
+            tile_width=tile_width,
+            tile_height=tile_height,
+            tile_temporal=tile_temporal,
+            overlap_width=overlap_width,
+            overlap_height=overlap_height,
+            encode_fn=self._encode_tile,
+            use_tiling=self.use_tiling,
+        )
 
         if self.use_slicing and B > self.slice_batch_size:
             mu_slices = [encode_fn(x_slice) for x_slice in x.split(self.slice_batch_size)]
@@ -764,23 +758,18 @@ class Wan22VAE(VAEBase):
 
     def _decode(self, z, input_shape: tuple):
         B, C, T, H, W = z.shape
-        
-        if self.use_tiling:
-            tile_width, tile_height, tile_temporal, overlap_width, overlap_height = self.get_tiling_config(input_shape=input_shape)
-            decode_fn = partial(
-                self.tiled_decode_3d,
-                tile_width=tile_width,
-                tile_height=tile_height,
-                tile_temporal=tile_temporal,
-                overlap_width=overlap_width,
-                overlap_height=overlap_height,
-                decode_fn=self._decode_tile
-            )
-        else:
-            def decode_fn(z):
-                self.reset_causal_cache()
-                self._conv_idx = [0]
-                return self._decode_tile(z, feat_cache=self._feat_map, feat_idx=self._conv_idx)
+        tile_width, tile_height, tile_temporal, overlap_width, overlap_height = self.get_tiling_config(input_shape=input_shape)
+        decode_fn = partial(
+            self.tiled_decode_3d,
+            tile_width=tile_width,
+            tile_height=tile_height,
+            tile_temporal=tile_temporal,
+            overlap_width=overlap_width,
+            overlap_height=overlap_height,
+            decode_fn=self._decode_tile,
+            use_tiling=self.use_tiling,
+        )
+
 
         if self.use_slicing and B > 1:
             decoded_slices = [decode_fn(z_slice) for z_slice in z.split(1)]

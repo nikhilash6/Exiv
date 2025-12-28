@@ -32,7 +32,7 @@ def rope(pos: Tensor, dim: int, theta: int) -> Tensor:
     # Calculate the angle for each position and frequency pair by multiplying them.
     # This is equivalent to 'm * θ_i' from the formula.
     # pos - [b, n] , omega - [d/2], out - [b, n, d/2] (batch, sequence_len, d/2)
-    out = torch.einsum("...n,d->...nd", pos.to(dtype=torch.float32, device=pos.device), omega.to(dtype=torch.float32))      # FIX: higher precision
+    out = torch.einsum("...n,d->...nd", pos.to(dtype=torch.float32, device=pos.device), omega)      # FIX: higher precision
 
     # Create the 2x2 rotation matrix elements: [cos(angle), -sin(angle), sin(angle), cos(angle)]
     # This prepares the values for the final matrix.

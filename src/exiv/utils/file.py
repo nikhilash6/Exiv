@@ -1,3 +1,4 @@
+import subprocess
 import torch
 import torchvision
 import numpy as np
@@ -7,7 +8,7 @@ import re
 import glob
 import urllib.parse
 import requests
-from typing import List
+from typing import List, Dict
 from tqdm import tqdm
 
 from .file_path import FilePaths
@@ -119,7 +120,7 @@ class MediaProcessor:
         return torch.stack(res, dim=0)
     
     @staticmethod
-    def save_latents_to_media(out):
+    def save_latents_to_media(out, metadata: Dict | None = None):
         # TODO: make this a generic method, allowing saving images/audio/3d as well
         # rn it is only for video
         video_tensor = out.sample if hasattr(out, "sample") else out
@@ -141,6 +142,21 @@ class MediaProcessor:
                 fps=24,
                 options={"crf": "25"}  # 'Constant Rate Factor' for quality (lower is better)
             )
+            
+            try:
+                if metadata:
+                    temp_path = save_path + ".temp.mp4"
+                    cmd = ["ffmpeg", "-y", "-i", save_path, "-c", "copy"]
+                    for k, v in metadata.items():
+                        cmd.extend(["-metadata", f"{k}={v}"])
+                    cmd.append(temp_path)
+                    
+                    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    os.replace(temp_path, save_path)
+            except Exception as e:
+                from ..utils.logging import app_logger
+                app_logger.warning(f"Unable to write metadata in {save_path}")
+            
             output_paths.append(save_path)
             
         return output_paths
