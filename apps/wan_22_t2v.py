@@ -121,7 +121,7 @@ def main(**params):
     progress_callback(0.2, "Encoding prompts")
     # generate text embeddings
     cur_model = "umt5_xxl_fp16.safetensors"
-    model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="clip")
+    model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="text_encoder")
     t5_xxl = UMT5XXL(model_path=model_path_data.path, dtype=torch.float16)
     wan_encoder = WanEncoder(t5_xxl=t5_xxl)
     wan_encoder.load_model(t5_xxl_download_url=model_path_data.url)
@@ -133,7 +133,7 @@ def main(**params):
     progress_callback(0.3, "Generating CLIP embeddings")
     # generate img embeddings
     cur_model = "CLIP-ViT-H-fp16.safetensors"
-    model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="clip_vision")
+    model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vision_encoder")
     clip_model = create_vision_encoder(model_path=model_path_data.path, download_url=model_path_data.url, dtype=torch.float16)
     clip_model.load_model()
     clip_embed_dict = clip_model.encode_image(input_img)

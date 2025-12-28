@@ -7,12 +7,12 @@ from typing import List, Dict, Union, Optional
 
 # going with what everyone is using
 DEFAULT_MAPPING = {
-        "checkpoint":       ["models/checkpoints"],
+        "checkpoint":      ["models/checkpoints"],
         "unet":            ["models/unet", "models/diffusion_models"],
         "lora":            ["models/loras"],
         "vae":             ["models/vae"],
-        "clip":            ["models/clip"],
-        "clip_vision":     ["models/clip_vision"],
+        "text_encoder":    ["models/clip"],
+        "vision_encoder":  ["models/clip_vision"],
         "style_model":     ["models/style_models"],
         "embedding":       ["models/embeddings"],
         "hypernetwork":    ["models/hypernetworks"],
@@ -26,11 +26,11 @@ DEFAULT_MAPPING = {
 # TODO: separate this in a file if the list becomes large
 DOWNLOAD_MAP = {
     "umt5_xxl_fp16.safetensors": {
-        "type": "clip",
+        "type": "text_encoder",
         "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp16.safetensors?download=true"
     },
     "CLIP-ViT-H-fp16.safetensors": {
-        "type": "clip_vision",
+        "type": "vision_encoder",
         "url": "https://huggingface.co/Kijai/CLIPVisionModelWithProjection_fp16/resolve/main/CLIP-ViT-H-fp16.safetensors?download=true"
     },
     "wan21_1_3B.safetensors": {

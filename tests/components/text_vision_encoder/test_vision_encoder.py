@@ -37,7 +37,7 @@ class VisionEncoderTest(unittest.TestCase):
             input_img = common_upscale(input_img, height, width)
 
             cur_model = "CLIP-ViT-H-fp16.safetensors"
-            model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="clip_vision")
+            model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vision_encoder")
             clip_model = create_vision_encoder(model_path=model_path_data.path, download_url=model_path_data.url, dtype=torch.float16)
             clip_model.load_model()
             clip_embed = clip_model.encode_image(input_img)

@@ -659,7 +659,7 @@ class Wan22VAE(VAEBase):
         attn_scales=[],
         temperal_downsample=[False, True, True],
         dropout=0.0,
-        use_tiling: bool = True,                        # TOOD: enable this option !!!!!
+        use_tiling: bool = True,
         max_batch_size: Union[int, None] = 4,
         **kwargs
     ):

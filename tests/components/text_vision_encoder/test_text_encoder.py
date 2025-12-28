@@ -47,7 +47,7 @@ class TextEncoderTest(unittest.TestCase):
             del tokenizer
 
             cur_model = "umt5_xxl_fp16.safetensors"
-            model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="clip")
+            model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="text_encoder")
             t5_xxl = UMT5XXL(
                 model_path=model_path_data.path, 
                 dtype=torch.float16
@@ -74,7 +74,7 @@ class TextEncoderTest(unittest.TestCase):
             prompt = "a photo of a (white:2) (dog:1) and a ((blue)) (bird:3)"
 
             cur_model = "umt5_xxl_fp16.safetensors"
-            model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="clip")
+            model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="text_encoder")
             t5_xxl = UMT5XXL(model_path=model_path_data.path, dtype=torch.float16)
             wan_encoder = WanEncoder(t5_xxl=t5_xxl)
             wan_encoder.load_model(t5_xxl_download_url=model_path_data.url)

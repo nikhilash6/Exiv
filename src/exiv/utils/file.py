@@ -56,18 +56,11 @@ def ensure_model_availability(model_path: str, download_url: str = None, force_d
     """
     from .logging import app_logger
     
+    assert model_path != None or model_path != "", "model_path provided can't be None"
+    
     if download_url:  # It's a URL
         parsed = urllib.parse.urlparse(download_url)
         assert parsed.scheme in ("http", "https"), "invalid download link"
-    
-    # TODO: fix this, have proper model paths defined
-    if model_path is None:
-        if not download_url:
-            raise ValueError("Must provide either a local 'model_path' or a 'download_url'.")
-        # default download path: same filename under ~/.cache/my_package/
-        cache_dir = os.path.expanduser("~/.cache/my_package")
-        os.makedirs(cache_dir, exist_ok=True)
-        model_path = os.path.join(cache_dir, os.path.basename(parsed.path))
 
     if download_url and (force_download or not os.path.exists(model_path)):
         app_logger.info(f"Downloading model from {download_url} to {model_path} ...")

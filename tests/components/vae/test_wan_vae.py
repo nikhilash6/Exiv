@@ -73,7 +73,7 @@ class VisionEncoderTest(unittest.TestCase):
             self.assertLess(mse_loss.item(), 1e-04)
             self.assertEqual(image.shape, decoded_image.shape)
 
-
+    # TODO: low_vram / no_oom should automatically trigger use_tiling = False
     LOADING_PARAMS = [
         ("no_oom",   {"no_oom": True,  "low_vram": False, "normal_load": False}, 4407, VRAM_DEVICE, True),       # this will force revert to normal_load mode
         ("normal",   {"no_oom": False, "low_vram": False, "normal_load": True},  4407, VRAM_DEVICE, True),       # TODO: decoding cache increases vram, look into how this can be reduced
