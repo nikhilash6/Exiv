@@ -11,7 +11,7 @@ from einops import rearrange
 
 from .base import VAEBase, VAEImageProcessor
 from .wan_vae import CausalConv3d, RMS_norm, Upsample
-from ..attention import optimized_attention
+from ..attention import vae_optimized_attention
 
 CACHE_T = 2
 
@@ -188,9 +188,8 @@ class AttentionBlock(nn.Module):
                                    -1).permute(0, 1, 3,
                                                2).contiguous().chunk(3, dim=-1))
 
-        # TODO: replace with optimized_attention
         # apply attention
-        x = optimized_attention(q, k, v)
+        x = vae_optimized_attention(q, k, v)
         x = x.squeeze(1).permute(0, 2, 1).reshape(b * t, c, h, w)
 
         # output

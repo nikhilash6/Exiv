@@ -9,7 +9,7 @@ from typing import Union, Tuple, Optional, List
 from .base import VAEBase
 from .helper_methods import DiagonalGaussianDistribution
 from ..activations import get_activation
-from ..attention import optimized_attention
+from ..attention import vae_optimized_attention
 
 
 CACHE_T = 2
@@ -226,9 +226,8 @@ class AttentionBlock(nn.Module):
         qkv = qkv.permute(0, 1, 3, 2).contiguous()
         q, k, v = qkv.chunk(3, dim=-1)
 
-        # TODO: replace with optimized_attention
         # apply attention
-        x = optimized_attention(q, k, v)
+        x = vae_optimized_attention(q, k, v)
 
         x = x.squeeze(1).permute(0, 2, 1).reshape(batch_size * time, channels, height, width)
 
