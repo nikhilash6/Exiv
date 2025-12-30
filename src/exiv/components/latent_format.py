@@ -13,17 +13,7 @@ class LatentFormat:
 
     def process_out(self, latent):
         return latent / self.scale_factor
-    
-    def decode_latent_to_preview(self, x0):
-        # TODO: copied from a1111, check and fix
-        latent_image = x0[0].permute(1, 2, 0).cpu() @ self.latent_rgb_factors
 
-        latents_ubyte = (((latent_image + 1) / 2)
-                            .clamp(0, 1)    # change scale from -1..1 to 0..1
-                            .mul(0xFF)      # to 0..255
-                            .byte()).cpu()
-
-        return Image.fromarray(latents_ubyte.numpy())
     
 class Wan21VAELatentFormat(LatentFormat):
     def __init__(self):

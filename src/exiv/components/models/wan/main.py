@@ -721,3 +721,6 @@ class Wan22Model(Wan21Model):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.model_arch_config: ModelArchConfig = Wan22ModelArchConfig()
+        
+    def scale_latent_inpaint(self, sigma, noise, latent_image, **kwargs):
+        return latent_image

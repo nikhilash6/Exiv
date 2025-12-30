@@ -76,10 +76,6 @@ class ModelMixin(nn.Module, LoraMixin, metaclass=ModuleMeta):
         self.model_path = model_path
         self.model_arch_config = None
     
-    def clear_cache(self):
-        # TODO: legacy code, will remove after a final check
-        pass
-    
     @staticmethod
     def is_leaf_module(module: nn.Module) -> bool:
         return len(list(module.children())) == 0

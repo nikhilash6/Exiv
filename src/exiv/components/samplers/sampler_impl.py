@@ -78,7 +78,7 @@ class Sampler:
                 # so reshaping sigma from [4] -> [4, 1, 1, 1]   (assuming batch_size = 4)
                 reshaped_sigma = sigma.reshape([sigma.shape[0]] + [1] * (len(noise.shape) - 1))
                 scaled_latent = wrapped_model.scale_latent_inpaint(reshaped_sigma, noise, latent_image)
-                x = x * denoise_mask + scaled_latent * latent_mask   # TODO: fix this !!!!!!!
+                x = x * denoise_mask + scaled_latent * latent_mask
             
             out = denoising_fn(x, sigma, model_options=model_options, seed=seed)
             
