@@ -57,6 +57,8 @@ class TextEncoderTest(unittest.TestCase):
             embed_output = t5_xxl.encode_token_weights(res_tokens, special_tokens)   # output, pooled, extra
             # print("embed details: ", len(embed_output), embed_output[0].shape)
 
+            self.assertIsNotNone(embed_output.last_hidden_state)
+            self.assertEqual(embed_output.last_hidden_state.shape[0], 1)
             del t5_xxl, embed_output
             # TODO: add check for output the correctness
     

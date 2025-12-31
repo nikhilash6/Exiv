@@ -110,7 +110,7 @@ def is_ffmpeg_present():
     import shutil
     for binary in ["ffmpeg", "ffprobe"]:
         if shutil.which(binary) is None:
-            app_logger.warning(f"{binary} not found. Please install FFmpeg (https://ffmpeg.org/download.html).")
+            app_logger.warning(f"{binary} not found. Unable to save metadata to output. Please install FFmpeg.")
             return False
     
     return True

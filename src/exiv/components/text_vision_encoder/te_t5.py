@@ -5,6 +5,7 @@ import math
 import copy
 from typing import Optional
 
+from .common import TextEncoderOutput
 from ..activations import ACT2FN
 from .encoder_base import TextEncoder, T5Config, T5XXLConfig, UMT5XXLConfig
 from ..enum import TextEncoderType
@@ -434,7 +435,14 @@ class T5(TextEncoder):
         
         if self.dtype not in [torch.float32, torch.float16, torch.bfloat16]:
             x = torch.nan_to_num(x) #Fix for fp8 T5 base
-        return self.encoder(x, attention_mask=attention_mask, **kwargs)
+        
+        x, intermediate = self.encoder(x, attention_mask=attention_mask, **kwargs)
+        return TextEncoderOutput(
+            last_hidden_state=x,
+            penultimate_hidden_state=intermediate,
+            pooled_output=None,  # T5 usually doesn't have a pooled output
+            extra={"attention_mask": attention_mask} if attention_mask is not None else {}
+        )
 
 
 class T5XXL(T5):

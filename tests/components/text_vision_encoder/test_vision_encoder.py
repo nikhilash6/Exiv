@@ -42,5 +42,7 @@ class VisionEncoderTest(unittest.TestCase):
             clip_model.load_model()
             clip_embed = clip_model.encode_image(input_img)
             
+            self.assertIsNotNone(clip_embed.image_embedding)
+            self.assertIsNotNone(clip_embed.penultimate_hidden_states)
             del clip_model, clip_embed, input_img
             # TODO: add exact output check later

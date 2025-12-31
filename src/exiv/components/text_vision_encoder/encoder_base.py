@@ -4,6 +4,7 @@ from torch import Tensor
 from dataclasses import dataclass
 from typing import Any, Dict
 
+from .common import TextEncoderOutput, VisionEncoderOutput
 from ...utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, ProcDevice
 from ...model_utils.model_mixin import ModelMixin
 from ...utils.logging import app_logger
@@ -158,7 +159,7 @@ class TextEncoder(ModelMixin):
             embeds_info     # TODO: likely a bug, overwritten every loop
         )
 
-    def encode_token_weights(self, token_weight_pairs, special_tokens: tuple) -> Dict[str, Any]:
+    def encode_token_weights(self, token_weight_pairs, special_tokens: tuple) -> TextEncoderOutput:
         to_encode = list()
         max_token_len = 0
         has_weights = False
@@ -198,7 +199,7 @@ class TextEncoder(ModelMixin):
         
         # ---------------- main encoding ----------------
         with torch.autocast(device_type="cuda", dtype=torch.float32):
-            outputs = self(
+            raw_output: TextEncoderOutput = self(
                 input_ids=None, 
                 attention_mask=attention_mask_copy, 
                 input_embeds=embeds, 
@@ -208,28 +209,18 @@ class TextEncoder(ModelMixin):
             )
         
         if self.layer == "last":
-            final_output = outputs[0].float()
+            final_output = raw_output.last_hidden_state.float()
         else:
-            final_output = outputs[1].float()
+            # fallback to the last layer if penultimate is missing
+            final_output = (raw_output.penultimate_hidden_state or raw_output.last_hidden_state).float()
 
         if self.zero_out_masked:
             # any token embedding where the mask was 0.0 is multiplied by 0.0
             final_output *= attention_mask.unsqueeze(-1).float()
 
-        pooled_output = None
-        if len(outputs) >= 3:
-            # output: (final, intermediate, projected_pooled, raw_pooled)
-            if not self.return_projected_pooled and len(outputs) >= 4 and outputs[3] is not None:
-                pooled_output = outputs[3].float()
-            elif outputs[2] is not None:
-                pooled_output = outputs[2].float()
-
-        if pooled_output is not None:
-            # grabbing the first pooled (from the batch)
-            first_pooled = pooled_output[0:1].to(OFFLOAD_DEVICE)
-        else:
-            # for T5 this would be intermediate_output (None)
-            first_pooled = pooled_output
+        final_pooled = None
+        if raw_output.pooled_output is not None:
+            final_pooled = raw_output.pooled_output[0:1].to(OFFLOAD_DEVICE)
 
         # ---------------- apply weights ----------------
         # current out: [batch_size + 1, seq_len, embed_dim] , extra dim for the empty ref
@@ -245,27 +236,31 @@ class TextEncoder(ModelMixin):
                         z[0][j] = (z[0][j] - z_empty[j]) * weight + z_empty[j]
             output.append(z)
 
-        encoder_output = {}
         if (len(output) == 0):
             # returning the empty neutral
-            encoder_output = {"output": final_output[-1:].to(OFFLOAD_DEVICE)}
+            final_stack = final_output[-1:].to(OFFLOAD_DEVICE)
         else:
             # concatenating all the processed (and weighted) embeddings together
-            encoder_output = { "output": torch.cat(output, dim=-2).to(OFFLOAD_DEVICE)}
-        
-        encoder_output.update({"pooled": first_pooled})
+            final_stack = torch.cat(output, dim=-2).to(OFFLOAD_DEVICE)
 
         # extra data (like an attention mask), process and append it to the output
-        if len(outputs) > 2:
-            extra = {}
-            for k in outputs[2]:
-                v = outputs[2][k]
-                if k == "attention_mask":   # TODO: check this while running
+        final_extra = {}
+        if raw_output.extra:
+            for k, v in raw_output.extra.items():
+                if k == "attention_mask":
+                    # Logic: We generated (batch + 1) items including the empty prompt.
+                    # We usually only want the mask for the real prompts.
+                    # 1. Slice [:batch_count] to drop the empty prompt mask
+                    # 2. Flatten and Unsqueeze to match Sampler expectations
                     v = v[:batch_count].flatten().unsqueeze(dim=0).to(OFFLOAD_DEVICE)
-                extra[k] = v
-
-            encoder_output.update({ "extra": extra })
-        return encoder_output
+                
+                final_extra[k] = v
+        return TextEncoderOutput(
+            last_hidden_state=final_stack,
+            penultimate_hidden_state=None,      # we already processed it above
+            pooled_output=final_pooled,
+            extra=final_extra
+        )
         
 
 class VisionEncoder(ModelMixin):
@@ -277,6 +272,7 @@ class VisionEncoder(ModelMixin):
         assert self.config is not None, "Vision encoder config not set, unable to proceed"
         
         # setting defaults
+        # NOTE: defaults are from OpenAI's original CLIP impl.
         size = self.config.get("image_size", 224)
         mean = self.config.get("image_mean", [0.48145466, 0.4578275, 0.40821073])
         std = self.config.get("image_std", [0.26862954, 0.26130258, 0.27577711])
@@ -300,29 +296,31 @@ class VisionEncoder(ModelMixin):
         image = torch.clip((255. * image), 0, 255).round() / 255.0
         return (image - mean.view([3,1,1])) / std.view([3,1,1])
         
-    def encode_image(self, image: Tensor, crop=True) -> Dict[str, Any]:
+    def encode_image(self, image: Tensor, crop=True) -> VisionEncoderOutput:
         pixel_values = self.clip_preprocess(image.to(self.gpu_device), crop=crop).float()
-        out = self(pixel_values=pixel_values, intermediate_output='all' if self.return_all_hidden_states else -2)
-
+        
         '''
         image_embeds - final output, designed to match text embeds
         penultimate_hidden_states - richer spatial details, preferred choice for adaptors (controlnets, IPAs)
         mm_projected - llava embedding
         all_hidden_states - full data dump
         '''
-        outputs = {}
-        outputs["last_hidden_state"] = out[0]
-        outputs["image_embeds"] = out[2]
-        
-        if self.return_all_hidden_states:
-            all_hs = out[1]
-            outputs["penultimate_hidden_states"] = all_hs[:, -2]
-            outputs["all_hidden_states"] = all_hs
+        out: VisionEncoderOutput = self(pixel_values=pixel_values, intermediate_output='all' if self.return_all_hidden_states else -2)
+        final_penultimate = None
+        if self.return_all_hidden_states and out.intermediate_hidden_states is not None:
+            # if we have all layers, grab the second to last one
+            final_penultimate = out.intermediate_hidden_states[:, -2]
         else:
-            outputs["penultimate_hidden_states"] = out[1]
+            # otherwise, the model returned exactly what we asked for (the -2 layer)
+            final_penultimate = out.intermediate_hidden_states
 
-        outputs["mm_projected"] = out[3]
-        return outputs
+        return VisionEncoderOutput(
+            last_hidden_state=out.last_hidden_state,
+            image_embedding=out.image_embedding,
+            intermediate_hidden_states=final_penultimate,
+            multimodal_projection=out.multimodal_projection,
+            extra=out.extra
+        )
 
 
 @dataclass

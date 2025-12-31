@@ -150,6 +150,7 @@ class MediaProcessor:
             
         return output_paths
 
+    # NOTE: maybe a pure pythonic way will be more robust
     @staticmethod
     def save_metadata(file_path: str, metadata: Dict):
         if not is_ffmpeg_present(): return

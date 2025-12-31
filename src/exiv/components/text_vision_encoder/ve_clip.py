@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as T
 
+from .common import VisionEncoderOutput
 from .encoder_base import VisionEncoder
 from ..attention import optimized_attention
 from ..activations import get_activation
@@ -205,15 +206,24 @@ class CLIPViTL(VisionEncoder):
             "torch_dtype": "float32"
         }
 
-
     def forward(self, *args, **kwargs):
+        # x[0] = last_hidden_state
+        # x[1] = intermediate_hidden_states (all layers)
+        # x[2] = pooled_output (raw)
         x = self.vision_model(*args, **kwargs)
+        
+        # calculate projections
         out = self.visual_projection(x[2])
         projected = None
         if self.multi_modal_projector is not None:
             projected = self.multi_modal_projector(x[1])
 
-        return (x[0], x[1], out, projected)
+        return VisionEncoderOutput(
+            last_hidden_state=x[0],
+            intermediate_hidden_states=x[1],
+            image_embedding=out,
+            multimodal_projection=projected
+        )
     
 
 class CLIPViTH(VisionEncoder):
@@ -254,7 +264,12 @@ class CLIPViTH(VisionEncoder):
         if self.multi_modal_projector is not None:
             projected = self.multi_modal_projector(x[1])
 
-        return (x[0], x[1], out, projected)
+        return VisionEncoderOutput(
+            last_hidden_state=x[0],
+            intermediate_hidden_states=x[1],
+            image_embedding=out,
+            multimodal_projection=projected
+        )
     
 
 class CLIPVitLlava(CLIPViTL):
@@ -296,4 +311,9 @@ class CLIPVitLlava(CLIPViTL):
         if self.multi_modal_projector is not None:
             projected = self.multi_modal_projector(x[1])
 
-        return (x[0], x[1], out, projected)
+        return VisionEncoderOutput(
+            last_hidden_state=x[0],
+            intermediate_hidden_states=x[1],
+            image_embedding=out,
+            multimodal_projection=projected
+        )

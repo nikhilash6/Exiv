@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
 
-from typing import Any, Callable, List
+from typing import Any, Callable, List, Tuple, Optional, Union
 from dataclasses import dataclass, field
 
 from .model_mixin import ModelMixin
