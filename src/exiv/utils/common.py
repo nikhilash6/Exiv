@@ -1,5 +1,6 @@
 from typing import get_origin, get_args, Any, Union, Tuple
 
+from .logging import app_logger
 
 def split_module_key(module: Any, tensor_name: str) -> Tuple[Any, str]:
     # given a key, splits it into module, final key attr
@@ -104,5 +105,14 @@ def safe_check(value, expected_type):
     except TypeError:
         return False
 
+
+def is_ffmpeg_present():
+    import shutil
+    for binary in ["ffmpeg", "ffprobe"]:
+        if shutil.which(binary) is None:
+            app_logger.warning(f"{binary} not found. Please install FFmpeg (https://ffmpeg.org/download.html).")
+            return False
+    
+    return True
 
 null_func = lambda *args, **kwargs: None

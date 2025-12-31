@@ -13,6 +13,7 @@ from typing import List, Dict
 from tqdm import tqdm
 
 from .file_path import FilePaths
+from ..utils.common import is_ffmpeg_present
 
 
 def create_sanitized_path(file_path):
@@ -151,6 +152,7 @@ class MediaProcessor:
 
     @staticmethod
     def save_metadata(file_path: str, metadata: Dict):
+        if not is_ffmpeg_present(): return
         temp_path = file_path + ".temp.mp4"
         cmd = ["ffmpeg", "-y", "-i", file_path, "-c", "copy"]
         for k, v in metadata.items():
@@ -165,6 +167,7 @@ class MediaProcessor:
         """
         Returns the metadata dictionary from the file using ffprobe.
         """
+        if not is_ffmpeg_present(): return
         try:
             # -v quiet: suppress logs
             # -print_format json: output JSON
