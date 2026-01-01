@@ -195,6 +195,7 @@ def main(**params):
         vae_dtype=vae_dtype,
         use_tiling=use_vae_tiling
     )
+    out = out.to(vae_dtype)
     out = wan_vae.decode(out, (height, width, output_frame_count))
     
     metadata = {

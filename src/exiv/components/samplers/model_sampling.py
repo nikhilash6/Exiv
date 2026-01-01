@@ -5,7 +5,7 @@ from typing import Dict, List
 
 from .utils import normalize_seed
 from .scheduler_types import calculate_sigmas
-from .sampling_helpers import filter_active_conds, preprocess_cond_per_step, prepare_model_conds, prepare_mask
+from .sampling_helpers import filter_active_conds, prepare_model_conds, prepare_mask
 from ..enum import DISCARD_PENULTIMATE_SIGMA_SAMPLERS, KSamplerType, SamplerType, SchedulerType
 from .sampler_impl import Sampler, ksampler_factory
 from ...utils.tensor import fix_empty_latent_channels, prepare_noise

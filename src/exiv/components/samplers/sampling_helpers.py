@@ -135,7 +135,7 @@ def prepare_model_conds(
             active_cond.model_input = model.format_conds(active_cond, **base_ctx)
             updated_conds.append(active_cond)
             
-        res.add_cond_to_group(cond_group_name, updated_conds)
+        res.set_group_cond(cond_group_name, updated_conds, replace=True)
     
     # res = process_masks(res, noise.shape[2:], device)
     # res = prepare_controlnet(res)

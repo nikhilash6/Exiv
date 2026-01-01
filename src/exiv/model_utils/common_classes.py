@@ -4,7 +4,6 @@ from torch import Tensor
 from typing import Any, Callable, List, Tuple, Optional, Union, Dict
 from dataclasses import dataclass, field
 
-from .model_mixin import ModelMixin
 from ..utils.enum import ExtendedEnum
 from ..components.latent_format import LatentFormat
 from ..components.samplers.cfg_methods import default_cfg
@@ -29,12 +28,12 @@ class ModelWrapper:
     '''
     def __init__(
         self, 
-        model: ModelMixin, 
+        model: "ModelMixin", 
         model_sampling: Any = None,
         disable_cfg: bool = False,
         cfg_func: Callable = default_cfg
     ):
-        self.model: ModelMixin = model
+        self.model: "ModelMixin" = model
         self.model_sampling = model_sampling or model.get_model_sampling_obj()
         
         self.disable_cfg: bool = disable_cfg
@@ -144,19 +143,24 @@ class BatchedConditioning:
     # e.g. ["positive", "negative"] implies batch_size=2
     execution_order: List[str] = field(default_factory=lambda: ["positive", "negative"])
 
-    def add_cond_to_group(self, group_name: str, cond: 'Conditioning'):
+    def set_group_cond(self, group_name: str, conds: Union['Conditioning', List['Conditioning']], replace: bool = False):
         """
-        Adds a single Conditioning object to a specific group.
-        Creates the group if it doesn't exist.
+        Updates a conditioning group.
+        - conds: Single object or list.
+        - replace: If True, overwrites the group. If False, appends/extends.
         """
         if group_name not in self.groups:
             self.groups[group_name] = []
-            # auto-add to execution order if it's a new group? 
-            # usually safer to let user define order explicitly, but flexible logic:
             if group_name not in self.execution_order:
                 self.execution_order.append(group_name)
         
-        self.groups[group_name].append(cond)
+        if not isinstance(conds, list):
+            conds = [conds]
+            
+        if replace:
+            self.groups[group_name] = conds
+        else:
+            self.groups[group_name].extend(conds)
     
     def set_execution_order(self, order: List[str]):
         """

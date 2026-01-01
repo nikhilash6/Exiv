@@ -255,7 +255,7 @@ class VAEBase(ModelMixin):
 
 # IMPORTANT: this method not only initializes the VAE but also moves it on the VRAM device
 def get_vae(
-        vae_type: VAEType,
+        vae_type: str,
         vae_dtype = torch.bfloat16,
         use_tiling = True,
         override_filename = None,   # if provided it will use this instead of the default file name/paths
@@ -263,9 +263,9 @@ def get_vae(
     from .wan_vae import Wan21VAE
     from .wan_vae22 import Wan22VAE
     
-    if vae_type == VAEType.WAN:
+    if vae_type == VAEType.WAN21.value:
         return Wan21VAE()
-    elif vae_type == VAEType.WAN22:
+    elif vae_type == VAEType.WAN22.value:
         cur_model = override_filename or "wan_2_2_vae.safetensors"
         model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vae")
         model_path = ensure_model_availability(model_path=model_path_data.path, download_url=model_path_data.url)

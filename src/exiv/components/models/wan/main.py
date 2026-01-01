@@ -655,7 +655,7 @@ class Wan21Model(ModelMixin):
         freqs = self.rope_embedder(img_ids).movedim(1, 2)
         return freqs
 
-    def forward(self, x, timestep, context, clip_fea=None, **kwargs):
+    def forward(self, x, timestep, cross_attn, visual_embedding=None, **kwargs):
         bs, c, t, h, w = x.shape
         x = pad_to_patch_size(x, self.patch_size)
 
@@ -664,7 +664,7 @@ class Wan21Model(ModelMixin):
             t_len += 1      # the single latent that has been passed
 
         freqs = self.rope_encode(t_len, h, w, device=x.device, dtype=x.dtype)
-        return self.forward_orig(x, timestep, context, clip_fea=clip_fea, freqs=freqs, **kwargs)[:, :, :t, :h, :w]
+        return self.forward_orig(x, timestep, cross_attn, clip_fea=visual_embedding, freqs=freqs, **kwargs)[:, :, :t, :h, :w]
 
     def unpatchify(self, x, grid_sizes):
         r"""

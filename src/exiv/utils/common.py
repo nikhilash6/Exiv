@@ -1,7 +1,5 @@
 from typing import get_origin, get_args, Any, Union, Tuple
 
-from .logging import app_logger
-
 def split_module_key(module: Any, tensor_name: str) -> Tuple[Any, str]:
     # given a key, splits it into module, final key attr
     # layer1.block.0.weight -> (layer1.block[0], 'weight')
@@ -108,6 +106,7 @@ def safe_check(value, expected_type):
 
 def is_ffmpeg_present():
     import shutil
+    from .logging import app_logger
     for binary in ["ffmpeg", "ffprobe"]:
         if shutil.which(binary) is None:
             app_logger.warning(f"{binary} not found. Unable to save metadata to output. Please install FFmpeg.")

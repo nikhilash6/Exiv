@@ -107,5 +107,5 @@ class Model(ExtendedEnum):
     QWEN_IMAGE = "qwen_image"
     
 class VAEType(ExtendedEnum):
-    WAN = "wan"
+    WAN21 = "wan21"
     WAN22 = "wan22"
