@@ -1,9 +1,13 @@
 import os
+
+from exiv.components.text_vision_encoder.common import TextEncoderOutput, VisionEncoderOutput
+from exiv.components.vae.base import get_vae
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
 import torch
+from torch import Tensor
 
-from exiv.components.enum import KSamplerType, SchedulerType
+from exiv.components.enum import KSamplerType, SchedulerType, VAEType
 from exiv.components.models.wan.constructor import get_wan_instance
 from exiv.components.models.wan.main import Wan22ModelArchConfig
 from exiv.components.samplers.model_sampling import KSampler
@@ -13,7 +17,7 @@ from exiv.components.text_vision_encoder.vision_encoder import create_vision_enc
 from exiv.components.vae.wan_vae import Wan21VAE
 from exiv.components.vae.wan_vae22 import Wan22VAE
 from exiv.model_patching.cache_hook import enable_step_caching
-from exiv.model_utils.common_classes import Latent
+from exiv.model_utils.common_classes import Conditioning, BatchedConditioning, ConditioningType, Latent
 from exiv.model_utils.common_classes import ModelWrapper
 from exiv.model_utils.helper_methods import move_model
 from exiv.server.app_core import App, AppOutputType, Input, Output
@@ -27,42 +31,41 @@ from exiv.utils.logging import app_logger
 use_vae_tiling = False
 vae_dtype = torch.bfloat16
 
-# TODO: move to the tensors file
-def conditioning_set_values(conditioning_list, new_values_dict = {}):
-    is_list = lambda x : isinstance(x, list)
-    is_tuple = lambda x : isinstance(x, tuple)
-    is_not_list_of_list = is_list(conditioning_list) and not \
-        (is_list(conditioning_list[0]) or is_tuple(conditioning_list[0]))
-    if is_not_list_of_list or is_tuple(conditioning_list):
-        # general format is to have list of lists, to accomodate for different
-        # types of prompts for the single generation (like regional prompting)
-        conditioning_list = [conditioning_list]     # list of [tensor, options_dict] pairs
-        
-    updated_conditioning_list = []
-    for conditioning_item in conditioning_list:
-        updated_item = [conditioning_item[0], conditioning_item[1].copy()]
-        options_dict_to_update = updated_item[1]
 
-        for key, value_to_add in new_values_dict.items():
-            value_to_set = value_to_add
-            options_dict_to_update[key] = value_to_set
-
-        updated_conditioning_list.append(updated_item)
-
-    return updated_conditioning_list
-
-def preprocess_wan_conditionals(pos_embed_dict, neg_embed_dict, clip_embed_dict, input_img, height, width, frame_count, batch_size) -> tuple[list, list, Latent]:
-    # converting pos and neg embed dict in the appropriate format (list of lists)
-    pos_embed = [[pos_embed_dict.pop("output"), pos_embed_dict]]
-    neg_embed = [[neg_embed_dict.pop("output"), neg_embed_dict]]
+def preprocess_wan_conditionals(
+        pos_embed: TextEncoderOutput, 
+        neg_embed: TextEncoderOutput, 
+        clip_embed: VisionEncoderOutput, 
+        input_img: Tensor, 
+        height, width, frame_count, batch_size
+    ) -> tuple[BatchedConditioning, Latent]:
+    
+    pos_cond = Conditioning(
+        data=pos_embed.last_hidden_state,
+        type=ConditioningType.EMBEDDING,
+        extra=pos_embed.extra.copy()
+    )
+    
+    neg_cond = Conditioning(
+        data=neg_embed.last_hidden_state,
+        type=ConditioningType.EMBEDDING,
+        extra=neg_embed.extra.copy()
+    )
+    
+    batched_cond = BatchedConditioning(
+        groups={
+            "positive": [pos_cond],
+            "negative": [neg_cond],
+        },
+        execution_order=["positive", "negative"]
+    )
     
     # encode the entire sequence
-    cur_model = "wan_2_2_vae.safetensors"
-    model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vae")
-    model_path = ensure_model_availability(model_path=model_path_data.path, download_url=model_path_data.url)
-    wan_vae = Wan22VAE(dtype=vae_dtype, use_tiling=use_vae_tiling)
-    wan_vae.load_model(model_path=model_path)
-    move_model(wan_vae, VRAM_DEVICE)
+    wan_vae = get_vae(
+        vae_type=VAEType.WAN22.value,
+        vae_dtype=vae_dtype,
+        use_tiling=use_vae_tiling
+    )
     
     # empty tensor
     blank_latent = Latent()
@@ -74,9 +77,14 @@ def preprocess_wan_conditionals(pos_embed_dict, neg_embed_dict, clip_embed_dict,
     # that tells not to touch the attached image part
     if input_img is None:
         blank_latent.samples = latent
-        return pos_embed, neg_embed, blank_latent
+        return batched_cond, blank_latent
 
-    mask = torch.ones([latent.shape[0], 1, ((frame_count - 1) // 4) + 1, latent.shape[-2], latent.shape[-1]], device=VRAM_DEVICE)
+    b = latent.shape[0]
+    h = latent.shape[-2]
+    w = latent.shape[-1]
+    t = ((frame_count - 1) // 4) + 1
+    mask = torch.ones([b, 1, t, h, w], device=VRAM_DEVICE)
+    
     if input_img is not None:
         # B, C, H, W -> B, C, 1, H, W
         input_img = input_img.unsqueeze(2)
@@ -93,10 +101,9 @@ def preprocess_wan_conditionals(pos_embed_dict, neg_embed_dict, clip_embed_dict,
     blank_latent.samples = blank_latent.samples.to(vae_dtype)                           # TODO: auto convert these (should be auto converting ?)
     blank_latent.noise_mask = mask.repeat((batch_size, ) + (1,) * (mask.ndim - 1))
     blank_latent.noise_mask = blank_latent.noise_mask.to(vae_dtype)
-    return pos_embed, neg_embed, blank_latent
+    return batched_cond, blank_latent
 
 def main(**params):
-    
     report_progress = params.get("report_progress")
     def progress_callback(progress_fraction, stage): 
         app_logger.debug(f"Percent: {progress_fraction}  -- Stage: {stage}")
@@ -141,7 +148,7 @@ def main(**params):
     MemoryManager.clear_memory()
     
     # preprocess conditionals
-    pos_embed, neg_embed, blank_latent = preprocess_wan_conditionals(
+    batched_cond, blank_latent = preprocess_wan_conditionals(
                                             pos_embed_dict, 
                                             neg_embed_dict, 
                                             clip_embed_dict,
@@ -170,8 +177,7 @@ def main(**params):
         cfg=cfg,
         sampler_name=sampler_name,
         scheduler_name=scheduler_name,
-        positive=pos_embed,
-        negative=neg_embed,
+        batched_conditioning=batched_cond,
         latent_image=blank_latent
     )
     
@@ -184,12 +190,11 @@ def main(**params):
     MemoryManager.clear_memory()
     
     progress_callback(0.95, "Decoding output latents")
-    cur_model = "wan_2_2_vae.safetensors"
-    model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vae")
-    out = out.to(vae_dtype)
-    wan_vae = Wan22VAE(dtype=vae_dtype, use_tiling=use_vae_tiling)
-    wan_vae.load_model(model_path=model_path_data.path)
-    move_model(wan_vae, VRAM_DEVICE)
+    wan_vae = get_vae(
+        vae_type=VAEType.WAN22.value,
+        vae_dtype=vae_dtype,
+        use_tiling=use_vae_tiling
+    )
     out = wan_vae.decode(out, (height, width, output_frame_count))
     
     metadata = {

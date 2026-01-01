@@ -1,6 +1,7 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
 
 import torch
+from torch import Tensor
 import torch.nn as nn
 from einops import rearrange
 
@@ -15,7 +16,7 @@ from ...latent_format import LatentFormat, Wan21VAELatentFormat, Wan22VAELatentF
 from ....components.samplers.sampler_types import get_model_sampling
 from ....model_utils.helper_methods import get_state_dict
 from ....model_utils.model_mixin import ModelMixin
-from ....model_utils.common_classes import ModelArchConfig
+from ....model_utils.common_classes import Conditioning, ConditioningType, ModelArchConfig, ModelForwardInput
 from ....utils.tensor import common_upscale, pad_to_patch_size, repeat_to_batch_size
 from ....utils.dev import get_tensor_hash
 
@@ -452,23 +453,34 @@ class Wan21Model(ModelMixin):
             self.ref_conv = nn.Conv2d(in_dim_ref_conv, dim, kernel_size=patch_size[1:], stride=patch_size[1:])
         else:
             self.ref_conv = None
-            
-    def concatenate_conditioning_latents(self, **kwargs):
+    
+    # TODO: both prepare_concat_latent and format_conds seem very generic
+    # and should be moved inside the ModelMixin        
+    def prepare_concat_latent(self, cond: Conditioning, noise: Tensor):
         """
+        Prepares the concatenation conditioning (Mask + Reference Image) for I2V/Inpainting.
+        
         Inserts 'concat_mask' in a specific position ('concat_mask_index') in the 
         'concat_latent_image' tensor channels. Insert position defaults to 0.
         """
-        noise = kwargs.get("noise", None)
+        assert noise is not None, "noise tensor can't be None during cond preprocessing"
         
+        # extra channels supported by the model
         extra_channels = self.patch_embedding.weight.shape[1] - noise.shape[1]
         if extra_channels == 0:
             return None
 
-        image = kwargs.get("concat_latent_image", None)
-        device = kwargs["device"]
-
-        # CASE 1: No reference image was provided
+        device = noise.device
+        if cond.concat is None:
+            image, mask, mask_index = None, None, 0
+        else:
+            image = cond.concat.data
+            mask = cond.concat.mask
+            mask_index = cond.concat.mask_index
+        
         if image is None:
+            # CASE 1: No reference image was provided 
+            # (but we have to fill the extra channels)
             shape_image = list(noise.shape)
             shape_image[1] = extra_channels
             image = torch.zeros(shape_image, dtype=noise.dtype, layout=noise.layout, device=noise.device)
@@ -483,18 +495,15 @@ class Wan21Model(ModelMixin):
             
             image = repeat_to_batch_size(image, noise.shape[0])
 
-        # masks are repeated to 4 channels (not clear why)
+        # 4 channels are reserved for the mask, if image has too many then we crop it
         if extra_channels != image.shape[1] + 4:
-            if not self.image_to_video or extra_channels == image.shape[1]:
-                return image
-
-        # truncate image channels
-        if image.shape[1] > (extra_channels - 4):
-            image = image[:, :(extra_channels - 4)]
+            # only truncate if we are strictly in an I2V scenario or overflowing
+            if getattr(self, "image_to_video", False) or image.shape[1] > (extra_channels - 4):
+                 image = image[:, :(extra_channels - 4)]
 
         # --- Mask Processing ---
-        mask = kwargs.get("concat_mask", kwargs.get("denoise_mask", None))
         if mask is None:
+            # defaulting to all zeros ("keep the original")
             mask = torch.zeros_like(noise)[:, :4]
         else:
             if mask.shape[1] != 4:
@@ -502,53 +511,48 @@ class Wan21Model(ModelMixin):
             
             mask = 1.0 - mask
             mask = common_upscale(mask.to(device), noise.shape[-1], noise.shape[-2], "bilinear", "center")
-            if mask.shape[-3] < noise.shape[-3]:
-                mask = torch.nn.functional.pad(mask, (0, 0, 0, 0, 0, noise.shape[-3] - mask.shape[-3]), mode='constant', value=0)
+            if noise.ndim == 5 and mask.shape[2] < noise.shape[2]:
+                pad_len = noise.shape[2] - mask.shape[2]
+                # F.pad format: (left, right, top, bottom, front, back)
+                mask = torch.nn.functional.pad(mask, (0, 0, 0, 0, 0, pad_len), mode='constant', value=0)
             
+            # expand to 4 channels if needed
             if mask.shape[1] == 1:
-                mask = mask.repeat(1, 4, 1, 1, 1)
+                mask = mask.repeat(1, 4, *([1] * (mask.ndim - 2)))
             
             mask = repeat_to_batch_size(mask, noise.shape[0])
 
         # --- Final Assembly ---
-        concat_mask_index = kwargs.get("concat_mask_index", 0)
-        if concat_mask_index != 0:
-            return torch.cat((image[:, :concat_mask_index], mask, image[:, concat_mask_index:]), dim=1)
-        else:
-            return torch.cat((mask, image), dim=1)
+        return torch.cat((image[:, :mask_index], mask, image[:, mask_index:]), dim=1)
             
-    def format_conds(self, *args, **kwargs):
-        out = {}
-        
-        concat_cond = self.concatenate_conditioning_latents(**kwargs)
-        if concat_cond is not None:
-            out['c_concat'] = CONDNoiseShape(concat_cond)
+    def format_conds(self, cond: Conditioning, **ctx) -> ModelForwardInput:
+        output = ModelForwardInput()
+        noise = ctx.get("noise")
 
-        cross_attn_cnet = kwargs.get("cross_attn_controlnet", None)
-        if cross_attn_cnet is not None:
-            out['crossattn_controlnet'] = CONDCrossAttn(cross_attn_cnet)
+        # channel concat latents
+        concat_tensor = self.prepare_concat_latent(cond, noise)
+        if concat_tensor is not None:
+            output.concat_map = CONDNoiseShape(concat_tensor)
 
-        c_concat = kwargs.get("noise_concat", None)
-        if c_concat is not None:
-            out['c_concat'] = CONDNoiseShape(c_concat)
+        # text / image embeds
+        if cond.type == ConditioningType.EMBEDDING:
+             output.cross_attn = CONDCrossAttn(cond.data)
+        # ipa
+        elif cond.type == ConditioningType.IPA:
+             output.visual_embedding = CONDRegular(cond.data)
 
-        cross_attn = kwargs.get("cross_attn", None)
-        if cross_attn is not None:
-            out['c_crossattn'] = CONDCrossAttn(cross_attn)
+        # auxiliary signals
+        if cond.aux:
+            if cond.aux.time_hint is not None:
+                t = self.process_latent_in(cond.aux.time_hint)
+                output.time_hint = CONDRegular(t)
 
-        clip_vision_output = kwargs.get("clip_vision_output", None)
-        if clip_vision_output is not None:
-            out['clip_fea'] = CONDRegular(clip_vision_output["penultimate_hidden_states"])
+            if cond.aux.reference_latents is not None:
+                refs = cond.aux.reference_latents
+                processed_ref = self.process_latent_in(refs[-1])[:, :, 0]   # taking only the first frame (b,c,t,h,w)
+                output.ref_latent = CONDRegular(processed_ref)
 
-        time_dim_concat = kwargs.get("time_dim_concat", None)
-        if time_dim_concat is not None:
-            out['time_dim_concat'] = CONDRegular(self.process_latent_in(time_dim_concat))
-
-        reference_latents = kwargs.get("reference_latents", None)
-        if reference_latents is not None:
-            out['reference_latent'] = CONDRegular(self.process_latent_in(reference_latents[-1])[:, :, 0])
-        
-        return out
+        return output
 
     def forward_orig(
         self,

@@ -1,6 +1,10 @@
 import torch
 from torch import Tensor
 
+from exiv.model_utils.helper_methods import move_model
+from exiv.utils.file import ensure_model_availability
+from exiv.utils.file_path import FilePathData, FilePaths
+
 from .helper_methods import VAEImageProcessor
 from ..enum import VAEType
 from ...config import LOADING_MODE
@@ -249,15 +253,26 @@ class VAEBase(ModelMixin):
             b[:, :, :, :, x] = a[:, :, :, :, -blend_extent + x] * (1 - blend_ratio) + b[:, :, :, :, x] * blend_ratio
         return b
 
-    
-def get_vae(vae_type: VAEType) -> VAEBase:
+# IMPORTANT: this method not only initializes the VAE but also moves it on the VRAM device
+def get_vae(
+        vae_type: VAEType,
+        vae_dtype = torch.bfloat16,
+        use_tiling = True,
+        override_filename = None,   # if provided it will use this instead of the default file name/paths
+    ) -> VAEBase:
     from .wan_vae import Wan21VAE
     from .wan_vae22 import Wan22VAE
     
     if vae_type == VAEType.WAN:
         return Wan21VAE()
     elif vae_type == VAEType.WAN22:
-        return Wan22VAE()
+        cur_model = override_filename or "wan_2_2_vae.safetensors"
+        model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vae")
+        model_path = ensure_model_availability(model_path=model_path_data.path, download_url=model_path_data.url)
+        wan_vae = Wan22VAE(dtype=vae_dtype, use_tiling=use_tiling)
+        wan_vae.load_model(model_path=model_path)
+        move_model(wan_vae, VRAM_DEVICE)
+        return wan_vae
     
     raise Exception(f"{vae_type} vae not supported")
 

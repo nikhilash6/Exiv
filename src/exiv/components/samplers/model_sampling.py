@@ -1,17 +1,15 @@
-from typing import List
 import torch
 from torch import Tensor
 
-import math
+from typing import Dict, List
 
 from .utils import normalize_seed
 from .scheduler_types import calculate_sigmas
-from .sampling_helpers import preprocess_cond_per_step, prepare_model_conds, prepare_mask
+from .sampling_helpers import filter_active_conds, preprocess_cond_per_step, prepare_model_conds, prepare_mask
 from ..enum import DISCARD_PENULTIMATE_SIGMA_SAMPLERS, KSamplerType, SamplerType, SchedulerType
 from .sampler_impl import Sampler, ksampler_factory
 from ...utils.tensor import fix_empty_latent_channels, prepare_noise
-from ...model_utils.common_classes import ModelWrapper
-from ...model_utils.common_classes import Latent
+from ...model_utils.common_classes import BatchedConditioning, ModelForwardInput, ModelWrapper, Latent
 from ...utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, ProcDevice
 from ...utils.common import null_func
 
@@ -24,8 +22,7 @@ class KSampler:
         cfg: float,
         sampler_name: str,
         scheduler_name: str,
-        positive: torch.Tensor,
-        negative: torch.Tensor,
+        batched_conditioning: BatchedConditioning,
         latent_image: Latent,
         denoise: float = 1.0,
         device = None,
@@ -42,8 +39,7 @@ class KSampler:
         self.cfg = cfg 
         self.sampler_name = sampler_name
         self.scheduler_name = scheduler_name
-        self.positive = positive
-        self.negative = negative
+        self.batched_conditioning = batched_conditioning
         self.latent_image = latent_image
         self.denoise = denoise
         
@@ -91,8 +87,7 @@ class KSampler:
         return sample(
             self.wrapped_model,
             noise,
-            self.positive,
-            self.negative,
+            self.batched_conditioning,
             self.cfg,
             self.sigmas,
             ksampler_cls_impl,
@@ -106,8 +101,7 @@ class KSampler:
 def sample(
     wrapped_model: ModelWrapper,
     noise: Tensor,
-    positive,
-    negative,
+    batched_conditioning: BatchedConditioning,
     cfg,
     sigmas,
     ksampler_cls_impl: Sampler,
@@ -123,9 +117,7 @@ def sample(
     '''
     # returning if there are 0 steps
     if sigmas.shape[-1] == 0: return latent_image
-   
-    grouped_cond = {"positive": positive, "negative": negative}
-        
+    
     if denoise_mask is not None:
         denoise_mask = prepare_mask(denoise_mask, noise.shape, wrapped_model.model.gpu_device)
     
@@ -133,18 +125,36 @@ def sample(
     if latent_image is not None and torch.count_nonzero(latent_image) > 0:
         latent_image = wrapped_model.model.process_latent_in(latent_image)
     
-    conds = prepare_model_conds(wrapped_model, grouped_cond, noise, latent_image, denoise_mask, seed)
-    pos_conds, neg_conds = conds.get("positive"), conds.get("negative")
+    # modified batched conditioning
+    mod_batched_conds: BatchedConditioning = prepare_model_conds(
+        wrapped_model, 
+        batched_conditioning, 
+        noise, 
+        latent_image, 
+        denoise_mask, 
+        seed
+    )
+    
+    # used in filtering time based conditioning
+    sigma_start = sigmas[0].item()
+    sigma_end = sigmas[-1].item()
+    total_range = sigma_start - sigma_end + 1e-5
     
     extra_args = {"seed":seed}
     
     def denoiser_function(x, sigma, **kwargs):
+        # progres -> (0.0 -> 1.0)
+        current_sigma = sigma.item()
+        progress = (sigma_start - current_sigma) / total_range
+        progress = max(0.0, min(1.0, progress))
+        
+        active_batch = filter_active_conds(mod_batched_conds, progress)
+        
         return model_sampling_step(
             wrapped_model,
             x,
             sigma,
-            neg_conds,
-            pos_conds,
+            active_batch,
             cfg,
             denoise_mask=denoise_mask,
             seed=kwargs.get("seed")
@@ -154,7 +164,15 @@ def sample(
     return wrapped_model.model.process_latent_out(samples.to(torch.float32))
 
 
-def model_sampling_step(wrapped_model: ModelWrapper, x, sigma, uncond, cond, cond_scale, denoise_mask=None, seed=None):
+def model_sampling_step(
+    wrapped_model: ModelWrapper, 
+    x: Tensor, 
+    sigma: Tensor, 
+    active_batch: BatchedConditioning, 
+    cond_scale: float, 
+    denoise_mask=None, 
+    seed=None
+):
     '''
     Single sampling step for a given model. 
     - scales input using calculate_input
@@ -165,15 +183,17 @@ def model_sampling_step(wrapped_model: ModelWrapper, x, sigma, uncond, cond, con
     
     # convert sigma (noise level) to the discrete timestep expected by the model
     timestep = wrapped_model.model_sampling.timestep(sigma)
-    
     # x is the current noisy latent
     x_in = wrapped_model.model_sampling.calculate_input(sigma, x)
 
     # **** main model run ****
-    conds = [cond, uncond]
-    out = calc_cond_batch(wrapped_model, conds, x_in, timestep, denoise_mask=denoise_mask)
+    out_groups = calc_cond_batch(wrapped_model, active_batch, x_in, timestep, denoise_mask=denoise_mask)
+    
     # TODO: streamline this as more cfg methods are added
-    cond_pred, uncond_pred = out[0], out[1]
+    # (defaulting to zeros if the group is missing / filtered)
+    cond_pred = out_groups.get("positive", torch.zeros_like(x_in))
+    uncond_pred = out_groups.get("negative", torch.zeros_like(x_in))
+    
     kwargs = {
         "cond": cond_pred, 
         "uncond": uncond_pred, 
@@ -187,91 +207,110 @@ def model_sampling_step(wrapped_model: ModelWrapper, x, sigma, uncond, cond, con
     }
     # we can apply cfg on raw outputs, no matter what they are 
     cfg_result = wrapped_model.cfg_func(**kwargs)
-
     # convert the model output (EPS, V, etc.) back to the denoised latent (x0)
     denoised = wrapped_model.model_sampling.calculate_denoised(sigma, cfg_result, x)
 
     return denoised
 
-# will check and update this later
-def cond_cat(conds):
-    c_out = {}
-    for k in conds[0]:
-        current_conds = [c[k] for c in conds[1:]]
-        c_out[k] = conds[0][k].concat(current_conds)
-        
-    return c_out
+def collate_inputs(inputs: List[ModelForwardInput]):
+    """Merges a list of ModelForwardInputs into a single batched input."""
+    if not inputs: return {}
+    
+    # TODO: assumes same makeup for pos/neg batches, will fail for heterogenous stuff like IPA
+    keys = inputs[0].to_dict().keys()
+    
+    collated = {}
+    for k in keys:
+        values = [getattr(inp, k) for inp in inputs]
+        if hasattr(values[0], 'concat'):
+            collated[k] = values[0].concat(values[1:])
+        elif isinstance(values[0], torch.Tensor):
+            collated[k] = torch.cat(values, dim=0)
+            
+    return collated
 
-# TODO: support multi batch conditionals, like multiple conditionals applied to different frames, that require
-# the model to be run multiple times
-def calc_cond_batch(wrapped_model: ModelWrapper, conds: List[List], x_in: Tensor, timestep: Tensor, denoise_mask=None):
+def prepare_per_frame_timestep(timestep, num_tasks, denoise_mask):
+    # NOTE: assuming denoise_mask shape to be [Batch, Channels, Frames, Height, Width]
+    if denoise_mask is None:
+        return timestep.repeat(num_tasks)
+    
+    # 1. Create a Per-Frame Mask
+    # We average over Channels(1), Height(3), and Width(4).
+    # Result: A tensor of shape [Batch, 1, Frames, 1, 1]
+    # Value is 1.0 for "Generation Frames" and 0.0 for "Context Frames"
+    # if ANY pixel in a frame is masked, the entire frame get the full timestep t
+    frame_mask = torch.amax(denoise_mask, dim=(1, 3, 4), keepdim=True)
+    
+    # 2. Reshape the global timestep 't' to match the mask dimensions
+    # t shape: [Batch] -> [Batch, 1, 1, 1, 1]
+    t_reshaped = timestep.view(timestep.shape[0], 1, 1, 1, 1)
+    
+    # 3. Apply the timestep logic (The "Gate")
+    # - Context Frames: 0.0 * t = 0  (Model sees them as "Clean/Finished")
+    # - Gen Frames:     1.0 * t = t  (Model sees them as "Noisy/Current Step")
+    per_frame_timesteps = frame_mask * t_reshaped
+    
+    # 4. Flatten back to [Batch, Frames] for the model
+    batched_t = per_frame_timesteps.reshape(timestep.shape[0], -1)
+    
+    # 5. Repeat for all parallel tasks (Positive, Negative, etc.)
+    batched_t = batched_t.repeat(num_tasks, 1)
+    
+    return batched_t
+
+def calc_cond_batch(
+    wrapped_model: ModelWrapper, 
+    batched_conds: BatchedConditioning, 
+    x_in: Tensor, 
+    timestep: Tensor, 
+    denoise_mask=None
+) -> Dict[str, Tensor]:
     """
     It batches all conditioning (pos, neg, others etc..) together, runs the
     model once, and then returns the separated results. (for now)
     """
-    # nothing to process
-    if not len(conds) or all(c is None for c in conds):
-        return [torch.zeros_like(x_in) for _ in conds]
 
-    # ---- prepare conditioning
-    applied_cond = []
-    applied_cond_group = []
-
-    for i, cond_list in enumerate(conds):
-        if cond_list is None: continue
-        for c in cond_list:
-            prepared_chunk = preprocess_cond_per_step(c, x_in)
-            applied_cond.append(prepared_chunk)
-            applied_cond_group.append(i)
-
-    # returning if no conditional applied
-    if not applied_cond:
-        return [torch.zeros_like(x_in) for _ in range(len(conds))]
-
-    # ---- build the batch
-    num_tasks = len(applied_cond)
-    batched_input_x = x_in.repeat(num_tasks, *[1] * (x_in.ndim - 1))
-    batched_timestep = timestep.repeat(num_tasks)
-
-    if denoise_mask is not None:
-         temp_ts = (torch.mean(denoise_mask[:, :, :, :, :], dim=(1, 3, 4), keepdim=True) * timestep.view([timestep.shape[0]] + [1] * (denoise_mask.ndim - 1))).reshape(timestep.shape[0], -1)
-         batched_timestep = temp_ts.repeat(num_tasks, 1)
-    conditioning_to_cat = [t.conditioning for t in applied_cond]
-
-    batched_conditioning = cond_cat(conditioning_to_cat)
-
-    controlnet_cond = next((t.control for t in applied_cond if t.control is not None), None)
-    if controlnet_cond is not None:
-        batched_conditioning['control'] = controlnet_cond.get_control(batched_input_x, batched_timestep, batched_conditioning, num_tasks)
-
-    if "c_crossattn" in batched_conditioning:
-        batched_conditioning["context"] = batched_conditioning.pop("c_crossattn")
+    flat_conds = []
+    group_map = []  # group name for each item in flat_conds
     
-    # ---- run model
-    output = wrapped_model.model(batched_input_x, batched_timestep, **batched_conditioning)
+    # flat_conds - [t1, t2, t3, t4]
+    # group_map  - [p,  p,  n,  n]
+    for name, conds in batched_conds.get_groups_in_order():
+        if not conds: continue
+        for cond in conds:
+            flat_conds.append(cond)
+            group_map.append(name)
+            
+    if not flat_conds:
+        return {}
 
-    # ---- average the results
-    final_outputs = [torch.zeros_like(x_in) for _ in range(len(conds))]
-    final_counts = [torch.zeros_like(x_in) + 1e-37 for _ in range(len(conds))]
+    # batch inputs
+    num_tasks = len(flat_conds)
+    batched_inputs = collate_inputs([c.model_input for c in flat_conds])
+    
+    # batch standard args (repeat for each task)
+    batched_x = x_in.repeat(num_tasks, *[1] * (x_in.ndim - 1))
+    batched_t = prepare_per_frame_timestep(timestep, num_tasks, denoise_mask)
 
+    # **** main model run ****
+    output = wrapped_model.model(batched_x, batched_t, **batched_inputs)
+    
+    # un-batch and average per group
     output_chunks = output.chunk(num_tasks)
+    
+    results = {}
+    counts = {}
+    
+    for i, (chunk, group_name) in enumerate(zip(output_chunks, group_map)):
+        cond = flat_conds[i]
+        if group_name not in results:
+            results[group_name] = torch.zeros_like(x_in)
+            counts[group_name] = torch.zeros_like(x_in) + 1e-37
+            
+        results[group_name] += chunk * cond.strength
+        counts[group_name] += cond.strength
 
-    for i, result_chunk in enumerate(output_chunks):
-        original_index = applied_cond_group[i]
-        strength_mult = applied_cond[i].mult
-
-        final_outputs[original_index] += result_chunk * strength_mult
-        final_counts[original_index] += strength_mult
-
-    for i in range(len(final_outputs)):
-        final_outputs[i] /= final_counts[i]
-
-    final_results = []
-    for i, c in enumerate(conds):
-        if c is None: 
-            final_results.append(torch.zeros_like(x_in))
-        else:
-            final_results.append(final_outputs[i])
-
-    return final_results
-
+    for name in results:
+        results[name] /= counts[name]
+        
+    return results
