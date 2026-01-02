@@ -264,7 +264,13 @@ def get_vae(
     from .wan_vae22 import Wan22VAE
     
     if vae_type == VAEType.WAN21.value:
-        return Wan21VAE()
+        cur_model = override_filename or "wan_2_1_vae.safetensors"
+        model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vae")
+        model_path = ensure_model_availability(model_path=model_path_data.path, download_url=model_path_data.url)
+        wan_vae = Wan21VAE(dtype=vae_dtype, use_tiling=use_tiling)
+        wan_vae.load_model(model_path=model_path)
+        move_model(wan_vae, VRAM_DEVICE)
+        return wan_vae
     elif vae_type == VAEType.WAN22.value:
         cur_model = override_filename or "wan_2_2_vae.safetensors"
         model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vae")

@@ -6,43 +6,10 @@ import math
 import collections
 from typing import Any, List
 
+from ...model_utils.conditioning_mixin import ConditioningMixin
 from ...model_utils.common_classes import BatchedConditioning, Conditioning, ModelWrapper
 from ...utils.tensor import common_upscale, repeat_to_batch_size
 
-
-def prepare_mask(mask, shape, device):
-    """
-    Ensures the mask is of the proper dimensions.
-    - Matches the number of dimensions of the target shape.
-    - Interpolates the spatial dimensions (last two).
-    - Adjusts the batch and channel dimensions to match the target shape.
-    """
-    mask = mask.to(device)
-    
-    # Ensure mask has the same number of dimensions as shape
-    while mask.ndim < len(shape):
-        mask = mask.unsqueeze(0)
-    
-    # Spatial interpolation on the last two dimensions
-    if mask.shape[-2:] != shape[-2:]:
-        mask = common_upscale(mask, shape[-1], shape[-2], upscale_method="bilinear", crop="none")
-
-    # Adjust channel dimension (shape[1])
-    if mask.shape[1] != shape[1]:
-        if mask.shape[1] == 1:
-            # Expand works for both 4D [B, C, H, W] and 5D [B, C, T, H, W]
-            mask = mask.expand(mask.shape[0], shape[1], *mask.shape[2:])
-        else:
-            mask = repeat_to_batch_size(mask, shape[1], dim=1)
-
-    # Adjust batch dimension (shape[0])
-    mask = repeat_to_batch_size(mask, shape[0])
-    
-    # Adjust temporal dimension if 5D
-    if mask.ndim == 5 and shape[2] != mask.shape[2]:
-        mask = repeat_to_batch_size(mask, shape[2], dim=2)
-
-    return mask
 
 def filter_active_conds(
     batched_conditioning: BatchedConditioning, 
@@ -78,7 +45,8 @@ def prepare_model_conds(
     ) -> BatchedConditioning:
     """
     (runs once)
-    - adds 'model_input' to individual conditioning, basically a inference safe format
+    - filters out model conds that are not supported by the model
+    - adds 'model_input' to individual conditioning, basically an inference safe format
     - creates temporal mask based on frame range
     
     In each sample step, we go through these and pick the appropriate conds to apply for that 
@@ -100,39 +68,16 @@ def prepare_model_conds(
         base_ctx["width"] = noise.shape[3] * base_ctx["spatial_compression_factor"]
         base_ctx["height"] = noise.shape[2] * base_ctx["spatial_compression_factor"]
         
-    # shape is [B, C, T, H, W] for video or [B, C, H, W] for images
-    has_temporal = noise.ndim == 5
-    num_frames = noise.shape[2] if has_temporal else 1
-    
     for cond_group_name, cond_list in batched_conditioning.get_groups_in_order():
+        cond_list = wrapped_model.model.filter_conditionings(cond_list)
         if cond_list is None: continue
         
         updated_conds = []
         for cond in cond_list:
             # shallow copy to avoid stale data in case of accidental re-use
             active_cond = dataclasses.replace(cond)
-            
-            # --- FRAME RANGE LOGIC ---
-            if active_cond.frame_range is not None and has_temporal:
-                f_start, f_end = active_cond.frame_range
-                
-                # broadcastable temporal mask: [1, 1, T, 1, 1]
-                temporal_mask = torch.zeros((1, 1, num_frames, 1, 1), device=noise.device, dtype=noise.dtype)
-                
-                # clamping
-                f_start = max(0, f_start)
-                f_end = min(num_frames, f_end)
-                temporal_mask[:, :, f_start:f_end, :, :] = 1.0
-                
-                if active_cond.mask is not None:
-                    # handling spatial expansion (H,W -> T,H,W) and batching
-                    existing_mask = prepare_mask(active_cond.mask, noise.shape, noise.device)
-                    active_cond.mask = existing_mask * temporal_mask
-                else:
-                    # if no spatial mask is present, just use the temporal one
-                    active_cond.mask = repeat_to_batch_size(temporal_mask, noise.shape[0])
-            
-            active_cond.model_input = model.format_conds(active_cond, **base_ctx)
+            active_cond = ConditioningMixin.create_spatial_mask(active_cond, noise)
+            active_cond.model_input = model.prepare_model_input(active_cond, **base_ctx)
             updated_conds.append(active_cond)
             
         res.set_group_cond(cond_group_name, updated_conds, replace=True)

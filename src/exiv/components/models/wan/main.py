@@ -6,7 +6,7 @@ import torch.nn as nn
 from einops import rearrange
 
 import math
-import uuid
+from typing import List
 
 from ...enum import Model, ModelType
 from ...attention import optimized_attention
@@ -453,107 +453,16 @@ class Wan21Model(ModelMixin):
             self.ref_conv = nn.Conv2d(in_dim_ref_conv, dim, kernel_size=patch_size[1:], stride=patch_size[1:])
         else:
             self.ref_conv = None
-    
-    # TODO: both prepare_concat_latent and format_conds seem very generic
-    # and should be moved inside the ModelMixin        
+            
+        # supported conditionings
+        self.supported_conditioning = [ConditioningType.EMBEDDING, ConditioningType.VISION]
+          
     def prepare_concat_latent(self, cond: Conditioning, noise: Tensor):
-        """
-        Prepares the concatenation conditioning (Mask + Reference Image) for I2V/Inpainting.
-        
-        Inserts 'concat_mask' in a specific position ('concat_mask_index') in the 
-        'concat_latent_image' tensor channels. Insert position defaults to 0.
-        """
-        assert noise is not None, "noise tensor can't be None during cond preprocessing"
-        
         # extra channels supported by the model
         extra_channels = self.patch_embedding.weight.shape[1] - noise.shape[1]
-        if extra_channels == 0:
-            return None
-
-        device = noise.device
-        if cond.concat is None:
-            image, mask, mask_index = None, None, 0
-        else:
-            image = cond.concat.data
-            mask = cond.concat.mask
-            mask_index = cond.concat.mask_index
-        
-        if image is None:
-            # CASE 1: No reference image was provided 
-            # (but we have to fill the extra channels)
-            shape_image = list(noise.shape)
-            shape_image[1] = extra_channels
-            image = torch.zeros(shape_image, dtype=noise.dtype, layout=noise.layout, device=noise.device)
-        else:
-            # CASE 2: A reference image exists.
-            latent_dim = self.latent_format.latent_channels
-            
-            # upscale/resize + process to match vae's distribution
-            image = common_upscale(image.to(device), noise.shape[-1], noise.shape[-2], "bilinear", "center")
-            for i in range(0, image.shape[1], latent_dim):
-                image[:, i: i + latent_dim] = self.process_latent_in(image[:, i: i + latent_dim])
-            
-            image = repeat_to_batch_size(image, noise.shape[0])
-
-        # 4 channels are reserved for the mask, if image has too many then we crop it
-        if extra_channels != image.shape[1] + 4:
-            # only truncate if we are strictly in an I2V scenario or overflowing
-            if getattr(self, "image_to_video", False) or image.shape[1] > (extra_channels - 4):
-                 image = image[:, :(extra_channels - 4)]
-
-        # --- Mask Processing ---
-        if mask is None:
-            # defaulting to all zeros ("keep the original")
-            mask = torch.zeros_like(noise)[:, :4]
-        else:
-            if mask.shape[1] != 4:
-                mask = torch.mean(mask, dim=1, keepdim=True)
-            
-            mask = 1.0 - mask
-            mask = common_upscale(mask.to(device), noise.shape[-1], noise.shape[-2], "bilinear", "center")
-            if noise.ndim == 5 and mask.shape[2] < noise.shape[2]:
-                pad_len = noise.shape[2] - mask.shape[2]
-                # F.pad format: (left, right, top, bottom, front, back)
-                mask = torch.nn.functional.pad(mask, (0, 0, 0, 0, 0, pad_len), mode='constant', value=0)
-            
-            # expand to 4 channels if needed
-            if mask.shape[1] == 1:
-                mask = mask.repeat(1, 4, *([1] * (mask.ndim - 2)))
-            
-            mask = repeat_to_batch_size(mask, noise.shape[0])
-
-        # --- Final Assembly ---
+        image, mask, mask_index = super().prepare_concat_latent(cond, noise, extra_channels=extra_channels, mask_channels=4)
         return torch.cat((image[:, :mask_index], mask, image[:, mask_index:]), dim=1)
             
-    def format_conds(self, cond: Conditioning, **ctx) -> ModelForwardInput:
-        output = ModelForwardInput()
-        noise = ctx.get("noise")
-
-        # channel concat latents
-        concat_tensor = self.prepare_concat_latent(cond, noise)
-        if concat_tensor is not None:
-            output.concat_map = CONDNoiseShape(concat_tensor)
-
-        # text / image embeds
-        if cond.type == ConditioningType.EMBEDDING:
-             output.cross_attn = CONDCrossAttn(cond.data)
-        # ipa
-        elif cond.type == ConditioningType.IPA:
-             output.visual_embedding = CONDRegular(cond.data)
-
-        # auxiliary signals
-        if cond.aux:
-            if cond.aux.time_hint is not None:
-                t = self.process_latent_in(cond.aux.time_hint)
-                output.time_hint = CONDRegular(t)
-
-            if cond.aux.reference_latents is not None:
-                refs = cond.aux.reference_latents
-                processed_ref = self.process_latent_in(refs[-1])[:, :, 0]   # taking only the first frame (b,c,t,h,w)
-                output.ref_latent = CONDRegular(processed_ref)
-
-        return output
-
     def forward_orig(
         self,
         x,
@@ -561,6 +470,7 @@ class Wan21Model(ModelMixin):
         context,
         clip_fea=None,
         freqs=None,
+        reference_latent=None,
         **kwargs,
     ):
         r"""
@@ -599,7 +509,7 @@ class Wan21Model(ModelMixin):
         # injecting reference image
         full_ref = None
         if self.ref_conv is not None:
-            full_ref = kwargs.get("reference_latent", None)
+            full_ref = reference_latent
             if full_ref is not None:
                 full_ref = self.ref_conv(full_ref).flatten(2).transpose(1, 2)
                 x = torch.concat((full_ref, x), dim=1)
@@ -655,16 +565,16 @@ class Wan21Model(ModelMixin):
         freqs = self.rope_embedder(img_ids).movedim(1, 2)
         return freqs
 
-    def forward(self, x, timestep, cross_attn, visual_embedding=None, **kwargs):
+    def forward(self, x, timestep, cross_attn, visual_embedding=None, reference_latent=None, **kwargs):
         bs, c, t, h, w = x.shape
         x = pad_to_patch_size(x, self.patch_size)
 
         t_len = t
-        if self.ref_conv is not None and "reference_latent" in kwargs:
+        if self.ref_conv is not None and reference_latent is not None:
             t_len += 1      # the single latent that has been passed
 
         freqs = self.rope_encode(t_len, h, w, device=x.device, dtype=x.dtype)
-        return self.forward_orig(x, timestep, cross_attn, clip_fea=visual_embedding, freqs=freqs, **kwargs)[:, :, :t, :h, :w]
+        return self.forward_orig(x, timestep, cross_attn, clip_fea=visual_embedding, freqs=freqs, reference_latent=reference_latent, **kwargs)[:, :, :t, :h, :w]
 
     def unpatchify(self, x, grid_sizes):
         r"""

@@ -6,6 +6,7 @@ from torch import Tensor
 from typing import List
 import uuid
 
+from .conditioning_mixin import ConditioningMixin
 from .lora_mixin import LoraMixin
 from .helper_methods import get_state_dict, set_module_tensor_to_device
 from ..components.enum import ModelType
@@ -52,7 +53,7 @@ class ModuleMeta(type(nn.Module)):
         return instance
 
 
-class ModelMixin(nn.Module, LoraMixin, metaclass=ModuleMeta):
+class ModelMixin(nn.Module, LoraMixin, ConditioningMixin, metaclass=ModuleMeta):
     '''
     Adds additional feature to the base model
     
@@ -77,6 +78,9 @@ class ModelMixin(nn.Module, LoraMixin, metaclass=ModuleMeta):
         self.gpu_device = device or VRAM_DEVICE
         self.model_path = model_path
         self.model_arch_config = None
+        
+        # NOTE: overriden in child impl.
+        self.supported_conditioning = [ConditioningType.EMBEDDING, ConditioningType.VISION]
     
     @staticmethod
     def is_leaf_module(module: nn.Module) -> bool:
@@ -252,10 +256,6 @@ class ModelMixin(nn.Module, LoraMixin, metaclass=ModuleMeta):
     def process_latent_out(self, latent_out: Tensor) -> Tensor:
         assert self.model_arch_config is not None, "model_arch_config not set"
         return self.model_arch_config.latent_format.process_out(latent_out)
-    
-    def format_conds(self) -> ModelForwardInput:
-        # NOTE: this formats the conds to a format as required by the underlying model
-        raise NotImplementedError("Child instance has not overriden this empty impl.")
     
     def get_memory_footprint_params(self):
         # NOTE: this has to be overidden in the child model

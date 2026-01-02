@@ -49,21 +49,22 @@ class ModelWrapper:
         return self.model_sampling.noise_scaling(sigma.reshape([sigma.shape[0]] + [1] * (len(noise.shape) - 1)), noise, latent_image)
 
 class ConditioningType(ExtendedEnum):
-    EMBEDDING = "embedding"
+    EMBEDDING = "embedding"     # ref latent and aux signals go here
     CONTROLNET = "controlnet"
     LORA = "lora"
-    IPA = "ipa"
+    VISION = "vision"           # can be used for ipa as well
 
 @dataclass
 class ModelForwardInput:
     """
-    Formatted conds that go in the forward pass (see format_conds)
+    Formatted conds that go in the forward pass (see prepare_model_input)
     """
     cross_attn: Optional[Any] = None            # main prompt
     concat_map: Optional[Any] = None            # image + mask
-    visual_embedding: Optional[Any] = None      # 'ref_latent' or 'clip_fea'
+    visual_embedding: Optional[Any] = None      # ipa / vision embeds
     controlnet: Optional[Any] = None            # controlnet signal
     time_hint: Optional[Any] = None             # time_dim_concat
+    reference_latent: Optional[Any] = None      # vae encoded latent as a hint
 
     def to_dict(self):
         return {k: v for k, v in self.__dict__.items() if v is not None}
