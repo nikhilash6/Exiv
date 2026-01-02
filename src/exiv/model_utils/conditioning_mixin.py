@@ -12,7 +12,7 @@ class ConditioningMixin:
     Handles all conditioning preparation, filtering, and formatting.
     """
     
-    def prepare_concat_latent(
+    def get_concat_components(
         self, 
         cond: Conditioning, 
         noise: Tensor, 

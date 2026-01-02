@@ -5,11 +5,12 @@ from typing import Dict, List
 
 from .utils import normalize_seed
 from .scheduler_types import calculate_sigmas
-from .sampling_helpers import filter_active_conds, prepare_model_conds, prepare_mask
+from .sampling_helpers import filter_active_conds, prepare_model_conds
 from ..enum import DISCARD_PENULTIMATE_SIGMA_SAMPLERS, KSamplerType, SamplerType, SchedulerType
 from .sampler_impl import Sampler, ksampler_factory
 from ...utils.tensor import fix_empty_latent_channels, prepare_noise
 from ...model_utils.common_classes import BatchedConditioning, ModelForwardInput, ModelWrapper, Latent
+from ...model_utils.conditioning_mixin import ConditioningMixin
 from ...utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, ProcDevice
 from ...utils.common import null_func
 
@@ -119,7 +120,7 @@ def sample(
     if sigmas.shape[-1] == 0: return latent_image
     
     if denoise_mask is not None:
-        denoise_mask = prepare_mask(denoise_mask, noise.shape, wrapped_model.model.gpu_device)
+        denoise_mask = ConditioningMixin.prepare_mask(denoise_mask, noise.shape, wrapped_model.model.gpu_device)
     
     # not scaling the blank latents
     if latent_image is not None and torch.count_nonzero(latent_image) > 0:

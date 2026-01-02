@@ -460,7 +460,8 @@ class Wan21Model(ModelMixin):
     def prepare_concat_latent(self, cond: Conditioning, noise: Tensor):
         # extra channels supported by the model
         extra_channels = self.patch_embedding.weight.shape[1] - noise.shape[1]
-        image, mask, mask_index = super().prepare_concat_latent(cond, noise, extra_channels=extra_channels, mask_channels=4)
+        image, mask, mask_index = self.get_concat_components(cond, noise, extra_channels=extra_channels, mask_channels=4)
+        if any(x is None for x in [image, mask, mask_index]): return None
         return torch.cat((image[:, :mask_index], mask, image[:, mask_index:]), dim=1)
             
     def forward_orig(
