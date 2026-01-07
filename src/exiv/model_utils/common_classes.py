@@ -169,16 +169,46 @@ class Conditioning:
                 mask[end:] = 0.0
         
         return mask     # (T, H, W)
+    
+    def signature(self):
+        """
+        Identifies this cond and is mainly used to decide if two conds can be stacked or not.
+        They can be stacked if they have the same signature.
+        
+        This only applies to model_input / ModelForwardInput, as that is the final prepared input.
+        """
+        if getattr(self, "model_input", None) is None:
+            return None
+
+        sig = []
+        inputs = self.model_input.to_dict()
+        for key in sorted(inputs.keys()):
+            val = inputs[key]
+            
+            if torch.is_tensor(val):
+                sig.append((key, tuple(val.shape), val.dtype, val.device))
+            elif isinstance(val, list):
+                list_sig = []
+                for item in val:
+                    if torch.is_tensor(item):
+                        list_sig.append((tuple(item.shape), item.dtype, item.device))
+                    else:
+                        list_sig.append(item)
+                sig.append((key, tuple(list_sig)))
+            else:
+                sig.append((key, val))
+                
+        return tuple(sig)
         
 
 """
-NOTE: there are a couple of dataclasses and all of them are being used at different points in the code
+NOTE: there are a couple of dataclasses and all of them are being used at different points in the code.
 will consolidate them later. here is a short summary of what is being used where -
 
 Conditioning        -   user defined conditioning unit. passed as a group / batch
 BatchedConditioning -   provided by the user. the Conditioning objects inside this don't have ModelForwardInput yet
-ModelForwardInput   -   depending on what model format of conds model require this is created and attached to the 
-                        respective Conditioining objects
+ModelForwardInput   -   depending on what format of conds model requires this is created and attached to the 
+                        respective Conditioining objects (these are ultimately collated inside the ExecutionBatch)
 ExecutionBatch      -   This is the final batch of conds, created after filtering and batching compatible conds, that
                         ultimtely gets passed to the model
 """
@@ -188,8 +218,66 @@ class ExecutionBatch:
     feed_t: Tensor
     feed_input: Dict[str, Tensor] 
     
-    group_names: List[str] 
-    conds: List[Conditioning]
+    group_names: List[str] = []
+    conds: List[Conditioning] = []
+    
+    def add_cond(self, cond, group_name):
+        self.group_names.append(group_name)
+        self.conds.append(cond)
+        
+    def _collate_inputs(self, inputs: List[ModelForwardInput]):
+        """ Merges a list of ModelForwardInputs into a single batched input """
+        if not inputs: return {}
+        keys = inputs[0].to_dict().keys()
+        
+        collated = {}
+        for k in keys:
+            values = [getattr(inp, k) for inp in inputs]
+            collated[k] = torch.cat(values, dim=0)
+                
+        return collated
+    
+    def _prepare_per_frame_timestep(self, timestep, num_tasks, denoise_mask):
+        # NOTE: assuming denoise_mask shape to be [Batch, Channels, Frames, Height, Width]
+        if denoise_mask is None:
+            return timestep.repeat(num_tasks)
+        
+        # 1. Create a Per-Frame Mask
+        # We average over Channels(1), Height(3), and Width(4).
+        # even a tiny UNmasked(1) part of the frame will lead to the entire frame being 
+        # considered UNmasked(1)
+        frame_mask = torch.amax(denoise_mask, dim=(1, 3, 4), keepdim=True)  # [Batch, 1, Frames, 1, 1]
+        
+        # 2. Reshape the global timestep 't' to match the mask dimensions
+        # t shape: [Batch] -> [Batch, 1, 1, 1, 1]
+        t_reshaped = timestep.view(timestep.shape[0], 1, 1, 1, 1)
+        
+        # 3. Apply the timestep logic (The "Gate")
+        # - Context Frames: 0.0 * t = 0  (Model sees them as "Clean/Finished")
+        # - Gen Frames:     1.0 * t = t  (Model sees them as "Noisy/Current Step")
+        per_frame_timesteps = frame_mask * t_reshaped
+        
+        # 4. Flatten back to [Batch, Frames] for the model
+        batched_t = per_frame_timesteps.reshape(timestep.shape[0], -1)
+        
+        # 5. Repeat for all parallel tasks (Positive, Negative, etc.)
+        batched_t = batched_t.repeat(num_tasks, 1)
+        
+        return batched_t
+        
+    def expand_batched_values(self, timestep, denoise_mask):
+        """ 
+        Updates x, t and input based on the num of conds. Should be run at the end.
+        TODO: this is not a good practice, will fix later
+        """
+        num_tasks = len(self.conds)
+    
+        # collates model inputs
+        self.feed_input = self._collate_inputs([c.model_input for c in self.conds])
+        # (B, C, H, W) -> (Num_Tasks * B, C, H, W)
+        self.feed_x = self.feed_x.repeat(num_tasks, *[1] * (self.feed_x.ndim - 1))
+        # specific logic for frame-ranges, usually simple repeat
+        self.feed_t = self._prepare_per_frame_timestep(timestep, num_tasks, denoise_mask)
 
 @dataclass
 class BatchedConditioning:

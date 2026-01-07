@@ -4,7 +4,7 @@ from torch import Tensor
 
 import math
 import collections
-from typing import Any, List
+from typing import Any, List, Tuple
 
 from ...utils.logging import app_logger
 from ...model_utils.conditioning_mixin import ConditioningMixin
@@ -98,81 +98,60 @@ def prepare_model_conds(
 
     return res
 
-def collate_inputs(inputs: List[ModelForwardInput]):
-    """Merges a list of ModelForwardInputs into a single batched input."""
-    if not inputs: return {}
-    
-    # TODO: assumes same makeup for pos/neg batches, will fail for heterogenous stuff like IPA
-    keys = inputs[0].to_dict().keys()
-    
-    collated = {}
-    for k in keys:
-        values = [getattr(inp, k) for inp in inputs]
-        if hasattr(values[0], 'concat'):
-            collated[k] = values[0].concat(values[1:])
-        elif isinstance(values[0], torch.Tensor):
-            collated[k] = torch.cat(values, dim=0)
-            
-    return collated
-
-def prepare_per_frame_timestep(timestep, num_tasks, denoise_mask):
-    # NOTE: assuming denoise_mask shape to be [Batch, Channels, Frames, Height, Width]
-    if denoise_mask is None:
-        return timestep.repeat(num_tasks)
-    
-    # 1. Create a Per-Frame Mask
-    # We average over Channels(1), Height(3), and Width(4).
-    # Result: A tensor of shape [Batch, 1, Frames, 1, 1]
-    # Value is 1.0 for "Generation Frames" and 0.0 for "Context Frames"
-    # if ANY pixel in a frame is masked, the entire frame get the full timestep t
-    frame_mask = torch.amax(denoise_mask, dim=(1, 3, 4), keepdim=True)
-    
-    # 2. Reshape the global timestep 't' to match the mask dimensions
-    # t shape: [Batch] -> [Batch, 1, 1, 1, 1]
-    t_reshaped = timestep.view(timestep.shape[0], 1, 1, 1, 1)
-    
-    # 3. Apply the timestep logic (The "Gate")
-    # - Context Frames: 0.0 * t = 0  (Model sees them as "Clean/Finished")
-    # - Gen Frames:     1.0 * t = t  (Model sees them as "Noisy/Current Step")
-    per_frame_timesteps = frame_mask * t_reshaped
-    
-    # 4. Flatten back to [Batch, Frames] for the model
-    batched_t = per_frame_timesteps.reshape(timestep.shape[0], -1)
-    
-    # 5. Repeat for all parallel tasks (Positive, Negative, etc.)
-    batched_t = batched_t.repeat(num_tasks, 1)
-    
-    return batched_t
-
-
-def batch_compatible_conds(active_batched_conds) -> List[ExecutionBatch]:
+def check_oom_safety(cond: Conditioning, x_in: Tensor) -> bool:
     """
-    Group conds to run them as a single batch instead of individually. This grouping should
-    be according to the memory available and if the conds are compatible with each other or not.
+    Mainly for checking if the stacked cond is OOM safe or not
     """
-    flat_conds = []
-    group_map = []  # group name for each item in flat_conds
-    
-    # flat_conds - [t1, t2, t3, t4]
-    # group_map  - [p,  p,  n,  n]
-    for name, conds in active_batched_conds.get_groups_in_order():
-        if not conds: continue
-        for cond in conds:
-            flat_conds.append(cond)
-            group_map.append(name)
-            
-    if not flat_conds:
-        return {}
-    
-    # batch inputs
-    num_tasks = len(flat_conds)
-    batched_inputs = collate_inputs([c.model_input for c in flat_conds])
-    
-    # batch standard args (repeat for each task)
-    batched_x = x_in.repeat(num_tasks, *[1] * (x_in.ndim - 1))
-    batched_t = prepare_per_frame_timestep(timestep, num_tasks, denoise_mask)
-    
+    # TODO: not implemented yet
+    return True
 
+def break_cond_for_no_oom(cond: Conditioning, x_in: Tensor):
+    """
+    Breaks the Condition into smaller Conditions that run individually and don't cause OOMs
+    """
+    # TODO: not implemented yet
+    # use the check_oom_safety method defined above here
+    return [cond]
+
+def batch_compatible_conds(
+    active_batched_conds: BatchedConditioning, 
+    x_in: Tensor, 
+    timestep: Tensor, 
+    denoise_mask: Tensor | None
+) -> List[ExecutionBatch]:
+
+    # flatten the queue
+    work_queue: List[Tuple[str, Conditioning]] = []
+    for group_name, cond_list in active_batched_conds.get_groups_in_order():
+        if not cond_list: continue
+        for cond in cond_list:
+            broken_conds, _ = break_cond_for_no_oom(cond, x_in)
+            for bc in broken_conds: work_queue.append((group_name, bc))
+
+    # greedy approach, trying to match pairs that are compatible and OOM safe
+    execution_batches: List[ExecutionBatch] = []
+    is_consumed: List[bool] = [False] * len(work_queue)
+    for idx, (group, cur_cond) in enumerate(work_queue):
+        if is_consumed[idx]: continue
+        is_consumed[idx] = True
+        cur_execution_batch = ExecutionBatch(
+            feed_x=x_in, 
+            feed_t=timestep, 
+            feed_input=cur_cond.model_input.to_dict() if cur_cond.model_input else {}
+        )
+        cur_execution_batch.add_cond(cur_cond)
+        
+        if idx != len(work_queue) - 1:
+            for i, (g, c) in enumerate(work_queue[idx+1:]):
+                # signature matches and the combination is memory safe, then batch them
+                if cur_cond.signature == c.signature and check_oom_safety(torch.stack[cur_cond, c]):    # TODO: fix this stacking
+                    cur_execution_batch.add_cond(c, g)
+                    is_consumed[idx + 1 + i] = True
+        
+        execution_batches.append(cur_execution_batch)
+
+    return execution_batches
+    
 def accumulate_output(
     out_acc: Tensor, 
     weight_acc: Tensor, 
@@ -187,8 +166,8 @@ def accumulate_output(
         current_output = current_output.chunk(len(execution_batch.conds))
         for pred, cond, group_name in zip(current_output, execution_batch.conds, execution_batch.group_names):
             T, _, H, W = cond.shape
-            weight = cond.get_combined_mask(T) * cond.strength 
             out_acc[group_name] += pred * weight
+            weight = cond.get_combined_mask(T) * cond.strength 
             weight_acc[group_name] += weight
             
     return out_acc, weight_acc

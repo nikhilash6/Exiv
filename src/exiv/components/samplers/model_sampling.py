@@ -221,6 +221,7 @@ def calc_cond_batch(
     out_acc = {k: torch.zeros_like(x_in) for k, _ in active_batched_conds.groups.items()}
     weights_acc = {k: torch.zeros_like(x_in) for k, _ in active_batched_conds.groups.items()}
     for execution_batch in execution_batch_list:
+        execution_batch.expand_batched_values(timestep, denoise_mask)    # this saves us vram 
         output = wrapped_model.model(execution_batch.feed_x, execution_batch.feed_t, **execution_batch.input)
         out_acc, weights_acc = accumulate_output(out_acc, weights_acc, output, execution_batch)
     
