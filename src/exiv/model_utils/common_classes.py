@@ -140,35 +140,33 @@ class Conditioning:
         # per step strength (if provided) should match the timestep length
         pass
     
-    def get_combined_mask(self, num_frames: int) -> torch.Tensor:
+    def get_combined_mask(self, num_frames: int) -> Tensor:
         """
         Combines spatial mask (H, W) with temporal frame_range to produce (T, H, W).
         """
         # TODO / NOTE: this method will break if the input latent is of a differnt shape than the mask
         # we are assuming that the user provides the correctly shaped mask as an input
         
-        h, w = self.mask.shape
+        dtype = torch.uint8     # TODO: test to see if this is not causing any issues
         device = VRAM_DEVICE
         
         if self.mask is not None:
-            # default to full white if no mask provided
-            mask = torch.ones((h, w), device=device, dtype=torch.float32)
-
-        # (H, W) -> (T, H, W)
-        mask = mask.unsqueeze(0).repeat(num_frames, 1, 1)
+            # (H, W) -> (T, H, W)
+            mask = self.mask.to(device, dtype=dtype)
+            mask = mask.unsqueeze(0).repeat(num_frames, 1, 1)
+        else:
+            # (T, 1, 1) - broadcastable to any H, W
+            mask = torch.ones((num_frames, 1, 1), device=device, dtype=dtype)
 
         if self.frame_range is not None:
             start, end = self.frame_range
             start = max(0, start)
             end = min(num_frames, end)
 
-            # zero out frames outside the range
-            if start > 0:
-                mask[:start] = 0.0
-            if end < num_frames:
-                mask[end:] = 0.0
+            if start > 0: mask[:start] = 0.0
+            if end < num_frames: mask[end:] = 0.0
         
-        return mask     # (T, H, W)
+        return mask
     
     def signature(self):
         """

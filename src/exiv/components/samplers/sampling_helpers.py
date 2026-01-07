@@ -6,6 +6,7 @@ import math
 import collections
 from typing import Any, List, Tuple
 
+from ...utils.device import MemoryManager
 from ...utils.logging import app_logger
 from ...model_utils.conditioning_mixin import ConditioningMixin
 from ...model_utils.common_classes import BatchedConditioning, Conditioning, ExecutionBatch, ModelForwardInput, ModelWrapper
@@ -98,12 +99,42 @@ def prepare_model_conds(
 
     return res
 
-def check_oom_safety(cond: Conditioning, x_in: Tensor) -> bool:
+# TODO: move this in the tensor file
+def get_structure_size_mb(data) -> float:
+    """Recursively calculates the memory size of tensors in a structure (MB)."""
+    if isinstance(data, torch.Tensor):
+        return (data.numel() * data.element_size()) / (1024 ** 2)
+    elif isinstance(data, dict):
+        return sum(get_structure_size_mb(v) for v in data.values())
+    elif isinstance(data, (list, tuple)):
+        return sum(get_structure_size_mb(v) for v in data)
+    return 0.0
+
+def check_oom_safety(input_list: List[ModelForwardInput], x_in: Tensor) -> bool:
     """
     Mainly for checking if the stacked cond is OOM safe or not
     """
-    # TODO: not implemented yet
-    return True
+    # TODO: maybe this is model specific ?
+    # TODO: experiment and see how well these perform
+    
+    # heuristic factors
+    MEMORY_FACTORS = {
+        "x_in": 6.0,     
+        "controlnet": 1.0,      
+        "cross_attn": 0.5,      
+        "concat_map": 2.0,      
+        "visual_embedding": 1.0,
+        "reference_latent": 3.0,
+        "default": 1.0          
+    }
+    
+    total_mem = get_structure_size_mb(x_in) * MEMORY_FACTORS["x_in"]
+    for inp in input_list:
+        inp_dict = inp.to_dict()
+        for k, v in inp_dict.items():
+            total_mem += get_structure_size_mb(v) * MEMORY_FACTORS.get(k, MEMORY_FACTORS["default"])
+
+    return total_mem < (MemoryManager.available_memory() - 500)   # 500MB buffer
 
 def break_cond_for_no_oom(cond: Conditioning, x_in: Tensor):
     """
@@ -144,7 +175,8 @@ def batch_compatible_conds(
         if idx != len(work_queue) - 1:
             for i, (g, c) in enumerate(work_queue[idx+1:]):
                 # signature matches and the combination is memory safe, then batch them
-                if cur_cond.signature == c.signature and check_oom_safety(torch.stack[cur_cond, c]):    # TODO: fix this stacking
+                if cur_cond.signature == c.signature and \
+                    check_oom_safety([cur_cond.model_input, c.model_input], x_in):
                     cur_execution_batch.add_cond(c, g)
                     is_consumed[idx + 1 + i] = True
         
