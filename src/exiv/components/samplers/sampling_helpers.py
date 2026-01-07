@@ -6,18 +6,19 @@ import math
 import collections
 from typing import Any, List
 
+from ...utils.logging import app_logger
 from ...model_utils.conditioning_mixin import ConditioningMixin
-from ...model_utils.common_classes import BatchedConditioning, Conditioning, ModelWrapper
+from ...model_utils.common_classes import BatchedConditioning, Conditioning, ExecutionBatch, ModelForwardInput, ModelWrapper
 from ...utils.tensor import common_upscale, repeat_to_batch_size
 
 
 def filter_active_conds(
     batched_conditioning: BatchedConditioning, 
-    current_progress: float
+    timestep: float
 ) -> BatchedConditioning:
     """
     Returns a shallow copy of BatchedConditioning containing only 
-    conditions active for the current progress (0.0 start -> 1.0 end)
+    conditions active for the timestep, using timestep_range and strength
     """
     filtered = BatchedConditioning()
     filtered.execution_order = batched_conditioning.execution_order
@@ -25,13 +26,27 @@ def filter_active_conds(
     for group_name, cond_list in batched_conditioning.groups.items():
         active_list = []
         for cond in cond_list:
-            start, end = cond.timestep_range
-            # Check if current progress is within range (inclusive)
-            if start <= current_progress <= end:
-                active_list.append(cond)
+            filter_out = False
+            
+            # timestep filtering
+            if cond.timestep_range != (-1, -1):
+                start, end = cond.timestep_range
+                if timestep < start or timestep > end:
+                    filter_out = True
+                    
+            # if per timestep strength is provided
+            if cond.strength == 0:
+                filter_out = True
+            elif not filter_out and isinstance(cond.strenth, List[float]):
+                try:
+                    cur_timestep_strength = cond.strength[timestep - cond.timestep_range[0]]
+                    if cur_timestep_strength == 0: filter_out = True
+                except Exception as e:
+                    app_logger.warning(f"Unable to calculate per step strength {e}")
+                    
+            if not filter_out: active_list.append(cond)
         
-        if active_list:
-            filtered.groups[group_name] = active_list
+        filtered.groups[group_name] = active_list
             
     return filtered
 
@@ -76,74 +91,104 @@ def prepare_model_conds(
         for cond in cond_list:
             # shallow copy to avoid stale data in case of accidental re-use
             active_cond = dataclasses.replace(cond)
-            active_cond = ConditioningMixin.create_spatial_mask(active_cond, noise)
             active_cond.model_input = model.prepare_model_input(active_cond, **base_ctx)
             updated_conds.append(active_cond)
             
         res.set_group_cond(cond_group_name, updated_conds, replace=True)
-    
-    # res = process_masks(res, noise.shape[2:], device)
-    # res = prepare_controlnet(res)
+
     return res
 
-# # NOTE: not very relevant atm, but will update as more models are added
-# def process_masks(grouped_conds: dict, latent_dims, device):
-#     """
-#     - moves the mask tensor to the target device (e.g., GPU).
-#     - resizes the mask to match the dimensions of the latent image.
-#     """
-#     for cond_group_name, cond_list in grouped_conds.items():
-#         for cond in cond_list:
-#             if 'mask' in cond:
-#                 mask = cond['mask']
-                
-#                 # if mask is [H, W], batch becomes 1 and if its [B, H, W], batch is preserved
-#                 batch_size = mask.shape[0] if mask.ndim > len(latent_dims) else 1
-#                 target_shape = (batch_size, 1) + latent_dims
-                
-#                 # if it's [B, H, W] or [B, T, H, W], unsqueeze the channel dim 
-#                 # so prepare_mask handles it as [B, C, ...] correctly
-#                 if mask.ndim == len(latent_dims) + 1:
-#                     mask = mask.unsqueeze(1)
-                
-#                 cond['mask'] = prepare_mask(mask, target_shape, device)
-                
-#     return grouped_conds
+def collate_inputs(inputs: List[ModelForwardInput]):
+    """Merges a list of ModelForwardInputs into a single batched input."""
+    if not inputs: return {}
+    
+    # TODO: assumes same makeup for pos/neg batches, will fail for heterogenous stuff like IPA
+    keys = inputs[0].to_dict().keys()
+    
+    collated = {}
+    for k in keys:
+        values = [getattr(inp, k) for inp in inputs]
+        if hasattr(values[0], 'concat'):
+            collated[k] = values[0].concat(values[1:])
+        elif isinstance(values[0], torch.Tensor):
+            collated[k] = torch.cat(values, dim=0)
+            
+    return collated
 
-# # TODO: test when proper controlnet support is added
-# def prepare_controlnet(grouped_conds: dict):
-#     """
-#     Ensures ControlNet is applied symmetrically to positive and negative conds.
-#     If a ControlNet guides the positive prompt (e.g., with a depth map), the 
-#     negative prompt also needs a corresponding "empty" ControlNet. This gives 
-#     the model a clean baseline to push away from, making the ControlNet's guidance 
-#     much more effective.
-#     """
-#     positive_conds = grouped_conds.get("positive", [])
-#     negative_conds = grouped_conds.get("negative", [])
+def prepare_per_frame_timestep(timestep, num_tasks, denoise_mask):
+    # NOTE: assuming denoise_mask shape to be [Batch, Channels, Frames, Height, Width]
+    if denoise_mask is None:
+        return timestep.repeat(num_tasks)
+    
+    # 1. Create a Per-Frame Mask
+    # We average over Channels(1), Height(3), and Width(4).
+    # Result: A tensor of shape [Batch, 1, Frames, 1, 1]
+    # Value is 1.0 for "Generation Frames" and 0.0 for "Context Frames"
+    # if ANY pixel in a frame is masked, the entire frame get the full timestep t
+    frame_mask = torch.amax(denoise_mask, dim=(1, 3, 4), keepdim=True)
+    
+    # 2. Reshape the global timestep 't' to match the mask dimensions
+    # t shape: [Batch] -> [Batch, 1, 1, 1, 1]
+    t_reshaped = timestep.view(timestep.shape[0], 1, 1, 1, 1)
+    
+    # 3. Apply the timestep logic (The "Gate")
+    # - Context Frames: 0.0 * t = 0  (Model sees them as "Clean/Finished")
+    # - Gen Frames:     1.0 * t = t  (Model sees them as "Noisy/Current Step")
+    per_frame_timesteps = frame_mask * t_reshaped
+    
+    # 4. Flatten back to [Batch, Frames] for the model
+    batched_t = per_frame_timesteps.reshape(timestep.shape[0], -1)
+    
+    # 5. Repeat for all parallel tasks (Positive, Negative, etc.)
+    batched_t = batched_t.repeat(num_tasks, 1)
+    
+    return batched_t
 
-#     positive_controls = [
-#         c['control'] for c in positive_conds
-#         if 'control' in c and c['control'] is not None
-#     ]
 
-#     if not positive_controls:
-#         return grouped_conds
+def batch_compatible_conds(active_batched_conds) -> List[ExecutionBatch]:
+    """
+    Group conds to run them as a single batch instead of individually. This grouping should
+    be according to the memory available and if the conds are compatible with each other or not.
+    """
+    flat_conds = []
+    group_map = []  # group name for each item in flat_conds
+    
+    # flat_conds - [t1, t2, t3, t4]
+    # group_map  - [p,  p,  n,  n]
+    for name, conds in active_batched_conds.get_groups_in_order():
+        if not conds: continue
+        for cond in conds:
+            flat_conds.append(cond)
+            group_map.append(name)
+            
+    if not flat_conds:
+        return {}
+    
+    # batch inputs
+    num_tasks = len(flat_conds)
+    batched_inputs = collate_inputs([c.model_input for c in flat_conds])
+    
+    # batch standard args (repeat for each task)
+    batched_x = x_in.repeat(num_tasks, *[1] * (x_in.ndim - 1))
+    batched_t = prepare_per_frame_timestep(timestep, num_tasks, denoise_mask)
+    
 
-#     neg_chunks_without_control = [
-#         (chunk, i) for i, chunk in enumerate(negative_conds)
-#         if chunk.get('control') is None
-#     ]
-
-#     if not neg_chunks_without_control:
-#         return grouped_conds
-
-#     # for each positive ControlNet, apply it to a corresponding negative prompt.
-#     for i, control_to_add in enumerate(positive_controls):
-#         # cycle through the available negative prompts.
-#         target_chunk, chunk_index = neg_chunks_without_control[i % len(neg_chunks_without_control)]
-#         new_chunk = target_chunk.copy()
-#         new_chunk['control'] = control_to_add
-#         grouped_conds["negative"][chunk_index] = new_chunk
-
-#     return grouped_conds
+def accumulate_output(
+    out_acc: Tensor, 
+    weight_acc: Tensor, 
+    current_output: Tensor, 
+    execution_batch: ExecutionBatch
+    ):
+    """
+    Accumulates the output per batch, applies mask and then takes their weighted average
+    """
+    
+    if len(execution_batch.conds):
+        current_output = current_output.chunk(len(execution_batch.conds))
+        for pred, cond, group_name in zip(current_output, execution_batch.conds, execution_batch.group_names):
+            T, _, H, W = cond.shape
+            weight = cond.get_combined_mask(T) * cond.strength 
+            out_acc[group_name] += pred * weight
+            weight_acc[group_name] += weight
+            
+    return out_acc, weight_acc
