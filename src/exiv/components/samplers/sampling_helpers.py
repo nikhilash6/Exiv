@@ -4,9 +4,10 @@ from torch import Tensor
 
 import math
 import collections
-from typing import Any, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-from ...utils.device import MemoryManager
+from ...model_utils.helper_methods import estimate_peak_activation_size
+from ...utils.device import RESERVED_MEM, MemoryManager
 from ...utils.logging import app_logger
 from ...model_utils.conditioning_mixin import ConditioningMixin
 from ...model_utils.common_classes import BatchedConditioning, Conditioning, ExecutionBatch, ModelForwardInput, ModelWrapper
@@ -30,8 +31,11 @@ def filter_active_conds(
             filter_out = False
             
             # timestep filtering
-            if cond.timestep_range != (-1, -1):
-                start, end = cond.timestep_range
+            start, end = cond.timestep_range
+            if end == -1:
+                if timestep < start:
+                    filter_out = True
+            else:
                 if timestep < start or timestep > end:
                     filter_out = True
                     
@@ -110,31 +114,20 @@ def get_structure_size_mb(data) -> float:
         return sum(get_structure_size_mb(v) for v in data)
     return 0.0
 
-def check_oom_safety(input_list: List[ModelForwardInput], x_in: Tensor) -> bool:
+def check_oom_safety(
+        cond_len: int, 
+        x_in: Tensor, 
+        memory_footprint_config: Optional[Dict] = None
+    ) -> bool:
     """
     Mainly for checking if the stacked cond is OOM safe or not
     """
-    # TODO: maybe this is model specific ?
-    # TODO: experiment and see how well these perform
-    
-    # heuristic factors
-    MEMORY_FACTORS = {
-        "x_in": 6.0,     
-        "controlnet": 1.0,      
-        "cross_attn": 0.5,      
-        "concat_map": 2.0,      
-        "visual_embedding": 1.0,
-        "reference_latent": 3.0,
-        "default": 1.0          
-    }
-    
-    total_mem = get_structure_size_mb(x_in) * MEMORY_FACTORS["x_in"]
-    for inp in input_list:
-        inp_dict = inp.to_dict()
-        for k, v in inp_dict.items():
-            total_mem += get_structure_size_mb(v) * MEMORY_FACTORS.get(k, MEMORY_FACTORS["default"])
+    effective_batch_size = x_in.shape[0] * cond_len
+    target_shape = (effective_batch_size,) + x_in.shape[1:]
+    activation_peak_mb = estimate_peak_activation_size(memory_footprint_config, target_shape)
 
-    return total_mem < (MemoryManager.available_memory() - 500)   # 500MB buffer
+    heuristic_buffer = 2000
+    return activation_peak_mb < heuristic_buffer
 
 def break_cond_for_no_oom(cond: Conditioning, x_in: Tensor):
     """
@@ -145,10 +138,11 @@ def break_cond_for_no_oom(cond: Conditioning, x_in: Tensor):
     return [cond]
 
 def batch_compatible_conds(
-    active_batched_conds: BatchedConditioning, 
-    x_in: Tensor, 
-    timestep: Tensor, 
-    denoise_mask: Tensor | None
+    active_batched_conds: BatchedConditioning,
+    x_in: Tensor,
+    timestep: Tensor,
+    denoise_mask: Optional[Tensor],
+    memory_footprint_config: Optional[Dict]
 ) -> List[ExecutionBatch]:
 
     # flatten the queue
@@ -176,7 +170,7 @@ def batch_compatible_conds(
             for i, (g, c) in enumerate(work_queue[idx+1:]):
                 # signature matches and the combination is memory safe, then batch them
                 if cur_cond.signature == c.signature and \
-                    check_oom_safety([cur_cond.model_input, c.model_input], x_in):
+                    check_oom_safety(len(cur_execution_batch.conds) + 1, x_in, memory_footprint_config):
                     cur_execution_batch.add_cond(c, g)
                     is_consumed[idx + 1 + i] = True
         

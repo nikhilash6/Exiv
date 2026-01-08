@@ -106,8 +106,8 @@ class Conditioning:
     type: ConditioningType = ConditioningType.EMBEDDING
 
     # --- Timings & Ranges ---
-    timestep_range: Tuple[float, float] = (-1, -1)          # (start, end), -1 means it spans the complete range
-    frame_range: Optional[Tuple[int, int]] = (-1, -1)       # (start_idx, end_idx)
+    timestep_range: Tuple[float, float] = (0, -1)          # (start, end), -1 means it spans the complete range
+    frame_range: Optional[Tuple[int, int]] = (0, -1)       # (start_idx, end_idx)
 
     # NOTE: this will be merged with the frame_range mask 
     # during output masking in the sampler in "combined_mask" property
@@ -161,6 +161,7 @@ class Conditioning:
         if self.frame_range is not None:
             start, end = self.frame_range
             start = max(0, start)
+            if end == -1: end = num_frames
             end = min(num_frames, end)
 
             if start > 0: mask[:start] = 0.0
@@ -168,6 +169,7 @@ class Conditioning:
         
         return mask.view(1, 1, *mask.shape)   # (1, 1, T, H, W)
     
+    @property
     def signature(self):
         """
         Identifies this cond and is mainly used to decide if two conds can be stacked or not.

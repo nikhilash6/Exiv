@@ -6,6 +6,7 @@ import weakref
 from typing import List, Any, Tuple
 
 from .hook_registry import HookRegistry, HookType, ModelHook
+from ..model_utils.helper_methods import estimate_peak_activation_size
 from ..utils.logging import app_logger
 from ..utils.device import OFFLOAD_DEVICE, RESERVED_MEM, MemoryManager
 from ..config import BYTES_IN_MB, LOADING_MODE, global_config
@@ -131,52 +132,6 @@ There are three modes for loading the model:
                 loaded / unloaded dynamically
 3. NORMAL   => This loads the entire model in one go and keeps it in VRAM for the entire inference
 """
-def estimate_peak_activation_size(model, target_shape):
-    """
-    A rough estimation of what peak mem use could be. Mostly focused
-    on attn + rope part.
-    """
-    default_mem_estimate = 0
-    if not target_shape: return default_mem_estimate
-
-    if hasattr(model, "get_memory_footprint_params"):
-        # NOTE: update this normalization logic as more models are added
-        # ------------------------------
-        safe_shape = list(target_shape)
-        # image (B, C, H, W) -> insert time=1 -> (B, C, 1, H, W)
-        if len(safe_shape) == 4:
-            safe_shape.insert(2, 1)
-        # text/latents (B, L, D) -> pad spatial dims with 1 -> (B, L, D, 1, 1)
-        while len(safe_shape) < 5:
-            safe_shape.append(1)
-        target_shape = safe_shape
-        # --------------------------------
-        
-        params = model.get_memory_footprint_params()
-        if not params: return default_mem_estimate
-        
-        # target_shape is (B, C, T, H, W)
-        t, h, w = target_shape[2], target_shape[3], target_shape[4]
-        patch_t, patch_h, patch_w = params.get("patch_size", (1, 1, 1))
-        
-        # round up dimensions to nearest patch multiple (padding logic)
-        t_tokens = (t + patch_t - 1) // patch_t
-        h_tokens = (h + patch_h - 1) // patch_h
-        w_tokens = (w + patch_w - 1) // patch_w
-        
-        num_tokens = target_shape[0] * t_tokens * h_tokens * w_tokens
-        
-        # attn calculation
-        attn_peak = params["hidden_dim"] * params.get("attn_factor", 2.5)
-        ffn_peak  = params["ffn_dim"]    * params.get("ffn_factor", 1.0)
-        peak_width = max(attn_peak, ffn_peak)
-        
-        dtype_size = params.get("dtype_size", 2)
-        total_bytes = num_tokens * peak_width * dtype_size
-        
-        return total_bytes / BYTES_IN_MB
-    else:
-        return default_mem_estimate
 
 def split_model_for_loading(model: 'ModelMixin', target_shape = None):
     MemoryManager.clear_memory()
@@ -186,7 +141,7 @@ def split_model_for_loading(model: 'ModelMixin', target_shape = None):
     full_load_modules: List[Tuple[weakref.ref, str]] = []
     
     current_mem_used = 0
-    act_mb = estimate_peak_activation_size(model, target_shape)
+    act_mb = estimate_peak_activation_size(model.get_memory_footprint_params(), target_shape)
     available_mem = MemoryManager.available_memory(model.gpu_device) - max(RESERVED_MEM, act_mb)
     
     module_by_size = []     # contains modules sorted by size (asc)

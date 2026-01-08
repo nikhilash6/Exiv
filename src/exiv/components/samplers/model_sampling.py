@@ -13,6 +13,7 @@ from ...model_utils.common_classes import BatchedConditioning, ExecutionBatch, M
 from ...model_utils.conditioning_mixin import ConditioningMixin
 from ...utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, ProcDevice
 from ...utils.common import null_func
+from ...utils.logging import app_logger
 
 class KSampler:
     def __init__(
@@ -215,14 +216,26 @@ def calc_cond_batch(
     """
 
     active_batched_conds = filter_active_conds(batched_conds, timestep)
-    execution_batch_list: List[ExecutionBatch] = batch_compatible_conds(active_batched_conds, x_in, timestep, denoise_mask)
+    execution_batch_list: List[ExecutionBatch] = batch_compatible_conds(
+        active_batched_conds, 
+        x_in, 
+        timestep, 
+        denoise_mask, 
+        wrapped_model.model.get_memory_footprint_params()
+    )
 
     # **** main model run ****
     out_acc = {k: torch.zeros_like(x_in) for k, _ in active_batched_conds.groups.items()}
     weights_acc = {k: torch.zeros_like(x_in) for k, _ in active_batched_conds.groups.items()}
     for execution_batch in execution_batch_list:
         execution_batch.expand_batched_values(timestep, denoise_mask)    # this saves us vram 
-        output = run_model(wrapped_model.model, execution_batch.feed_x, execution_batch.feed_t, **execution_batch.feed_input)
+        app_logger.debug(f"Batch size this step: {len(execution_batch.conds)}")
+        output = run_model(
+            wrapped_model.model, 
+            execution_batch.feed_x, 
+            execution_batch.feed_t, 
+            **execution_batch.feed_input
+        )
         out_acc, weights_acc = accumulate_output(out_acc, weights_acc, output, execution_batch)
     
     # average the accumulated outputs

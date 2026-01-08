@@ -5,7 +5,7 @@ import os
 from typing import Union, Optional
 import safetensors
 
-from ..config import global_config
+from ..config import BYTES_IN_MB, global_config
 from ..utils.logging import app_logger
 from ..utils.device import is_same_device
 
@@ -233,3 +233,51 @@ def get_state_dict(model_path, device=torch.device("cpu")):
             sd = val if isinstance(val, dict) else sd
             
     return sd
+
+# TODO: create a proper dataclass for the memory_config
+def estimate_peak_activation_size(memory_footprint_config = None, target_shape = None):
+    """
+    A rough estimation of what peak mem use could be. Mostly focused
+    on attn + rope part.
+    """
+    default_mem_estimate = 0
+    if not target_shape: return default_mem_estimate
+
+    if memory_footprint_config is not None:
+        # NOTE: update this normalization logic as more models are added
+        # ------------------------------
+        safe_shape = list(target_shape)
+        # image (B, C, H, W) -> insert time=1 -> (B, C, 1, H, W)
+        if len(safe_shape) == 4:
+            safe_shape.insert(2, 1)
+        # text/latents (B, L, D) -> pad spatial dims with 1 -> (B, L, D, 1, 1)
+        while len(safe_shape) < 5:
+            safe_shape.append(1)
+        target_shape = safe_shape
+        # --------------------------------
+        
+        params = memory_footprint_config
+        if not params: return default_mem_estimate
+        
+        # target_shape is (B, C, T, H, W)
+        t, h, w = target_shape[2], target_shape[3], target_shape[4]
+        patch_t, patch_h, patch_w = params.get("patch_size", (1, 1, 1))
+        
+        # round up dimensions to nearest patch multiple (padding logic)
+        t_tokens = (t + patch_t - 1) // patch_t
+        h_tokens = (h + patch_h - 1) // patch_h
+        w_tokens = (w + patch_w - 1) // patch_w
+        
+        num_tokens = target_shape[0] * t_tokens * h_tokens * w_tokens
+        
+        # attn calculation
+        attn_peak = params["hidden_dim"] * params.get("attn_factor", 2.5)
+        ffn_peak  = params["ffn_dim"]    * params.get("ffn_factor", 1.0)
+        peak_width = max(attn_peak, ffn_peak)
+        
+        dtype_size = params.get("dtype_size", 2)
+        total_bytes = num_tokens * peak_width * dtype_size
+        
+        return total_bytes / BYTES_IN_MB
+    else:
+        return default_mem_estimate
