@@ -141,7 +141,6 @@ def batch_compatible_conds(
     active_batched_conds: BatchedConditioning,
     x_in: Tensor,
     timestep: Tensor,
-    denoise_mask: Optional[Tensor],
     memory_footprint_config: Optional[Dict]
 ) -> List[ExecutionBatch]:
 

@@ -137,8 +137,6 @@ def sample(
         seed
     )
     
-    extra_args = {"seed":seed}
-    
     def denoiser_function(x, sigma, **kwargs):
         return model_sampling_step(
             wrapped_model,
@@ -147,10 +145,9 @@ def sample(
             mod_batched_conds,
             cfg,
             denoise_mask=denoise_mask,
-            seed=kwargs.get("seed")
         )
     
-    samples = ksampler_cls_impl.sample(denoiser_function, wrapped_model, sigmas, extra_args, callback, noise, latent_image, denoise_mask)
+    samples = ksampler_cls_impl.sample(denoiser_function, wrapped_model, sigmas, callback, noise, latent_image, denoise_mask)
     return wrapped_model.model.process_latent_out(samples.to(torch.float32))
 
 
@@ -160,8 +157,7 @@ def model_sampling_step(
     sigma: Tensor, 
     batched_conds: BatchedConditioning, 
     cond_scale: float, 
-    denoise_mask=None, 
-    seed=None
+    denoise_mask=None,
 ):
     '''
     Single sampling step for a given model. 
@@ -219,8 +215,7 @@ def calc_cond_batch(
     execution_batch_list: List[ExecutionBatch] = batch_compatible_conds(
         active_batched_conds, 
         x_in, 
-        timestep, 
-        denoise_mask, 
+        timestep,
         wrapped_model.model.get_memory_footprint_params()
     )
 
