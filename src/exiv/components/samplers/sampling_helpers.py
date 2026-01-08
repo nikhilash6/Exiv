@@ -4,20 +4,23 @@ from torch import Tensor
 
 import math
 import collections
-from typing import Any, List
+from typing import Any, Dict, List, Optional, Tuple
 
+from ...model_utils.helper_methods import estimate_peak_activation_size
+from ...utils.device import RESERVED_MEM, MemoryManager
+from ...utils.logging import app_logger
 from ...model_utils.conditioning_mixin import ConditioningMixin
-from ...model_utils.common_classes import BatchedConditioning, Conditioning, ModelWrapper
+from ...model_utils.common_classes import BatchedConditioning, Conditioning, ExecutionBatch, ModelForwardInput, ModelWrapper
 from ...utils.tensor import common_upscale, repeat_to_batch_size
 
 
 def filter_active_conds(
     batched_conditioning: BatchedConditioning, 
-    current_progress: float
+    timestep: float
 ) -> BatchedConditioning:
     """
     Returns a shallow copy of BatchedConditioning containing only 
-    conditions active for the current progress (0.0 start -> 1.0 end)
+    conditions active for the timestep, using timestep_range and strength
     """
     filtered = BatchedConditioning()
     filtered.execution_order = batched_conditioning.execution_order
@@ -25,13 +28,30 @@ def filter_active_conds(
     for group_name, cond_list in batched_conditioning.groups.items():
         active_list = []
         for cond in cond_list:
+            filter_out = False
+            
+            # timestep filtering
             start, end = cond.timestep_range
-            # Check if current progress is within range (inclusive)
-            if start <= current_progress <= end:
-                active_list.append(cond)
+            if end == -1:
+                if timestep < start:
+                    filter_out = True
+            else:
+                if timestep < start or timestep > end:
+                    filter_out = True
+                    
+            # if per timestep strength is provided
+            if cond.strength == 0:
+                filter_out = True
+            elif not filter_out and isinstance(cond.strength, list):
+                try:
+                    cur_timestep_strength = cond.strength[timestep - cond.timestep_range[0]]
+                    if cur_timestep_strength == 0: filter_out = True
+                except Exception as e:
+                    app_logger.warning(f"Unable to calculate per step strength {e}")
+                    
+            if not filter_out: active_list.append(cond)
         
-        if active_list:
-            filtered.groups[group_name] = active_list
+        filtered.groups[group_name] = active_list
             
     return filtered
 
@@ -69,81 +89,111 @@ def prepare_model_conds(
         base_ctx["height"] = noise.shape[2] * base_ctx["spatial_compression_factor"]
         
     for cond_group_name, cond_list in batched_conditioning.get_groups_in_order():
-        cond_list = wrapped_model.model.filter_conditionings(cond_list)
-        if cond_list is None: continue
+        # cond_list = wrapped_model.model.filter_conditionings(cond_list)
+        # if cond_list is None: continue
         
         updated_conds = []
         for cond in cond_list:
             # shallow copy to avoid stale data in case of accidental re-use
             active_cond = dataclasses.replace(cond)
-            active_cond = ConditioningMixin.create_spatial_mask(active_cond, noise)
             active_cond.model_input = model.prepare_model_input(active_cond, **base_ctx)
             updated_conds.append(active_cond)
             
         res.set_group_cond(cond_group_name, updated_conds, replace=True)
-    
-    # res = process_masks(res, noise.shape[2:], device)
-    # res = prepare_controlnet(res)
+
     return res
 
-# # NOTE: not very relevant atm, but will update as more models are added
-# def process_masks(grouped_conds: dict, latent_dims, device):
-#     """
-#     - moves the mask tensor to the target device (e.g., GPU).
-#     - resizes the mask to match the dimensions of the latent image.
-#     """
-#     for cond_group_name, cond_list in grouped_conds.items():
-#         for cond in cond_list:
-#             if 'mask' in cond:
-#                 mask = cond['mask']
-                
-#                 # if mask is [H, W], batch becomes 1 and if its [B, H, W], batch is preserved
-#                 batch_size = mask.shape[0] if mask.ndim > len(latent_dims) else 1
-#                 target_shape = (batch_size, 1) + latent_dims
-                
-#                 # if it's [B, H, W] or [B, T, H, W], unsqueeze the channel dim 
-#                 # so prepare_mask handles it as [B, C, ...] correctly
-#                 if mask.ndim == len(latent_dims) + 1:
-#                     mask = mask.unsqueeze(1)
-                
-#                 cond['mask'] = prepare_mask(mask, target_shape, device)
-                
-#     return grouped_conds
+# TODO: move this in the tensor file
+def get_structure_size_mb(data) -> float:
+    """Recursively calculates the memory size of tensors in a structure (MB)."""
+    if isinstance(data, torch.Tensor):
+        return (data.numel() * data.element_size()) / (1024 ** 2)
+    elif isinstance(data, dict):
+        return sum(get_structure_size_mb(v) for v in data.values())
+    elif isinstance(data, (list, tuple)):
+        return sum(get_structure_size_mb(v) for v in data)
+    return 0.0
 
-# # TODO: test when proper controlnet support is added
-# def prepare_controlnet(grouped_conds: dict):
-#     """
-#     Ensures ControlNet is applied symmetrically to positive and negative conds.
-#     If a ControlNet guides the positive prompt (e.g., with a depth map), the 
-#     negative prompt also needs a corresponding "empty" ControlNet. This gives 
-#     the model a clean baseline to push away from, making the ControlNet's guidance 
-#     much more effective.
-#     """
-#     positive_conds = grouped_conds.get("positive", [])
-#     negative_conds = grouped_conds.get("negative", [])
+def check_oom_safety(
+        cond_len: int, 
+        x_in: Tensor, 
+        memory_footprint_config: Optional[Dict] = None
+    ) -> bool:
+    """
+    Mainly for checking if the stacked cond is OOM safe or not
+    """
+    effective_batch_size = x_in.shape[0] * cond_len
+    target_shape = (effective_batch_size,) + x_in.shape[1:]
+    activation_peak_mb = estimate_peak_activation_size(memory_footprint_config, target_shape)
 
-#     positive_controls = [
-#         c['control'] for c in positive_conds
-#         if 'control' in c and c['control'] is not None
-#     ]
+    heuristic_buffer = 2000
+    return activation_peak_mb < heuristic_buffer
 
-#     if not positive_controls:
-#         return grouped_conds
+def break_cond_for_no_oom(cond: Conditioning, x_in: Tensor):
+    """
+    Breaks the Condition into smaller Conditions that run individually and don't cause OOMs
+    """
+    # TODO: not implemented yet
+    # use the check_oom_safety method defined above here
+    return [cond]
 
-#     neg_chunks_without_control = [
-#         (chunk, i) for i, chunk in enumerate(negative_conds)
-#         if chunk.get('control') is None
-#     ]
+def batch_compatible_conds(
+    active_batched_conds: BatchedConditioning,
+    x_in: Tensor,
+    timestep: Tensor,
+    denoise_mask: Optional[Tensor],
+    memory_footprint_config: Optional[Dict]
+) -> List[ExecutionBatch]:
 
-#     if not neg_chunks_without_control:
-#         return grouped_conds
+    # flatten the queue
+    work_queue: List[Tuple[str, Conditioning]] = []
+    for group_name, cond_list in active_batched_conds.get_groups_in_order():
+        if not cond_list: continue
+        for cond in cond_list:
+            broken_conds = break_cond_for_no_oom(cond, x_in)
+            for bc in broken_conds: work_queue.append((group_name, bc))
 
-#     # for each positive ControlNet, apply it to a corresponding negative prompt.
-#     for i, control_to_add in enumerate(positive_controls):
-#         # cycle through the available negative prompts.
-#         target_chunk, chunk_index = neg_chunks_without_control[i % len(neg_chunks_without_control)]
-#         new_chunk = target_chunk.copy()
-#         new_chunk['control'] = control_to_add
-#         grouped_conds["negative"][chunk_index] = new_chunk
+    # greedy approach, trying to match pairs that are compatible and OOM safe
+    execution_batches: List[ExecutionBatch] = []
+    is_consumed: List[bool] = [False] * len(work_queue)
+    for idx, (g_name, cur_cond) in enumerate(work_queue):
+        if is_consumed[idx]: continue
+        is_consumed[idx] = True
+        cur_execution_batch = ExecutionBatch(
+            feed_x=x_in, 
+            feed_t=timestep, 
+            feed_input=cur_cond.model_input.to_dict() if cur_cond.model_input else {}
+        )
+        cur_execution_batch.add_cond(cur_cond, g_name)
+        
+        if idx != len(work_queue) - 1:
+            for i, (g, c) in enumerate(work_queue[idx+1:]):
+                # signature matches and the combination is memory safe, then batch them
+                if cur_cond.signature == c.signature and \
+                    check_oom_safety(len(cur_execution_batch.conds) + 1, x_in, memory_footprint_config):
+                    cur_execution_batch.add_cond(c, g)
+                    is_consumed[idx + 1 + i] = True
+        
+        execution_batches.append(cur_execution_batch)
 
-#     return grouped_conds
+    return execution_batches
+    
+def accumulate_output(
+    out_acc: Tensor, 
+    weight_acc: Tensor, 
+    current_output: Tensor, 
+    execution_batch: ExecutionBatch
+    ):
+    """
+    Accumulates the output per batch, applies mask and then takes their weighted average
+    """
+    
+    if len(execution_batch.conds):
+        current_output = current_output.chunk(len(execution_batch.conds))
+        for pred, cond, group_name in zip(current_output, execution_batch.conds, execution_batch.group_names):
+            b, c, f, h, w = current_output[0].shape         # TODO: make sure this logic is generic enough for future models
+            weight = cond.get_combined_mask(f) * cond.strength
+            out_acc[group_name] += pred * weight
+            weight_acc[group_name] += weight
+            
+    return out_acc, weight_acc

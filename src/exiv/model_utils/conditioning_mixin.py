@@ -85,6 +85,11 @@ class ConditioningMixin:
 
         return image, mask, mask_index
     
+    def prepare_concat_latent(self, cond, noise):
+        # NOTE: needs to be overidden inside the model
+        app_logger.warning("concat latent not supported by the model, skipping")
+        return None
+    
     def prepare_model_input(self, cond: Conditioning, **ctx) -> ModelForwardInput:
         output = ModelForwardInput()
         noise = ctx.get("noise")
@@ -115,6 +120,7 @@ class ConditioningMixin:
         return output
     
     def filter_conditionings(self, conditionings: List[Conditioning] | None) -> List[Conditioning]:
+        # TODO: NOT in use rn, will integrate as more models are added
         if conditionings is None: return None
         supported_types = getattr(self, "supported_conditioning", [])
         
@@ -165,30 +171,3 @@ class ConditioningMixin:
             mask = repeat_to_batch_size(mask, target_shape[2], dim=2)
 
         return mask
-    
-    @staticmethod
-    def create_spatial_mask(cond: Conditioning, noise: Tensor):
-        # shape is [B, C, T, H, W] for video or [B, C, H, W] for images
-        has_temporal = noise.ndim == 5
-        num_frames = noise.shape[2] if has_temporal else 1
-        
-        if cond.frame_range is not None and has_temporal:
-            f_start, f_end = cond.frame_range
-            
-            # broadcastable temporal mask: [1, 1, T, 1, 1]
-            temporal_mask = torch.zeros((1, 1, num_frames, 1, 1), device=noise.device, dtype=noise.dtype)
-            
-            # clamping
-            f_start = max(0, f_start)
-            f_end = min(num_frames, f_end)
-            temporal_mask[:, :, f_start:f_end, :, :] = 1.0
-            
-            if cond.mask is not None:
-                # handling spatial expansion (H,W -> T,H,W) and batching
-                existing_mask = ConditioningMixin.prepare_mask(cond.mask, noise.shape, noise.device)
-                cond.mask = existing_mask * temporal_mask
-            else:
-                # if no spatial mask is present, just use the temporal one
-                cond.mask = repeat_to_batch_size(temporal_mask, noise.shape[0])
-                
-        return cond

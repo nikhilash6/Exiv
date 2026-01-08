@@ -11,7 +11,6 @@ from typing import List
 from ...enum import Model, ModelType
 from ...attention import optimized_attention
 from ...positional_embeddings import EmbedND, apply_rope
-from ...conditionals import CONDCrossAttn, CONDNoiseShape, CONDRegular
 from ...latent_format import LatentFormat, Wan21VAELatentFormat, Wan22VAELatentFormat
 from ....components.samplers.sampler_types import get_model_sampling
 from ....model_utils.helper_methods import get_state_dict
@@ -453,9 +452,6 @@ class Wan21Model(ModelMixin):
             self.ref_conv = nn.Conv2d(in_dim_ref_conv, dim, kernel_size=patch_size[1:], stride=patch_size[1:])
         else:
             self.ref_conv = None
-            
-        # supported conditionings
-        self.supported_conditioning = [ConditioningType.EMBEDDING, ConditioningType.VISION]
           
     def prepare_concat_latent(self, cond: Conditioning, noise: Tensor):
         # extra channels supported by the model
