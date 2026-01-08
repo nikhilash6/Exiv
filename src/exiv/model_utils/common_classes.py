@@ -166,7 +166,7 @@ class Conditioning:
             if start > 0: mask[:start] = 0.0
             if end < num_frames: mask[end:] = 0.0
         
-        return mask
+        return mask.view(1, 1, *mask.shape)   # (1, 1, T, H, W)
     
     def signature(self):
         """
@@ -216,8 +216,8 @@ class ExecutionBatch:
     feed_t: Tensor
     feed_input: Dict[str, Tensor] 
     
-    group_names: List[str] = []
-    conds: List[Conditioning] = []
+    group_names: List[str] = field(default_factory=list)
+    conds: List[Conditioning] = field(default_factory=list)
     
     def add_cond(self, cond, group_name):
         self.group_names.append(group_name)

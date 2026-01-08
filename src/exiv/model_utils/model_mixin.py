@@ -78,9 +78,6 @@ class ModelMixin(nn.Module, LoraMixin, ConditioningMixin, metaclass=ModuleMeta):
         self.gpu_device = device or VRAM_DEVICE
         self.model_path = model_path
         self.model_arch_config = None
-        
-        # NOTE: overriden in child impl.
-        self.supported_conditioning = [ConditioningType.EMBEDDING, ConditioningType.VISION]
     
     @staticmethod
     def is_leaf_module(module: nn.Module) -> bool:

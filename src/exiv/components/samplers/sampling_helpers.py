@@ -38,7 +38,7 @@ def filter_active_conds(
             # if per timestep strength is provided
             if cond.strength == 0:
                 filter_out = True
-            elif not filter_out and isinstance(cond.strenth, List[float]):
+            elif not filter_out and isinstance(cond.strength, list):
                 try:
                     cur_timestep_strength = cond.strength[timestep - cond.timestep_range[0]]
                     if cur_timestep_strength == 0: filter_out = True
@@ -85,8 +85,8 @@ def prepare_model_conds(
         base_ctx["height"] = noise.shape[2] * base_ctx["spatial_compression_factor"]
         
     for cond_group_name, cond_list in batched_conditioning.get_groups_in_order():
-        cond_list = wrapped_model.model.filter_conditionings(cond_list)
-        if cond_list is None: continue
+        # cond_list = wrapped_model.model.filter_conditionings(cond_list)
+        # if cond_list is None: continue
         
         updated_conds = []
         for cond in cond_list:
@@ -156,13 +156,13 @@ def batch_compatible_conds(
     for group_name, cond_list in active_batched_conds.get_groups_in_order():
         if not cond_list: continue
         for cond in cond_list:
-            broken_conds, _ = break_cond_for_no_oom(cond, x_in)
+            broken_conds = break_cond_for_no_oom(cond, x_in)
             for bc in broken_conds: work_queue.append((group_name, bc))
 
     # greedy approach, trying to match pairs that are compatible and OOM safe
     execution_batches: List[ExecutionBatch] = []
     is_consumed: List[bool] = [False] * len(work_queue)
-    for idx, (group, cur_cond) in enumerate(work_queue):
+    for idx, (g_name, cur_cond) in enumerate(work_queue):
         if is_consumed[idx]: continue
         is_consumed[idx] = True
         cur_execution_batch = ExecutionBatch(
@@ -170,7 +170,7 @@ def batch_compatible_conds(
             feed_t=timestep, 
             feed_input=cur_cond.model_input.to_dict() if cur_cond.model_input else {}
         )
-        cur_execution_batch.add_cond(cur_cond)
+        cur_execution_batch.add_cond(cur_cond, g_name)
         
         if idx != len(work_queue) - 1:
             for i, (g, c) in enumerate(work_queue[idx+1:]):
@@ -197,9 +197,9 @@ def accumulate_output(
     if len(execution_batch.conds):
         current_output = current_output.chunk(len(execution_batch.conds))
         for pred, cond, group_name in zip(current_output, execution_batch.conds, execution_batch.group_names):
-            T, _, H, W = cond.shape
+            b, c, f, h, w = current_output[0].shape         # TODO: make sure this logic is generic enough for future models
+            weight = cond.get_combined_mask(f) * cond.strength
             out_acc[group_name] += pred * weight
-            weight = cond.get_combined_mask(T) * cond.strength 
             weight_acc[group_name] += weight
             
     return out_acc, weight_acc

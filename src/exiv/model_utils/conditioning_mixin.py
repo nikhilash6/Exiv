@@ -120,6 +120,7 @@ class ConditioningMixin:
         return output
     
     def filter_conditionings(self, conditionings: List[Conditioning] | None) -> List[Conditioning]:
+        # TODO: NOT in use rn, will integrate as more models are added
         if conditionings is None: return None
         supported_types = getattr(self, "supported_conditioning", [])
         
