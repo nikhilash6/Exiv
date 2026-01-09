@@ -36,7 +36,7 @@ def preprocess_wan_conditionals(
         pos_embed: TextEncoderOutput, 
         neg_embed: TextEncoderOutput, 
         clip_embed: VisionEncoderOutput, 
-        input_img: Tensor, 
+        inpaint_img: Latent, 
         height, width, frame_count, batch_size
     ) -> tuple[BatchedConditioning, Latent]:
     
@@ -60,48 +60,20 @@ def preprocess_wan_conditionals(
         execution_order=["positive", "negative"]
     )
     
-    # encode the entire sequence
     wan_vae = get_vae(
         vae_type=VAEType.WAN22.value,
         vae_dtype=vae_dtype,
         use_tiling=use_vae_tiling
     )
     
-    # empty tensor
-    blank_latent = Latent()
-    compression_factor = wan_vae.spatial_compression_ratio
-    latent = torch.zeros([1, 48, ((frame_count - 1) // 4) + 1, height // compression_factor, width // compression_factor], device=VRAM_DEVICE)     # B, C, T, H, W
-
-    # NOTE: this is a divergence from the original repo to aim for 100% perfect first frame
-    # insteads of passing the image as a hint, we pass it directly attached to the latent with mask 
-    # that tells not to touch the attached image part
-    if input_img is None:
-        blank_latent.samples = latent
-        return batched_cond, blank_latent
-
-    b = latent.shape[0]
-    h = latent.shape[-2]
-    w = latent.shape[-1]
-    t = ((frame_count - 1) // 4) + 1
-    mask = torch.ones([b, 1, t, h, w], device=VRAM_DEVICE)
-    
-    if input_img is not None:
-        # B, C, H, W -> B, C, 1, H, W
-        input_img = input_img.unsqueeze(2)
-        input_img = input_img.to(vae_dtype)
-        input_img = input_img.to(VRAM_DEVICE)
-        latent_temp = wan_vae.encode(input_img)                 # requires  (B, C, T, H, W)
-        latent_temp = latent_temp.to(vae_dtype)
-        latent[:, :, :latent_temp.shape[2]] = latent_temp
-        mask[:, :, :latent_temp.shape[2]] *= 0.0                # setting mask to zero for the first concatenated latent
-
-    latent_format = Wan22ModelArchConfig().latent_format
-    latent = latent_format.process_out(latent) * mask + latent * (1.0 - mask)
-    blank_latent.samples = latent.repeat((batch_size, ) + (1,) * (latent.ndim - 1))
-    blank_latent.samples = blank_latent.samples.to(vae_dtype)                           # TODO: auto convert these (should be auto converting ?)
-    blank_latent.noise_mask = mask.repeat((batch_size, ) + (1,) * (mask.ndim - 1))
-    blank_latent.noise_mask = blank_latent.noise_mask.to(vae_dtype)
-    return batched_cond, blank_latent
+    inpaint_img.prepare_latent(
+        height, 
+        width, 
+        frame_count, 
+        Wan22ModelArchConfig().latent_format, 
+        wan_vae
+    )
+    return batched_cond, inpaint_img
 
 def main(**params):
     report_progress = params.get("report_progress")
@@ -119,11 +91,8 @@ def main(**params):
     scheduler_name = params.get("scheduler_name")
     
     progress_callback(0.1, "Loading Images")
-    input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/dog_realistic.jpg")[0]
+    inpaint_img = Latent(image_path_list=["./tests/test_utils/assets/media/dog_realistic.jpg"])
     height, width, output_frame_count = 480, 832, 81
-    
-    # resizing img
-    input_img = common_upscale(input_img.unsqueeze(0), width, height)   # (B, C, H, W)
     
     progress_callback(0.2, "Encoding prompts")
     # generate text embeddings
@@ -137,22 +106,12 @@ def main(**params):
     del t5_xxl
     del wan_encoder
     
-    progress_callback(0.3, "Generating CLIP embeddings")
-    # generate img embeddings
-    cur_model = "CLIP-ViT-H-fp16.safetensors"
-    model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vision_encoder")
-    clip_model = create_vision_encoder(model_path=model_path_data.path, download_url=model_path_data.url, dtype=torch.float16)
-    clip_model.load_model()
-    clip_embed_dict = clip_model.encode_image(input_img)
-    del clip_model
-    MemoryManager.clear_memory()
-    
     # preprocess conditionals
-    batched_cond, blank_latent = preprocess_wan_conditionals(
+    batched_cond, inpaint_latent = preprocess_wan_conditionals(
                                             pos_embed_dict, 
                                             neg_embed_dict, 
-                                            clip_embed_dict,
-                                            input_img, 
+                                            None,
+                                            inpaint_img, 
                                             height, 
                                             width, 
                                             output_frame_count, 
@@ -178,7 +137,7 @@ def main(**params):
         sampler_name=sampler_name,
         scheduler_name=scheduler_name,
         batched_conditioning=batched_cond,
-        latent_image=blank_latent
+        latent_image=inpaint_latent
     )
     
     # from torch_tracer import TorchTracer
