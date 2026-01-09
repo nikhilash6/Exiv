@@ -62,7 +62,6 @@ class Sampler:
         denoising_fn: Callable,     # used as model_forward in sampler methods
         wrapped_model: ModelWrapper,
         sigmas,
-        extra_args: Any, 
         callback: Callable[..., Any],
         noise: Tensor, 
         latent_image: Optional[Tensor] = None, 

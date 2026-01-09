@@ -7,21 +7,23 @@ from dataclasses import dataclass, field
 
 from ..utils.device import VRAM_DEVICE
 from ..utils.file import MediaProcessor
-from ..utils.tensor import common_upscale
 from ..utils.enum import ExtendedEnum
 from ..components.latent_format import LatentFormat
 from ..components.samplers.cfg_methods import default_cfg
 
 @dataclass
 class Latent:
-    image_path_list: List[str] = []         # user provided
+    image_path_list: List[str] = field(default_factory=list)        # user provided
     samples: List[Tensor] | None = None
     batch_index: List[int] | None = None
     # initially a user input [1, 0, 1, ...]
     # but modified to a complete mask during prepare_latent
-    noise_mask: Tensor | None = None
+    noise_mask: Optional[Tensor] = None
+    concat_latent: Optional[Tensor] = None
     
     def _load_images(self, height, width):
+        from ..utils.tensor import common_upscale
+        
         self.samples = MediaProcessor.load_image_list(self.image_path_list)
         # resizing img
         for i in range(len(self.samples)):            
@@ -31,7 +33,7 @@ class Latent:
                 height
             )   # (B, C, H, W)
     
-    def prepare_inpaint_latent(
+    def prepare_latent(
         self, 
         height: int, 
         width: int, 
@@ -43,8 +45,8 @@ class Latent:
         - creates 'samples' tensor given the initial image list
         - creates a noise_mask for it
         - requires the latent shape (height, width, num_frames)
+        - handles all the inpainting use cases
         """
-        self._load_images(height, width)
         
         # vae compression 
         spatial_compression_factor = vae.spatial_compression_ratio
@@ -56,6 +58,7 @@ class Latent:
         t_lat = ((num_frames - 1) // temporal_compression_factor) + 1
         
         latent = torch.zeros([1, vae_channels, t_lat, h_lat, w_lat], device=VRAM_DEVICE, dtype=vae_dtype)
+        if len(self.image_path_list): self._load_images(height, width)
         
         # mask is only created if there is something to be masked
         if self.samples is not None and len(self.samples) > 0:
@@ -68,7 +71,7 @@ class Latent:
                 self.noise_mask = [1 if i in indices else 0 for i in range(t_lat)]
             
             # [1] -> [1, 0, 0, ...] pad to match frame count
-            if isinstance(self.noise_mask, List[int]) and len(self.noise_mask) != t_lat:
+            if isinstance(self.noise_mask, list) and len(self.noise_mask) != t_lat:
                 self.noise_mask = self.noise_mask[:t_lat]
                 self.noise_mask += [0] * (t_lat - len(self.noise_mask))
 
@@ -92,60 +95,8 @@ class Latent:
             self.noise_mask = None
             
         self.samples = latent
-        
-    def prepare_concat_latent(
-        self, 
-        height: int, 
-        width: int, 
-        num_frames: int,
-        vae: 'VAEBase',
-    ) -> Optional['ConcatConditioning']:
-        """
-        Creates the CONDITIONING latent (the hint).
-        - Uses 0.5 (Gray) for empty frames in PIXEL space.
-        - Encodes the FULL sequence at once (captures 3D context).
-        - Used for: I2V / Control Signals (Wan 2.1).
-        """
-        self._load_images(height, width)
-        
-        if self.samples is None or len(self.samples) == 0:
-            return None
-        
-        vae_dtype = vae.dtype
-        
-        # 1. Create Pixel Sequence (Gray 0.5)
-        # Shape: (T, H, W, C) for easier manipulation
-        # Assuming the first image drives the channel count
-        c_channels = self.samples[0].shape[0]
-        pixel_seq = torch.ones((num_frames, height, width, c_channels), device=VRAM_DEVICE, dtype=vae_dtype) * 0.5
-        
-        # 2. Insert Images (At start, or spaced - defaulting to start/0th index for I2V)
-        # Logic: First image goes to Frame 0
-        pixel_seq[0] = self.samples[0].permute(1, 2, 0)
-        
-        # 3. Prepare for VAE: (T, H, W, C) -> (1, C, T, H, W)
-        vae_input = pixel_seq.permute(3, 0, 1, 2).unsqueeze(0)
-        
-        # 4. Encode Full Sequence
-        concat_latent = vae.encode(vae_input)
-        
-        # 5. Create Mask
-        # 0.0 = Conditioning (Input Image), 1.0 = Ignored/Generated
-        # Note: Wan2.1 masks based on Latent Frames.
-        d, c, t_lat, h_lat, w_lat = concat_latent.shape
-        mask = torch.ones((1, 1, t_lat, h_lat, w_lat), device=VRAM_DEVICE, dtype=vae_dtype)
-        
-        # Valid image is at Frame 0. 
-        # Since we encoded the full sequence, Frame 0 in Pixel space corresponds to Frame 0 in Latent space.
-        mask[:, :, 0] = 0.0
-        
-        return ConcatConditioning(
-            data=concat_latent,
-            mask=mask,
-            mask_index=0
-        )
-        
-        
+
+
 class ModelArchConfig:
     # will extend this as more models are added
     latent_format: LatentFormat = None
@@ -222,7 +173,7 @@ class AuxConditioning:
     Extra / Support signals for the generation process
     """
     type: str | None = None
-    data: Optional[Tensor] = None
+    data: Optional[Tensor] | List[Tensor] = None
     timestep_range: Tuple[float, float] = (0.0, -1)    # (0.0=start, -1.0=end)
     frame_range: Optional[Tuple[int, int]] = None       # (start_idx, end_idx)
 

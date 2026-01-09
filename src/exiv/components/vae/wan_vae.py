@@ -554,6 +554,7 @@ class Wan21VAE(VAEBase):
         
         # every downsample layer does spatial compression
         self.spatial_compression_ratio = 2 ** len(self.temporal_downsample)
+        self.temporal_compression_ratio = 2 ** sum(self.temporal_downsample)
         
         # slicing config
         self.use_slicing = max_batch_size != None and max_batch_size >= 1

@@ -3,6 +3,7 @@ from torch import Tensor
 
 from exiv.components.enum import KSamplerType, SchedulerType, VAEType
 from exiv.components.models.wan.constructor import get_wan_instance
+from exiv.components.models.wan.main import Wan21ModelArchConfig
 from exiv.components.samplers.model_sampling import KSampler
 from exiv.components.text_vision_encoder.common import TextEncoderOutput, VisionEncoderOutput
 from exiv.components.text_vision_encoder.te_t5 import UMT5XXL
@@ -11,7 +12,7 @@ from exiv.components.text_vision_encoder.vision_encoder import create_vision_enc
 from exiv.components.vae.base import get_vae
 from exiv.components.vae.wan_vae import Wan21VAE
 from exiv.model_patching.cache_hook import enable_step_caching
-from exiv.model_utils.common_classes import AuxCondType, AuxConditioning, BatchedConditioning, Conditioning, ConditioningType, Latent
+from exiv.model_utils.common_classes import AuxCondType, AuxConditioning, BatchedConditioning, ConcatConditioning, Conditioning, ConditioningType, Latent
 from exiv.model_utils.common_classes import ModelWrapper
 from exiv.model_utils.helper_methods import move_model
 from exiv.server.app_core import App, AppOutputType, Input, Output
@@ -22,15 +23,70 @@ from exiv.utils.tensor import common_upscale
 from exiv.utils.logging import app_logger
 
 use_vae_tiling = False
-vae_dtype = torch.bfloat16
+vae_dtype = torch.float32 # torch.bfloat16
+
+def encode_concat_condition(
+        img_tensor: Tensor, 
+        vae, 
+        height: int, 
+        width: int, 
+        num_frames: int
+    ):
+        """
+        Prepares the concat conditioning (I2V/Control signal) from a raw tensor.
+        Args:
+            img_tensor: (B, C, H, W) - Input images (usually B=1 for standard I2V)
+        """
+        # Ensure tensor is on the correct device/dtype
+        vae_dtype = vae.dtype
+        img_tensor = img_tensor.to(device=VRAM_DEVICE, dtype=vae_dtype)
+        
+        batch_size, c_channels, _, _ = img_tensor.shape
+        
+        # 1. Wan-Specific Logic: Prepare Pixel Sequence (T, H, W, C)
+        # Gray background initialization (specific to Wan training distribution)
+        pixel_seq = torch.ones((num_frames, height, width, c_channels), device=VRAM_DEVICE, dtype=vae_dtype) * 0.5
+        
+        # 2. Create Mask (0.0 = keep/condition, 1.0 = generate)
+        # Dimensions based on VAE compression
+        t_lat = ((num_frames - 1) // vae.temporal_compression_ratio) + 1
+        h_lat = height // vae.spatial_compression_ratio
+        w_lat = width // vae.spatial_compression_ratio
+        
+        mask = torch.ones((1, 1, t_lat, h_lat, w_lat), device=VRAM_DEVICE, dtype=vae_dtype)
+        
+        # TODO / NOTE: this is super incorrect logic, will fix when i am doing i2v
+        # 3. Fill pixel sequence and update mask
+        # We fill as many frames as provided in the batch (usually just the first one)
+        fill_count = min(batch_size, num_frames)
+        
+        for i in range(fill_count):
+            # (C, H, W) -> (H, W, C)
+            pixel_seq[i] = img_tensor[i].permute(1, 2, 0)
+            
+            # Unmask the corresponding latent frames so the model knows they are "given"
+            latent_idx = i // vae.temporal_compression_ratio
+            if latent_idx < t_lat:
+                mask[:, :, latent_idx] = 0.0
+
+        # 4. VAE Encoding
+        # (T, H, W, C) -> (1, C, T, H, W)
+        vae_input = pixel_seq.permute(3, 0, 1, 2).unsqueeze(0)      
+        concat_encoded = vae.encode(vae_input)
+        
+        # 5. Return the Conditioning Object
+        return ConcatConditioning(
+            data=concat_encoded,
+            mask=mask,
+            mask_index=0 # Wan specific mask index (Channel 0)
+        )
 
 def preprocess_wan_conditionals(
         pos_embed: TextEncoderOutput, 
         neg_embed: TextEncoderOutput, 
         clip_embed: VisionEncoderOutput, 
-        input_img: Latent, 
+        input_img: Tensor, 
         height: int, width: int, frame_count: int,
-        batch_size: int
     ) -> tuple[BatchedConditioning, Latent]:
     
     pos_cond = Conditioning(
@@ -63,12 +119,16 @@ def preprocess_wan_conditionals(
             use_tiling=use_vae_tiling
         )
         
-        concat_cond = input_img.prepare_concat_latent(
-            height, width, frame_count, wan_vae
+        concat_latent = encode_concat_condition(
+            input_img,
+            wan_vae,
+            height, 
+            width, 
+            frame_count,
         )
         
-        pos_cond.concat = concat_cond
-        neg_cond.concat = concat_cond
+        pos_cond.concat = concat_latent
+        neg_cond.concat = concat_latent
 
 
     batched_cond = BatchedConditioning(
@@ -79,8 +139,15 @@ def preprocess_wan_conditionals(
         execution_order=["positive", "negative"]
     )
     
-    # NOTE: batch_size repeat is removed from here, cross check
-    return batched_cond, None
+    blank_latent = Latent()
+    blank_latent.prepare_latent(
+        height, 
+        width, 
+        frame_count, 
+        Wan21ModelArchConfig().latent_format, 
+        wan_vae
+    )
+    return batched_cond, blank_latent
 
 def main(**params):
     
@@ -99,11 +166,9 @@ def main(**params):
     scheduler_name = params.get("scheduler_name")
     
     progress_callback(0.1, "Loading Images")
-    input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/boy_anime.jpg")[0]
     height, width, output_frame_count = 512, 512, 81
-    
-    # resizing img
-    input_img = common_upscale(input_img.unsqueeze(0), height, width)   # (B, C, H, W)
+    input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/boy_anime.jpg")[0]
+    input_img = common_upscale(input_img.unsqueeze(0), height, width)
     
     progress_callback(0.2, "Encoding prompts")
     # generate text embeddings
@@ -134,8 +199,7 @@ def main(**params):
                                             input_img, 
                                             height, 
                                             width, 
-                                            output_frame_count, 
-                                            1
+                                            output_frame_count,
                                         )
     
     MemoryManager.clear_memory()
@@ -166,6 +230,7 @@ def main(**params):
     MemoryManager.clear_memory()
     
     progress_callback(0.95, "Decoding output latents")
+    out = out.to(dtype=vae_dtype)
     wan_vae = get_vae(
         vae_type=VAEType.WAN21.value,
         vae_dtype=vae_dtype,

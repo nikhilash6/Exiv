@@ -5,7 +5,7 @@ from typing import List, Any
 
 from ..utils.logging import app_logger
 from ..utils.tensor import common_upscale, repeat_to_batch_size
-from .common_classes import Conditioning, ConditioningType, ModelForwardInput
+from .common_classes import AuxCondType, Conditioning, ConditioningType, ModelForwardInput
 
 class ConditioningMixin:
     """
@@ -107,15 +107,15 @@ class ConditioningMixin:
              output.visual_embedding = cond.data
 
         # auxiliary signals
-        if cond.aux:
-            if cond.aux.time_hint is not None:
-                t = self.process_latent_in(cond.aux.time_hint)
-                output.time_hint = t
+        if cond.aux and len(cond.aux):
+            for c_aux in cond.aux:
+                if c_aux.type == AuxCondType.TIME_HINT and c_aux.data is not None:
+                    t = self.process_latent_in(c_aux.data)
+                    output.time_hint = t
 
-            if cond.aux.reference_latents is not None:
-                refs = cond.aux.reference_latents
-                processed_ref = self.process_latent_in(refs[-1])[:, :, 0]   # taking only the first frame (b,c,t,h,w)
-                output.reference_latent = processed_ref
+                elif c_aux.type == AuxCondType.REF_LATENT and (refs:=c_aux.data) is not None:
+                    processed_ref = self.process_latent_in(refs[-1])[:, :, 0]   # taking only the first frame (b,c,t,h,w)
+                    output.reference_latent = processed_ref
 
         return output
     

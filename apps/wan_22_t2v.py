@@ -68,7 +68,7 @@ def preprocess_wan_conditionals(
         use_tiling=use_vae_tiling
     )
     
-    inpaint_img.prepare_inpaint_latent(
+    inpaint_img.prepare_latent(
         height, 
         width, 
         frame_count, 
