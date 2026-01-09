@@ -258,6 +258,9 @@ class Conditioning:
         
         This only applies to model_input / ModelForwardInput, as that is the final prepared input.
         """
+        if getattr(self, "_cached_signature", None) is not None:
+            return self._cached_signature
+        
         if getattr(self, "model_input", None) is None:
             return None
 
@@ -278,7 +281,8 @@ class Conditioning:
                 sig.append((key, tuple(list_sig)))
             else:
                 sig.append((key, val))
-                
+        
+        self._cached_signature = tuple(sig)
         return tuple(sig)
         
 
