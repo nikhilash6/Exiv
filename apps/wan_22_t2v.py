@@ -37,7 +37,7 @@ def preprocess_wan_conditionals(
         neg_embed: TextEncoderOutput, 
         clip_embed: VisionEncoderOutput, 
         inpaint_img: Latent, 
-        height, width, frame_count, batch_size
+        height, width, frame_count
     ) -> tuple[BatchedConditioning, Latent]:
     
     pos_cond = Conditioning(
@@ -51,6 +51,8 @@ def preprocess_wan_conditionals(
         type=ConditioningType.EMBEDDING,
         extra=neg_embed.extra.copy()
     )
+    
+    # TODO: incorporate clip_embed in here
     
     batched_cond = BatchedConditioning(
         groups={
@@ -66,7 +68,7 @@ def preprocess_wan_conditionals(
         use_tiling=use_vae_tiling
     )
     
-    inpaint_img.prepare_latent(
+    inpaint_img.prepare_inpaint_latent(
         height, 
         width, 
         frame_count, 
@@ -114,8 +116,7 @@ def main(**params):
                                             inpaint_img, 
                                             height, 
                                             width, 
-                                            output_frame_count, 
-                                            1
+                                            output_frame_count,
                                         )
     
     MemoryManager.clear_memory()
