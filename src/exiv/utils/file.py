@@ -85,10 +85,9 @@ def ensure_model_availability(model_path: str, download_url: str = None, force_d
 
 class MediaProcessor:
     @staticmethod
-    def load_image_list(image_path_list: List[str]):
-        from .logging import app_logger
-        
+    def load_image_list(image_path_list: List[str] | str):
         from PIL import Image
+        from .logging import app_logger
         
         if isinstance(image_path_list, str):
             image_path_list = [image_path_list]
@@ -107,12 +106,8 @@ class MediaProcessor:
             # Transposes H x W x C -> C x H x W
             pt_img = torch.from_numpy(np_img.transpose(2, 0, 1)) 
             res.append(pt_img)
-        
-        if not res:
-            # returning empty tensor for now, (needs changing?)
-            return torch.empty(0) 
-        
-        return torch.stack(res, dim=0)
+
+        return res
     
     @staticmethod
     def save_latents_to_media(out, metadata: Dict | None = None):

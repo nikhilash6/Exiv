@@ -4,17 +4,98 @@ from torch import Tensor
 from typing import Any, Callable, List, Tuple, Optional, Union, Dict
 from dataclasses import dataclass, field
 
-from exiv.utils.device import VRAM_DEVICE
 
+from ..utils.device import VRAM_DEVICE
+from ..utils.file import MediaProcessor
 from ..utils.enum import ExtendedEnum
 from ..components.latent_format import LatentFormat
 from ..components.samplers.cfg_methods import default_cfg
 
 @dataclass
 class Latent:
-    samples: Tensor | None = None
+    image_path_list: List[str] = field(default_factory=list)        # user provided
+    samples: List[Tensor] | None = None
     batch_index: List[int] | None = None
-    noise_mask: Tensor | None = None
+    # initially a user input [1, 0, 1, ...]
+    # but modified to a complete mask during prepare_latent
+    noise_mask: Optional[Tensor] = None
+    concat_latent: Optional[Tensor] = None
+    
+    def _load_images(self, height, width):
+        from ..utils.tensor import common_upscale
+        
+        self.samples = MediaProcessor.load_image_list(self.image_path_list)
+        # resizing img
+        for i in range(len(self.samples)):            
+            self.samples[i] = common_upscale(
+                self.samples[i].unsqueeze(0), 
+                width, 
+                height
+            )   # (B, C, H, W)
+    
+    def prepare_latent(
+        self, 
+        height: int, 
+        width: int, 
+        num_frames: int,
+        latent_format: LatentFormat,
+        vae: 'VAEBase',
+    ):
+        """
+        - creates 'samples' tensor given the initial image list
+        - creates a noise_mask for it
+        - requires the latent shape (height, width, num_frames)
+        - handles all the inpainting use cases
+        """
+        
+        # vae compression 
+        spatial_compression_factor = vae.spatial_compression_ratio
+        temporal_compression_factor = vae.temporal_compression_ratio
+        vae_channels = latent_format.latent_channels
+        vae_dtype = vae.dtype
+        h_lat = height // spatial_compression_factor
+        w_lat = width // spatial_compression_factor
+        t_lat = ((num_frames - 1) // temporal_compression_factor) + 1
+        
+        latent = torch.zeros([1, vae_channels, t_lat, h_lat, w_lat], device=VRAM_DEVICE, dtype=vae_dtype)
+        if len(self.image_path_list): self._load_images(height, width)
+        
+        # mask is only created if there is something to be masked
+        if self.samples is not None and len(self.samples) > 0:
+            # 1 -> image exists here, 0 -> empty latent
+            if self.noise_mask is None:
+                # creating spaced 1s only for the provided images
+                num_images = len(self.image_path_list)
+                step = (t_lat - 1) / (num_images - 1) if num_images > 1 else 0
+                indices = {round(i * step) for i in range(num_images)}
+                self.noise_mask = [1 if i in indices else 0 for i in range(t_lat)]
+            
+            # [1] -> [1, 0, 0, ...] pad to match frame count
+            if isinstance(self.noise_mask, list) and len(self.noise_mask) != t_lat:
+                self.noise_mask = self.noise_mask[:t_lat]
+                self.noise_mask += [0] * (t_lat - len(self.noise_mask))
+
+            # default 1
+            tensor_mask = torch.ones([1, 1, t_lat, h_lat, w_lat], device=VRAM_DEVICE, dtype=vae_dtype)
+            
+            sample_idx = 0
+            for frame_idx, has_image in enumerate(self.noise_mask):
+                if has_image == 1 and sample_idx < len(self.samples):
+                    # encode: (B, C, H, W) -> (B, C, 1, H, W)
+                    img = self.samples[sample_idx].to(VRAM_DEVICE, dtype=vae_dtype).unsqueeze(2)
+                    encoded = vae.encode(img)                   # requires  (B, C, T, H, W)
+                    latent[:, :, frame_idx] = encoded[:, :, 0]
+                    tensor_mask[:, :, frame_idx] = 0.0          # setting mask to zero for this latent
+                    
+                    sample_idx += 1
+            
+            latent = latent_format.process_out(latent) * tensor_mask + latent * (1.0 - tensor_mask)
+            self.noise_mask = tensor_mask
+        else:
+            self.noise_mask = None
+            
+        self.samples = latent
+
 
 class ModelArchConfig:
     # will extend this as more models are added
@@ -92,8 +173,8 @@ class AuxConditioning:
     Extra / Support signals for the generation process
     """
     type: str | None = None
-    data: Optional[Tensor] = None
-    timestep_range: Tuple[float, float] = (0.0, 1.0)    # (0.0=start, 1.0=end)
+    data: Optional[Tensor] | List[Tensor] = None
+    timestep_range: Tuple[float, float] = (0.0, -1)    # (0.0=start, -1.0=end)
     frame_range: Optional[Tuple[int, int]] = None       # (start_idx, end_idx)
 
 @dataclass
@@ -177,6 +258,9 @@ class Conditioning:
         
         This only applies to model_input / ModelForwardInput, as that is the final prepared input.
         """
+        if getattr(self, "_cached_signature", None) is not None:
+            return self._cached_signature
+        
         if getattr(self, "model_input", None) is None:
             return None
 
@@ -197,7 +281,8 @@ class Conditioning:
                 sig.append((key, tuple(list_sig)))
             else:
                 sig.append((key, val))
-                
+        
+        self._cached_signature = tuple(sig)
         return tuple(sig)
         
 
