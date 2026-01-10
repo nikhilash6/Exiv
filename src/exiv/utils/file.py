@@ -5,6 +5,7 @@ import numpy as np
 
 import os
 import re
+import av
 import glob
 import urllib.parse
 import requests
@@ -81,7 +82,7 @@ def ensure_model_availability(model_path: str, download_url: str = None, force_d
     if not os.path.exists(abs_path):
         raise FileNotFoundError(f"Model file not found at {abs_path}")
     return abs_path
-        
+
 
 class MediaProcessor:
     @staticmethod
@@ -148,29 +149,96 @@ class MediaProcessor:
     # NOTE: maybe a pure pythonic way will be more robust
     @staticmethod
     def save_metadata(file_path: str, metadata: Dict):
-        if not is_ffmpeg_present(): return
-        temp_path = file_path + ".temp.mp4"
-        cmd = ["ffmpeg", "-y", "-i", file_path, "-c", "copy"]
-        for k, v in metadata.items():
-            cmd.extend(["-metadata", f"{k}={v}"])
-        cmd.append(temp_path)
+        ext = os.path.splitext(file_path)[1].lower()
         
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        os.replace(temp_path, file_path)
+        # standardize metadata
+        clean_metadata = {k: str(v) for k, v in metadata.items()}
+
+        # image support (e.g. PNG via Pillow)
+        if ext == '.png':
+            try:
+                from PIL import Image, PngImagePlugin
+                with Image.open(file_path) as img:
+                    info = PngImagePlugin.PngInfo()
+                    # preserve existing info
+                    for k, v in img.info.items():
+                        info.add_text(k, str(v))
+                    # add new metadata
+                    for k, v in clean_metadata.items():
+                        info.add_text(k, v)
+                    img.save(file_path, pnginfo=info)
+                return
+            except Exception as e:
+                print(f"Pillow PNG metadata save failed: {e}")
+
+        temp_path = file_path + f".temp{ext}"
+        
+        options = {}
+        if ext in ('.mp4', '.mov', '.m4v'):
+            options = {'movflags': 'use_metadata_tags'}
+
+        try:
+            with av.open(file_path) as input_container:
+                with av.open(temp_path, mode='w', options=options) as output_container:
+                    # update global metadata
+                    full_metadata = dict(input_container.metadata)
+                    full_metadata.update(clean_metadata)
+                    output_container.metadata.update(full_metadata)
+
+                    # copy streams (video/audio/subtitle)
+                    stream_mapping = {}
+                    for stream in input_container.streams:
+                        if stream.type not in ('video', 'audio', 'subtitle'):
+                            continue
+
+                        # NOTE: PyAV v14+ uses add_stream_from_template, older versions used template=stream
+                        if hasattr(output_container, 'add_stream_from_template'):
+                            out_stream = output_container.add_stream_from_template(stream)
+                        else:
+                            # fallback for older PyAV versions
+                            try:
+                                out_stream = output_container.add_stream(template=stream)
+                            except (TypeError, AttributeError):
+                                # manual fallback if template arg fails
+                                out_stream = output_container.add_stream(stream.codec_context.name)
+                                out_stream.time_base = stream.time_base
+                                if stream.type == 'video':
+                                    out_stream.width = stream.codec_context.width
+                                    out_stream.height = stream.codec_context.height
+                                    out_stream.pix_fmt = stream.codec_context.pix_fmt
+                        
+                        stream_mapping[stream.index] = out_stream
+
+                    # mux packets (remuxing)
+                    for packet in input_container.demux():
+                        if packet.stream.index in stream_mapping:
+                            if packet.dts is None: continue
+                            packet.stream = stream_mapping[packet.stream.index]
+                            output_container.mux(packet)
+            
+            os.replace(temp_path, file_path)
+            
+        except Exception as e:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            print(f"Error saving metadata: {e}")
 
     @staticmethod
     def get_metadata(file_path: str) -> Dict:
-        """
-        Returns the metadata dictionary from the file using ffprobe.
-        """
-        if not is_ffmpeg_present(): return
+        ext = os.path.splitext(file_path)[1].lower()
+        
+        # prefer Pillow for standard image formats
+        if ext in ('.png', '.jpg', '.jpeg', '.webp'):
+            try:
+                from PIL import Image
+                with Image.open(file_path) as img:
+                    # return info dict, ensuring values are strings
+                    return {k: str(v) for k, v in img.info.items()}
+            except Exception:
+                pass
+
         try:
-            # -v quiet: suppress logs
-            # -print_format json: output JSON
-            # -show_format: show container format info (includes metadata)
-            cmd = ["ffprobe", "-v", "quiet", "-show_format", "-print_format", "json", file_path]
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            data = json.loads(result.stdout)
-            return data.get("format", {}).get("tags", {})
-        except (subprocess.CalledProcessError, json.JSONDecodeError):
+            with av.open(file_path) as container:
+                return dict(container.metadata)
+        except Exception:
             return {}
