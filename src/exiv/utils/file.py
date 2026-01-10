@@ -111,7 +111,7 @@ class MediaProcessor:
         return res
     
     @staticmethod
-    def save_latents_to_media(out, metadata: Dict | None = None):
+    def save_latents_to_media(out, metadata: Dict | None = None, subfolder: str | None = None):
         # TODO: make this a generic method, allowing saving images/audio/3d as well
         # rn it is only for video
         video_tensor = out.sample if hasattr(out, "sample") else out
@@ -125,9 +125,15 @@ class MediaProcessor:
         for i, video in enumerate(video_tensor):
             # (C, T, H, W) -> (T, H, W, C), for torchvision
             video_formatted = video.permute(1, 2, 3, 0).cpu()
+
+            save_dir = FilePaths.OUTPUT_DIRECTORY
+            if subfolder:
+                save_dir = os.path.join(save_dir, subfolder)
+                if not os.path.exists(save_dir):
+                    os.makedirs(save_dir)
             
             save_path = f"output_video_{i}.mp4"
-            save_path = get_numbered_filename(FilePaths.OUTPUT_DIRECTORY, save_path)
+            save_path = get_numbered_filename(save_dir, save_path)
             torchvision.io.write_video(
                 save_path,
                 video_formatted,
@@ -142,7 +148,8 @@ class MediaProcessor:
                 from ..utils.logging import app_logger
                 app_logger.warning(f"Unable to write metadata in {save_path}: {e}")
             
-            output_paths.append(save_path)
+            rel_path = os.path.relpath(save_path, FilePaths.OUTPUT_DIRECTORY)
+            output_paths.append(rel_path)
             
         return output_paths
 

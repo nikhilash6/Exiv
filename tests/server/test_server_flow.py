@@ -128,3 +128,37 @@ class ServerIntegrationTest(unittest.TestCase):
         
         statuses = [msg['status'] for msg in messages]
         self.assertIn(ScriptStatus.COMPLETED.value, statuses)
+
+    def test_outputs_and_subfolder_support(self):
+        """Test listing and fetching files from subfolders."""
+        from exiv.utils.file_path import FilePaths
+        
+        out_dir = FilePaths.OUTPUT_DIRECTORY
+        sub_dir = os.path.join(out_dir, "test_subdir")
+        os.makedirs(sub_dir, exist_ok=True)
+        
+        test_filename = "test_file.txt"
+        test_content = "Hello Subfolder!"
+        with open(os.path.join(sub_dir, test_filename), "w") as f:
+            f.write(test_content)
+            
+        # /api/outputs?subfolder=test_subdir
+        response = requests.get(f"{BASE_URL}/api/outputs", params={"subfolder": "test_subdir"})
+        self.assertEqual(response.status_code, 200)
+        files = response.json()
+        self.assertTrue(any(f['filename'] == test_filename for f in files))
+        
+        # /api/outputs/test_subdir/test_file.txt
+        response = requests.get(f"{BASE_URL}/api/outputs/test_subdir/{test_filename}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.text, test_content)
+        
+        # Security / Directory Traversal Check
+        response = requests.get(f"{BASE_URL}/api/outputs/../README.md")
+        self.assertIn(response.status_code, [403, 404])
+        
+        # cleanup
+        try:
+            os.remove(os.path.join(sub_dir, test_filename))
+            os.rmdir(sub_dir)
+        except: pass

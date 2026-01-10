@@ -170,7 +170,7 @@ async def get_script_progress(task_id: str):
     else:
         raise HTTPException(status_code=404, detail="Task not found")
 
-@app.get("/api/outputs/{filename}")
+@app.get("/api/outputs/{filename:path}")
 async def get_output_file(filename: str):
     out_dir = FilePaths.OUTPUT_DIRECTORY
     file_path = os.path.join(out_dir, filename)
@@ -185,8 +185,14 @@ async def get_output_file(filename: str):
     return FileResponse(file_path)
 
 @app.get("/api/outputs")
-async def list_output_files():
+async def list_output_files(subfolder: str = None):
     out_dir = FilePaths.OUTPUT_DIRECTORY
+    
+    if subfolder:
+        out_dir = os.path.join(out_dir, subfolder)
+        # security check for subfolder
+        if not os.path.abspath(out_dir).startswith(os.path.abspath(FilePaths.OUTPUT_DIRECTORY)):
+             raise HTTPException(status_code=403, detail="Access denied")
     
     if not os.path.exists(out_dir):
         return []
