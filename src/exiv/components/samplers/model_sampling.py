@@ -1,3 +1,4 @@
+from functools import partial
 import torch
 from torch import Tensor
 
@@ -225,12 +226,15 @@ def compute_batched_output(
     for execution_batch in execution_batch_list:
         execution_batch.expand_batched_values(timestep, denoise_mask)    # this saves us vram 
         app_logger.debug(f"Batch size this step: {len(execution_batch.conds)}")
-        output = run_model(
-            wrapped_model.model, 
-            execution_batch.feed_x, 
-            execution_batch.feed_t, 
-            **execution_batch.feed_input
-        )
+        
+        deferred_model_run = partial(run_model, wrapped_model.model)
+        registry = getattr(wrapped_model.model, "hook_registry", None)
+        if registry and registry.head.next_hook != registry.tail:
+            wrapped_call = registry.get_modified_sampler_wrap(deferred_model_run)
+            output = wrapped_call(execution_batch.feed_x, execution_batch.feed_t, **execution_batch.feed_input)
+        else:
+            output = deferred_model_run(execution_batch.feed_x, execution_batch.feed_t, **execution_batch.feed_input)
+
         out_acc, weights_acc = accumulate_output(out_acc, weights_acc, output, execution_batch)
     
     # average the accumulated outputs
