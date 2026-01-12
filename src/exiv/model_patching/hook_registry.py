@@ -54,7 +54,7 @@ class ModelHook:
         # raise NotImplementedError("Base new_forward should not be called directly.")
         
     # handling sampler hooks
-    def wrap_model_run(self, mod_run: Callable, x: Tensor, t: Tensor, **input):
+    def wrap_model_run(self, module: nn.Module, mod_run: Callable, x: Tensor, t: Tensor, **input):
         return mod_run(x, t, **input)
 
 
@@ -179,7 +179,7 @@ class HookRegistry:
         
         def create_new_wrap(hook, og_sampler_wrap):
             def new_call(*args, **kwargs):
-                return hook.call_wrapper(self._module_ref, og_sampler_wrap, *args, **kwargs)
+                return hook.wrap_model_run(self._module_ref, og_sampler_wrap, *args, **kwargs)
             return new_call
         
         while cur_hook != self.tail:

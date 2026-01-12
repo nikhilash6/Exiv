@@ -2,6 +2,7 @@ import os
 
 from exiv.components.text_vision_encoder.common import TextEncoderOutput, VisionEncoderOutput
 from exiv.components.vae.base import get_vae
+from exiv.model_patching.sliding_context_hook import enable_sliding_context
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
 import torch
@@ -126,6 +127,7 @@ def main(**params):
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
     wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
     enable_step_caching(wan_dit_model)
+    enable_sliding_context(wan_dit_model)
     model_wrapper = ModelWrapper(model=wan_dit_model)
 
     progress_callback(0.35, "Sampling loop")

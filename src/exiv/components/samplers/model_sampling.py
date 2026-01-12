@@ -227,6 +227,7 @@ def compute_batched_output(
         execution_batch.expand_batched_values(timestep, denoise_mask)    # this saves us vram 
         app_logger.debug(f"Batch size this step: {len(execution_batch.conds)}")
         
+        # sampler hooks are added here
         deferred_model_run = partial(run_model, wrapped_model.model)
         registry = getattr(wrapped_model.model, "hook_registry", None)
         if registry and registry.head.next_hook != registry.tail:
