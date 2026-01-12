@@ -1,16 +1,15 @@
 import torch
 from torch import Tensor
 
-from exiv.model_utils.helper_methods import move_model
-from exiv.utils.file import ensure_model_availability
-from exiv.utils.file_path import FilePathData, FilePaths
-
 from .helper_methods import VAEImageProcessor
 from ..enum import VAEType
 from ...config import LOADING_MODE
 from ...utils.logging import app_logger
-from ...utils.device import VRAM_DEVICE
+from ...utils.device import OFFLOAD_DEVICE, VRAM_DEVICE
+from ...utils.file import ensure_model_availability
+from ...utils.file_path import FilePathData, FilePaths
 from ...model_utils.model_mixin import ModelMixin
+from ...model_utils.helper_methods import move_model
 
 
 class VAEBase(ModelMixin):
@@ -202,7 +201,7 @@ class VAEBase(ModelMixin):
                     self._conv_idx = [0]
                     tile = z[:, :, k : k + 1, i : i + latent_tile_size_height, j : j + latent_tile_size_width]
                     decoded = decode_fn(tile, feat_cache=self._feat_map, feat_idx=self._conv_idx)
-                    time.append(decoded)
+                    time.append(decoded.to(OFFLOAD_DEVICE))
                 cur_temporal_row.append(torch.cat(time, dim=2))
             temporal_latent_rows.append(cur_temporal_row)
         self.reset_causal_cache()

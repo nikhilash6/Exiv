@@ -1,17 +1,20 @@
-from dataclasses import dataclass
-
 import torch
 
+from dataclasses import dataclass
+
+from ..utils.device import OFFLOAD_DEVICE, VRAM_DEVICE
 from ..utils.logging import app_logger
 from ..model_patching.hook_registry import HookRegistry, HookType, ModelHook
 
+# debug var
+low_blend = 0
 
 @dataclass
 class SlidingContextConfig:
-    ctx_len = 81
-    ctx_overlap = 2
+    ctx_len = 20
+    ctx_overlap = 10
     frame_dim = 2           # for (B, C, T, H, W). 1 if (B, T, C, H, W)
-    blend_type = "linear"   # supports 'linear' and 'pyramid' 
+    blend_type = "pyramid"   # supports 'linear' and 'pyramid' 
     
     @property
     def stride(self):
@@ -22,6 +25,7 @@ class SlidingContextHook(ModelHook):
         super().__init__()
         self.hook_type = HookType.SLIDING_CONTEXT.value
         self.config: SlidingContextConfig = config or SlidingContextConfig()
+        self.device = VRAM_DEVICE
         
     def _get_linear_mask(self, window_length, overlap):
         """
@@ -33,7 +37,7 @@ class SlidingContextHook(ModelHook):
         mask = torch.ones(window_length, device=self.device)
         if overlap > 0:
             # +2 and [1:-1] ensures we don't start at strictly 0.0 effectively avoiding div/0 issues later
-            ramp = torch.linspace(0, 1, overlap + 2, device=self.device)[1:-1]
+            ramp = torch.linspace(low_blend, 1, overlap + 2, device=self.device)[1:-1]
             mask[:overlap] *= ramp
             mask[-overlap:] *= ramp.flip(0)
             
@@ -50,11 +54,11 @@ class SlidingContextHook(ModelHook):
         # handle odd vs even window lengths to ensure peak is centered
         if window_length % 2 == 0:
             # even: e.g. 4 -> [0.33, 0.66, 0.66, 0.33] (approx)
-            ramp = torch.linspace(0, 1, mid + 1, device=self.device)[1:]
+            ramp = torch.linspace(low_blend, 1, mid + 1, device=self.device)[1:]
             mask = torch.cat([ramp, ramp.flip(0)])
         else:
             # odd: e.g. 5 -> [0.33, 0.66, 1.0, 0.66, 0.33]
-            ramp = torch.linspace(0, 1, mid + 2, device=self.device)[1:]
+            ramp = torch.linspace(low_blend, 1, mid + 2, device=self.device)[1:]
             mask = torch.cat([ramp[:-1], ramp.flip(0)])
             
         return mask
@@ -75,8 +79,9 @@ class SlidingContextHook(ModelHook):
             app_logger.warning(f"Shape {x.shape} is not supported by this hook, skipping processing")
         else:
             num_frames = x.shape[self.config.frame_dim]
-            if num_frames <= self.config.ctx_len:
-                return super().wrap_model_run(module, mod_run, x, t, **input)
+            # if num_frames <= self.config.ctx_len:
+            #     out = super().wrap_model_run(module, mod_run, x, t, **input)
+            #     return out
             
             # creating a list of windows to iterate upon
             windows = []
@@ -92,8 +97,8 @@ class SlidingContextHook(ModelHook):
                 if end_idx == num_frames: break
             
             # accumulate and blend the outputs
-            final_output = torch.zeros_like(x)
-            count_mask = torch.zeros_like(x)
+            final_output = torch.zeros_like(x, device=OFFLOAD_DEVICE)
+            count_mask = torch.zeros_like(x, device=OFFLOAD_DEVICE)
             for indices in windows:
                 # slice the window for inputs
                 slices = [slice(None)] * x.ndim
@@ -110,14 +115,37 @@ class SlidingContextHook(ModelHook):
                         # this is a heuristic; be careful with other tensors of same size
                         slices_k = [slice(None)] * v.ndim
                         slices_k[self.config.frame_dim] = indices
-                        input_slice[k] = v[tuple(slices_k)]
+                        anchor_frame = x[:, :, 0:1]
+                        x_slice = torch.cat([anchor_frame, x_slice], dim=2)
                     else:
                         input_slice[k] = v
-                        
+                
+                input_slice['t_start'] = indices[0]
+                if input_slice['t_start'] > 0:
+                    input_slice['t_start'] -= 1
+                    input_slice['time_indices_map'] = {0:0}
+                    t_anchor = torch.zeros((t.shape[0], 1), device=t.device, dtype=t.dtype)
+                    t = torch.cat([t_anchor, t], dim=1)
+                    anchor_frame = x[:, :, 0:1] 
+                    x_slice = torch.cat([anchor_frame, x_slice], dim=2)
+                
                 output_slice = super().wrap_model_run(module, mod_run, x_slice, t, **input_slice)
+                
+                if input_slice.get('time_indices_map') is not None:
+                    # slicing [1:] removes the first frame (anchor)
+                    output_slice = output_slice.narrow(self.config.frame_dim, 1, output_slice.shape[self.config.frame_dim] - 1)
+                
+                # (20)
                 window_mask = self._get_mask(len(indices))
-                final_output[tuple(slices)] += output_slice * window_mask
-                count_mask[tuple(slices)] += window_mask
+                # reshape to (1, 1, 20, 1, 1)
+                mask_shape = [1] * x.ndim
+                mask_shape[self.config.frame_dim] = len(indices)
+                window_mask = window_mask.view(mask_shape)
+                
+                temp_out = output_slice * window_mask
+                final_output[tuple(slices)] += temp_out.to(OFFLOAD_DEVICE)
+                count_mask[tuple(slices)] += window_mask.to(OFFLOAD_DEVICE)
+                print("here")
                 
             return final_output / (count_mask + 1e-5)
             

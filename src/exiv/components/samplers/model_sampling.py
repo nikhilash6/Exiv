@@ -236,6 +236,7 @@ def compute_batched_output(
         else:
             output = deferred_model_run(execution_batch.feed_x, execution_batch.feed_t, **execution_batch.feed_input)
 
+        output = output.to(VRAM_DEVICE)
         out_acc, weights_acc = accumulate_output(out_acc, weights_acc, output, execution_batch)
     
     # average the accumulated outputs
