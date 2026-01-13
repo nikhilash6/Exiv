@@ -95,14 +95,14 @@ class HookRegistry:
         self._insert_hook_after(self.tail.prev_hook, hook)
         self._cached_wrappers = {}
 
-    def get_sorted_hooks(self, location=None, hook_order=None):
+    def get_sorted_hooks(self, location: Optional[str] = None, hook_order: List[str] = None):
         # hook_order defines in what order the hooks must be applied
         # for e.g. the first ele / hook should be applied at the topmost level
         hook_order = hook_order or []
         all_hooks = []
         curr = self.head.next_hook
         while curr != self.tail:
-            if location is None or getattr(curr, 'location', None) == location:
+            if location is None or getattr(curr, 'hook_location', None) == location:
                 all_hooks.append(curr)
             curr = curr.next_hook
 
@@ -118,8 +118,8 @@ class HookRegistry:
         sorted_hooks = rest_hooks + list(reversed(priority_hooks))
         return sorted_hooks
     
-    def get_wrapped_fn(self, original_fn: Callable, location: HookLocation, hook_order: List[str] = None) -> Callable:
-        cache_key = f"{location.value}_{id(original_fn)}"
+    def get_wrapped_fn(self, original_fn: Callable, location: str, hook_order: List[str] = None) -> Callable:
+        cache_key = f"{location}_{id(original_fn)}"
         if cache_key in self._cached_wrappers:
             return self._cached_wrappers[cache_key]
         
@@ -151,13 +151,14 @@ class HookRegistry:
             
         registry = HookRegistry.get_hook_registry(module)
         registry.register_hook(hook)
-        module.forward = registry.get_wrapped_fn(module._original_forward, HookLocation.FORWARD)
+        module.forward = registry.get_wrapped_fn(module._original_forward, HookLocation.FORWARD.value)
         
     @staticmethod
     def remove_hook_from_module(module, hook_type: str):
         registry = HookRegistry.get_hook_registry(module)
         registry.remove_hook(hook_type)
-        module.forward = registry.get_wrapped_fn(module._original_forward, HookLocation.FORWARD)
+        if hasattr(module, "_original_forward"):
+            module.forward = registry.get_wrapped_fn(module._original_forward, HookLocation.FORWARD.value)
 
     def get_hook(self, hook_type: str) -> Optional[ModelHook]:
         return self.hooks_lookup.get(hook_type, None)

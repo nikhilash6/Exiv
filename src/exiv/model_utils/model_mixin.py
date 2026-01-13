@@ -174,7 +174,7 @@ class ModelMixin(nn.Module, LoraMixin, ConditioningMixin, metaclass=ModuleMeta):
             
         registry = getattr(self, "hook_registry", None)
         if registry and registry.head.next_hook != registry.tail:
-            wrapped_call = registry.get_wrapped_fn(original_call, location=HookLocation.MODEL_RUN)
+            wrapped_call = registry.get_wrapped_fn(original_call, location=HookLocation.MODEL_RUN.value)
             return wrapped_call(*args, **kwargs)
         else:
             return original_call(*args, **kwargs)

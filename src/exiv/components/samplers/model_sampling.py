@@ -238,7 +238,7 @@ def compute_batched_output(
         if registry and registry.head.next_hook != registry.tail:
             wrapped_call = registry.get_wrapped_fn(
                 deferred_model_run,
-                location=HookLocation.INNER_SAMPLER_STEP,
+                location=HookLocation.INNER_SAMPLER_STEP.value,
                 hook_order=[HookType.SLIDING_CONTEXT.value],
             )
             output = wrapped_call(execution_batch.feed_x, execution_batch.feed_t, **execution_batch.feed_input)

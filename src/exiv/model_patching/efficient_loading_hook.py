@@ -33,6 +33,7 @@ class EfficientModelLoaderHook(ModelHook):
     
     def __init__(self, full_load: List[Tuple[weakref.ref, str]]):
         self.hook_type = HookType.EFFICIENT_MODEL_LOADER.value
+        self.hook_location = HookLocation.FORWARD.value
         self.full_load = full_load
     
     # module here is the main model
