@@ -121,6 +121,27 @@ class HookRegistry:
         self._cached_forward = None
         self._cached_call = None
         self._cached_sampler_run = None
+        
+    def get_sorted_hooks(self, hook_order=[]):
+        # hook_order defines in what order the hooks must be applied
+        # for e.g. the first ele / hook should be applied at the topmost level
+        all_hooks = []
+        curr = self.head.next_hook
+        while curr != self.tail:
+            all_hooks.append(curr)
+            curr = curr.next_hook
+
+        # 'hook_order' should be ['sliding', 'inpainting'] (desired outermost -> innermost)
+        priority_hooks = [h for h in all_hooks if h.hook_type in hook_order]
+        rest_hooks = [h for h in all_hooks if h.hook_type not in hook_order]
+
+        # sort priority hooks to match hook_order
+        priority_hooks.sort(key=lambda h: hook_order.index(h.hook_type))
+
+        # final list: 'rest' applied first (inner), priority applied last (outer)
+        # execution: sliding(inpainting(Rest(model)))
+        sorted_hooks = rest_hooks + list(reversed(priority_hooks))
+        return sorted_hooks
     
     def get_modified_forward(self):
         if getattr(self, "_cached_forward", None) is not None:
@@ -173,18 +194,18 @@ class HookRegistry:
     def get_modified_sampler_wrap(self, og_sampler_wrap):
         if getattr(self, '_cached_sampler_run', None):
             return self._cached_sampler_run
+        
+        hook_order = [HookType.SLIDING_CONTEXT.value]
+        sorted_hooks = self.get_sorted_hooks(hook_order)
     
         cur_sampler_wrap = og_sampler_wrap
-        cur_hook = self.head.next_hook
-        
         def create_new_wrap(hook, og_sampler_wrap):
             def new_call(*args, **kwargs):
                 return hook.wrap_model_run(self._module_ref, og_sampler_wrap, *args, **kwargs)
             return new_call
         
-        while cur_hook != self.tail:
-            cur_sampler_wrap = create_new_wrap(hook=cur_hook, og_sampler_wrap=cur_sampler_wrap)
-            cur_hook = cur_hook.next_hook
+        for hook in sorted_hooks:
+            cur_sampler_wrap = create_new_wrap(hook=hook, og_sampler_wrap=cur_sampler_wrap)
         
         self._cached_sampler_run = cur_sampler_wrap
         return cur_sampler_wrap

@@ -216,7 +216,8 @@ def compute_batched_output(
     active_batched_conds = filter_active_conds(batched_conds, timestep)
     registry = HookRegistry.get_hook_registry(wrapped_model.model)
     sliding_context_hook = registry.get_hook(HookType.SLIDING_CONTEXT.value)
-    # NOTE: as more hooks are added that affect memory calc, we will pass a list of hooks here
+    # TODO / NOTE: as more hooks are added that affect memory calc, we will the model itself
+    # the underlying code can fetch the list of conds and pick whatever hook it wants
     execution_batch_list: List[ExecutionBatch] = batch_compatible_conds(
         active_batched_conds, 
         x_in, 
@@ -234,7 +235,6 @@ def compute_batched_output(
         
         # sampler hooks are added here
         deferred_model_run = partial(run_model, wrapped_model.model)
-        registry = getattr(wrapped_model.model, "hook_registry", None)
         if registry and registry.head.next_hook != registry.tail:
             wrapped_call = registry.get_modified_sampler_wrap(deferred_model_run)
             output = wrapped_call(execution_batch.feed_x, execution_batch.feed_t, **execution_batch.feed_input)
