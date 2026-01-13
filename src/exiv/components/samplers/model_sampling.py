@@ -15,7 +15,7 @@ from ...model_utils.conditioning_mixin import ConditioningMixin
 from ...utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, ProcDevice
 from ...utils.common import null_func
 from ...utils.logging import app_logger
-from ...model_patching.hook_registry import HookRegistry, HookType
+from ...model_patching.hook_registry import HookLocation, HookRegistry, HookType
 
 class KSampler:
     def __init__(
@@ -236,7 +236,11 @@ def compute_batched_output(
         # sampler hooks are added here
         deferred_model_run = partial(run_model, wrapped_model.model)
         if registry and registry.head.next_hook != registry.tail:
-            wrapped_call = registry.get_modified_sampler_wrap(deferred_model_run)
+            wrapped_call = registry.get_wrapped_fn(
+                deferred_model_run,
+                location=HookLocation.INNER_SAMPLER_STEP,
+                hook_order=[HookType.SLIDING_CONTEXT.value],
+            )
             output = wrapped_call(execution_batch.feed_x, execution_batch.feed_t, **execution_batch.feed_input)
         else:
             output = deferred_model_run(execution_batch.feed_x, execution_batch.feed_t, **execution_batch.feed_input)

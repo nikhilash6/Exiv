@@ -19,7 +19,7 @@ from ..utils.logging import app_logger
 from ..config import BYTES_IN_MB
 from ..quantizers.base import QuantType, Quantizer, get_quantizer
 from ..model_patching.efficient_loading_hook import enable_efficient_loading
-
+from ..model_patching.hook_registry import HookLocation
 
 # bypassing weight creation at model init
 class ModuleMeta(type(nn.Module)):
@@ -174,7 +174,7 @@ class ModelMixin(nn.Module, LoraMixin, ConditioningMixin, metaclass=ModuleMeta):
             
         registry = getattr(self, "hook_registry", None)
         if registry and registry.head.next_hook != registry.tail:
-            wrapped_call = registry.get_modified_call(original_call)
+            wrapped_call = registry.get_wrapped_fn(original_call, location=HookLocation.MODEL_RUN)
             return wrapped_call(*args, **kwargs)
         else:
             return original_call(*args, **kwargs)

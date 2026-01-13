@@ -1,20 +1,24 @@
 import torch
 from torch import Tensor
 
-from typing import Any
+from typing import Any, Callable
 
-from .hook_registry import HookRegistry, HookType
+from .hook_registry import HookLocation, HookRegistry, HookType
 from ..utils.logging import app_logger
 
 class NANCheckHook:
     def __init__(self):
         super().__init__()
         self.hook_type = HookType.NAN_CHECK.value
+        self.hook_location = HookLocation.FORWARD.value 
         
     def pre_forward(self, module: torch.nn.Module, *args, **kwargs):
         return args, kwargs
     
-    def post_forward(self, module: torch.nn.Module, output: Any):
+    def execute(self, module: torch.nn.Module, original_fn: Callable, *args, **kwargs):
+        output = original_fn(*args, **kwargs)
+        
+        # ---- post forward check
         outputs_to_check = []
         if isinstance(output, Tensor):
             outputs_to_check.append(output)

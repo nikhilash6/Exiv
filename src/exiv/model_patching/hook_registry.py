@@ -1,12 +1,18 @@
 import torch
 from torch import nn, Tensor
 
-from typing import Callable, Any, Dict, Optional
+from typing import Callable, Any, Dict, List, Optional
 
 from ..utils.enum import ExtendedEnum
 from ..utils.logging import app_logger
 
 # this creates a lookup table coupled with a doubly linked list, that has O(1) lookup and update
+
+class HookLocation(ExtendedEnum):
+    FORWARD = "forward"                # module forward
+    SAMPLER_STEP = "sampler_step"      # around compute_batched_output
+    INNER_SAMPLER_STEP = "inner_sampler_step"   # inside compute_batched_output
+    MODEL_RUN = "model_run"            # __call__ / the actual model call
 
 class HookType(ExtendedEnum):
     GENERIC = "generic"
@@ -22,8 +28,6 @@ class HookType(ExtendedEnum):
     TAYLOR_SEER_LITE_MODEL_HOOK = "taylor_seer_lite_model_hook"
     
     # sampler level hooks
-    # NOTE: these hooks are applied at the sampler level and are handled
-    # somewhat differently
     SLIDING_CONTEXT = "sliding_context"
     INPAINT_HOOK = "inpaint_hook"
     
@@ -34,28 +38,14 @@ class ModelHook:
     # we are creating a chain of hooks, being applied one after the other
     def __init__(self, *args, **kwargs):
         self.hook_type = HookType.GENERIC.value
+        self.hook_location = HookLocation.FORWARD.value
+        
         self.next_hook: ModelHook = None
         self.prev_hook: ModelHook = None
-    
-    # PONDER: can the structure be improved
-    def call_wrapper(self, module: nn.Module, og_call: Callable, *args, **kwargs):
-        return og_call(*args, **kwargs)
-
-    def pre_forward(self, module: nn.Module, *args, **kwargs):
-        return args, kwargs
-
-    def post_forward(self, module: nn.Module, output: Any):
-        return output
-    
-    # NOTE: this replaces the forward completely and thus needs to be applied
-    # first or else it will overwrite all other hooks applied before it
-    def new_forward(self, module: nn.Module,*args, **kwargs):
-        return module.forward(*args, **kwargs)
-        # raise NotImplementedError("Base new_forward should not be called directly.")
         
-    # handling sampler hooks
-    def wrap_model_run(self, module: nn.Module, mod_run: Callable, x: Tensor, t: Tensor, **input):
-        return mod_run(x, t, **input)
+    def execute(self, module: nn.Module, original_fn: Callable, *args, **kwargs):
+        # single wrapper for any location
+        return original_fn(*args, **kwargs)
 
 
 class HookRegistry:
@@ -69,9 +59,8 @@ class HookRegistry:
         self.head.next_hook = self.tail
         self.tail.prev_hook = self.head
         
-    def _has_new_forward(self, hook: ModelHook) -> bool:
-        return getattr(hook.__class__, "new_forward", None) is not ModelHook.new_forward
-
+        self._cached_wrappers = {}     # cache by location
+        
     def remove_hook(self, hook_type: str, recurse: bool = True) -> None:
         hook = self.hooks_lookup.get(hook_type, None)
         if not hook: return
@@ -103,32 +92,18 @@ class HookRegistry:
         if hook.hook_type in self.hooks_lookup.keys():
             raise ValueError(f"{hook.hook_type} already exists")
         
-        is_nf = self._has_new_forward(hook)
-        # hooks with new_forward go to the absolute start
-        curr = self.head.next_hook
-        last_nf = None
-        while curr != self.tail and self._has_new_forward(curr):
-            last_nf = curr
-            curr = curr.next_hook
-        
-        if is_nf and last_nf is not None:
-            app_logger.warning(f"{hook.hook_type} will overwrite all previous new_forward hooks")
-        
-        # always applying after the last_nf node (or head)
-        apply_after = last_nf or self.head
-        self._insert_hook_after(apply_after, hook)
-        
-        self._cached_forward = None
-        self._cached_call = None
-        self._cached_sampler_run = None
-        
-    def get_sorted_hooks(self, hook_order=[]):
+        self._insert_hook_after(self.tail.prev_hook, hook)
+        self._cached_wrappers = {}
+
+    def get_sorted_hooks(self, location=None, hook_order=None):
         # hook_order defines in what order the hooks must be applied
         # for e.g. the first ele / hook should be applied at the topmost level
+        hook_order = hook_order or []
         all_hooks = []
         curr = self.head.next_hook
         while curr != self.tail:
-            all_hooks.append(curr)
+            if location is None or getattr(curr, 'location', None) == location:
+                all_hooks.append(curr)
             curr = curr.next_hook
 
         # 'hook_order' should be ['sliding', 'inpainting'] (desired outermost -> innermost)
@@ -143,78 +118,29 @@ class HookRegistry:
         sorted_hooks = rest_hooks + list(reversed(priority_hooks))
         return sorted_hooks
     
-    def get_modified_forward(self):
-        if getattr(self, "_cached_forward", None) is not None:
-            return self._cached_forward
-    
-        cur_forward = self._module_ref._original_forward if \
-            getattr(self._module_ref, "_original_forward", None) else self._module_ref.forward
-        cur_hook = self.head.next_hook
+    def get_wrapped_fn(self, original_fn: Callable, location: HookLocation, hook_order: List[str] = None) -> Callable:
+        cache_key = f"{location.value}_{id(original_fn)}"
+        if cache_key in self._cached_wrappers:
+            return self._cached_wrappers[cache_key]
         
-        def create_new_forward(hook, og_forward):
-            def new_forward(*args, **kwargs):
-                args, kwargs = hook.pre_forward(self._module_ref, *args, **kwargs)
-                if self._has_new_forward(hook):
-                    output = hook.new_forward(self._module_ref, *args, **kwargs)
-                else:
-                    output = og_forward(*args, **kwargs)
-                return hook.post_forward(self._module_ref, output)
-
-            return new_forward
+        sorted_hooks = self.get_sorted_hooks(location, hook_order)
         
-        while cur_hook != self.tail:
-            cur_forward = create_new_forward(hook=cur_hook, og_forward=cur_forward)
-            cur_hook = cur_hook.next_hook
-        
-        self._cached_forward = cur_forward
-        return cur_forward
-    
-    # NOTE: hackish sol for now, instead of overwriting __call__ (which can't be done reliably)
-    # this is directly called from the ModelMixin's __call__ method
-    def get_modified_call(self, og_call):
-        if getattr(self, '_cached_call', None):
-            return self._cached_call
-    
-        cur_call = og_call
-        cur_hook = self.head.next_hook
-        
-        def create_new_call(hook, og_call):
-            def new_call(*args, **kwargs):
-                return hook.call_wrapper(self._module_ref, og_call, *args, **kwargs)
-            return new_call
-        
-        while cur_hook != self.tail:
-            cur_call = create_new_call(hook=cur_hook, og_call=cur_call)
-            cur_hook = cur_hook.next_hook
-        
-        self._cached_call = cur_call
-        return cur_call
-    
-    # directly called inside model_sampling
-    def get_modified_sampler_wrap(self, og_sampler_wrap):
-        if getattr(self, '_cached_sampler_run', None):
-            return self._cached_sampler_run
-        
-        hook_order = [HookType.SLIDING_CONTEXT.value]
-        sorted_hooks = self.get_sorted_hooks(hook_order)
-    
-        cur_sampler_wrap = og_sampler_wrap
+        wrapped_fn = original_fn
         def create_new_wrap(hook, og_sampler_wrap):
             def new_call(*args, **kwargs):
-                return hook.wrap_model_run(self._module_ref, og_sampler_wrap, *args, **kwargs)
+                return hook.execute(self._module_ref, og_sampler_wrap, *args, **kwargs)
             return new_call
         
         for hook in sorted_hooks:
-            cur_sampler_wrap = create_new_wrap(hook=hook, og_sampler_wrap=cur_sampler_wrap)
+            wrapped_fn = create_new_wrap(hook=hook, og_sampler_wrap=wrapped_fn)
         
-        self._cached_sampler_run = cur_sampler_wrap
-        return cur_sampler_wrap
+        self._cached_wrappers[cache_key] = wrapped_fn
+        return wrapped_fn
     
     @classmethod
     def get_hook_registry(cls, module):
         if not hasattr(module, "hook_registry"):
             module.hook_registry = cls(module)
-        
         return module.hook_registry
     
     @staticmethod
@@ -225,13 +151,13 @@ class HookRegistry:
             
         registry = HookRegistry.get_hook_registry(module)
         registry.register_hook(hook)
-        module.forward = registry.get_modified_forward()
+        module.forward = registry.get_wrapped_fn(module._original_forward, HookLocation.FORWARD)
         
     @staticmethod
     def remove_hook_from_module(module, hook_type: str):
         registry = HookRegistry.get_hook_registry(module)
         registry.remove_hook(hook_type)
-        module.forward = registry.get_modified_forward()
+        module.forward = registry.get_wrapped_fn(module._original_forward, HookLocation.FORWARD)
 
     def get_hook(self, hook_type: str) -> Optional[ModelHook]:
         return self.hooks_lookup.get(hook_type, None)

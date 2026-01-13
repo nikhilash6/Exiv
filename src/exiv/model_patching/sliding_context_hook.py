@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from ..utils.device import OFFLOAD_DEVICE, VRAM_DEVICE
 from ..utils.logging import app_logger
-from ..model_patching.hook_registry import HookRegistry, HookType, ModelHook
+from ..model_patching.hook_registry import HookLocation, HookRegistry, HookType, ModelHook
 
 # debug var
 low_blend = 0
@@ -24,6 +24,8 @@ class SlidingContextHook(ModelHook):
     def __init__(self, config = None):
         super().__init__()
         self.hook_type = HookType.SLIDING_CONTEXT.value
+        self.hook_location = HookLocation.INNER_SAMPLER_STEP.value
+        
         self.config: SlidingContextConfig = config or SlidingContextConfig()
         self.device = VRAM_DEVICE
         
@@ -74,7 +76,7 @@ class SlidingContextHook(ModelHook):
         elif blend_type == "pyramid":
             return self._get_pyramid_mask(window_length, self.config.ctx_overlap)
         
-    def wrap_model_run(self, module, mod_run, x, t, **input):
+    def execute(self, module, mod_run, x, t, **input):
         if len(x.shape) != 5:
             app_logger.warning(f"Shape {x.shape} is not supported by this hook, skipping processing")
         else:

@@ -1,7 +1,8 @@
+from typing import Callable
 import torch
 
 from .state import TaylorSeerState
-from ...hook_registry import HookRegistry, HookType, ModelHook
+from ...hook_registry import HookLocation, HookRegistry, HookType, ModelHook
 from ....utils.logging import app_logger
 
 from ....components.models.wan.main import repeat_e, sinusoidal_embedding_1d
@@ -11,6 +12,8 @@ class TaylorSeerModuleHook(ModelHook):
     def __init__(self, n_derivatives=1, max_warmup_steps=3, skip_interval_steps=2):
         super().__init__()
         self.hook_type = HookType.TAYLOR_SEER_MODULE_HOOK.value
+        self.hook_location = HookLocation.FORWARD.value
+        
         self.seer_state = TaylorSeerState(
             n_derivatives=n_derivatives, 
             max_warmup_steps=max_warmup_steps,
@@ -58,7 +61,7 @@ class TaylorSeerModuleHook(ModelHook):
 
         return x
         
-    def new_forward(self, module, *args, **kwargs):
+    def execute(self, module, original_fn: Callable, *args, **kwargs):
         x = args[0] if len(args) > 0 else kwargs.get("x")
         e = args[1] if len(args) > 1 else kwargs.get("e")
         freqs = args[2] if len(args) > 2 else kwargs.get("freqs")
@@ -70,6 +73,7 @@ class TaylorSeerModuleHook(ModelHook):
         self.seer_state.mark_step_begin()
         
         if self.seer_state.should_compute():
+            # NOTE: original_fn is completely replaced here
             hidden_states = self._fused_operation(module, x, e, freqs, context, vace_hints, context_img_len)
             self.seer_state.update(hidden_states)
             return hidden_states
@@ -80,8 +84,9 @@ class TaylorSeerModelHook(ModelHook):
     def __init__(self):
         super().__init__()
         self.hook_type = HookType.TAYLOR_SEER_MODEL_HOOK.value
+        self.hook_location = HookLocation.FORWARD.value
 
-    def new_forward(self, module, *args, **kwargs):
+    def execute(self, module, original_fn: Callable, *args, **kwargs):
         x = args[0]
         timestep = args[1]
         context = args[2] if len(args) > 2 else kwargs.get("context", None)
