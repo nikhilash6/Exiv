@@ -15,6 +15,7 @@ from ...model_utils.conditioning_mixin import ConditioningMixin
 from ...utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, ProcDevice
 from ...utils.common import null_func
 from ...utils.logging import app_logger
+from ...model_patching.hook_registry import HookRegistry, HookType
 
 class KSampler:
     def __init__(
@@ -213,11 +214,15 @@ def compute_batched_output(
     """
 
     active_batched_conds = filter_active_conds(batched_conds, timestep)
+    registry = HookRegistry.get_hook_registry(wrapped_model.model)
+    sliding_context_hook = registry.get_hook(HookType.SLIDING_CONTEXT.value)
+    # NOTE: as more hooks are added that affect memory calc, we will pass a list of hooks here
     execution_batch_list: List[ExecutionBatch] = batch_compatible_conds(
         active_batched_conds, 
         x_in, 
         timestep,
-        wrapped_model.model.get_memory_footprint_params()
+        wrapped_model.model.get_memory_footprint_params(),
+        sliding_context_hook=sliding_context_hook
     )
 
     # **** main model run ****
