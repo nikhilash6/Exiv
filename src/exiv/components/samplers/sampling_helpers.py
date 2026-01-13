@@ -12,6 +12,7 @@ from ...utils.logging import app_logger
 from ...model_utils.conditioning_mixin import ConditioningMixin
 from ...model_utils.common_classes import BatchedConditioning, Conditioning, ExecutionBatch, ModelForwardInput, ModelWrapper
 from ...utils.tensor import common_upscale, repeat_to_batch_size
+from ...model_patching.hook_registry import ModelHook
 
 
 def filter_active_conds(
@@ -117,13 +118,20 @@ def get_structure_size_mb(data) -> float:
 def check_oom_safety(
         cond_len: int, 
         x_in: Tensor, 
-        memory_footprint_config: Optional[Dict] = None
+        memory_footprint_config: Optional[Dict] = None,
+        sliding_context_hook: ModelHook = None
     ) -> bool:
     """
     Mainly for checking if the stacked cond is OOM safe or not
     """
     effective_batch_size = x_in.shape[0] * cond_len
     target_shape = (effective_batch_size,) + x_in.shape[1:]
+    if sliding_context_hook is not None:
+        # (B, C, T, H, W), clipping sliding context hook num of latent frames
+        target_shape_list = list(target_shape)
+        target_shape_list[2] = sliding_context_hook.config.ctx_len
+        target_shape = torch.Size(target_shape_list)
+    
     activation_peak_mb = estimate_peak_activation_size(memory_footprint_config, target_shape)
 
     heuristic_buffer = 2000
@@ -141,7 +149,8 @@ def batch_compatible_conds(
     active_batched_conds: BatchedConditioning,
     x_in: Tensor,
     timestep: Tensor,
-    memory_footprint_config: Optional[Dict]
+    memory_footprint_config: Optional[Dict],
+    sliding_context_hook: ModelHook = None
 ) -> List[ExecutionBatch]:
 
     # flatten the queue
@@ -169,7 +178,7 @@ def batch_compatible_conds(
             for i, (g, c) in enumerate(work_queue[idx+1:]):
                 # signature matches and the combination is memory safe, then batch them
                 if cur_cond.signature == c.signature and \
-                    check_oom_safety(len(cur_execution_batch.conds) + 1, x_in, memory_footprint_config):
+                    check_oom_safety(len(cur_execution_batch.conds) + 1, x_in, memory_footprint_config, sliding_context_hook):
                     cur_execution_batch.add_cond(c, g)
                     is_consumed[idx + 1 + i] = True
         

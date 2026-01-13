@@ -1,3 +1,4 @@
+import math
 from typing import get_origin, get_args, Any, Union, Tuple
 
 def split_module_key(module: Any, tensor_name: str) -> Tuple[Any, str]:
@@ -103,6 +104,14 @@ def safe_check(value, expected_type):
     except TypeError:
         return False
 
+def fix_frame_count(n, vae_temporal_factor = 4):
+    from .logging import app_logger
+    # changing num of frames as per vae requirements, 82 -> 85, 83 -> 85..
+    # e.g. pixels = 4 * latents + 1
+    latents = math.ceil((n - 1) / vae_temporal_factor)
+    t_n = (latents * vae_temporal_factor) + 1
+    if t_n != n: app_logger.warning(f"Number of frames changed from {n} to {t_n}")
+    return t_n
 
 def is_ffmpeg_present():
     import shutil

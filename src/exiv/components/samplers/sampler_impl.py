@@ -69,7 +69,7 @@ class Sampler:
         disable_pbar: bool = False
     ):
         extra_args = {"denoise_mask": denoise_mask}
-
+        # TODO: create this into a sampler hook
         def mask_preprocessing(x: Tensor, sigma, denoise_mask, model_options={}, seed=None):
             if denoise_mask is not None:
                 latent_mask = 1. - denoise_mask

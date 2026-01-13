@@ -2,6 +2,8 @@ import os
 
 from exiv.components.text_vision_encoder.common import TextEncoderOutput, VisionEncoderOutput
 from exiv.components.vae.base import get_vae
+from exiv.model_patching.sliding_context_hook import enable_sliding_context
+from exiv.utils.common import fix_frame_count
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
 import torch
@@ -95,6 +97,7 @@ def main(**params):
     progress_callback(0.1, "Loading Images")
     inpaint_img = Latent(image_path_list=["./tests/test_utils/assets/media/dog_realistic.jpg"])
     height, width, output_frame_count = 480, 832, 81
+    output_frame_count = fix_frame_count(output_frame_count)
     
     progress_callback(0.2, "Encoding prompts")
     # generate text embeddings
@@ -125,7 +128,8 @@ def main(**params):
     cur_model = "wan22_5B_ti2v_fp16"
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
     wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
-    enable_step_caching(wan_dit_model)
+    # enable_step_caching(wan_dit_model)
+    enable_sliding_context(wan_dit_model)
     model_wrapper = ModelWrapper(model=wan_dit_model)
 
     progress_callback(0.35, "Sampling loop")

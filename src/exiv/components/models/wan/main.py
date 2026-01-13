@@ -537,7 +537,7 @@ class Wan21Model(ModelMixin):
         
         return x
 
-    def rope_encode(self, t, h, w, t_start=0, steps_t=None, steps_h=None, steps_w=None, device=None, dtype=None):
+    def rope_encode(self, t, h, w, t_start=0, time_indices_map=None, steps_t=None, steps_h=None, steps_w=None, device=None, dtype=None):
         patch_size = self.patch_size
         t_len = ((t + (patch_size[0] // 2)) // patch_size[0])
         h_len = ((h + (patch_size[1] // 2)) // patch_size[1])
@@ -554,7 +554,17 @@ class Wan21Model(ModelMixin):
         # (this has marginal benefits on multi object scenes)
         dtype = torch.float32
         img_ids = torch.zeros((steps_t, steps_h, steps_w, 3), device=device, dtype=dtype)
-        img_ids[:, :, :, 0] = img_ids[:, :, :, 0] + torch.linspace(t_start, t_start + (t_len - 1), steps=steps_t, device=device, dtype=dtype).reshape(-1, 1, 1)
+        
+        t_seq = torch.linspace(t_start, t_start + (t_len - 1), steps=steps_t, device=device, dtype=dtype)
+        # TODO / PONDER: is there a better place to put this logic so it is more universal ?
+        # NOTE: applying map override (Position -> Time Value)
+        # e.g., {0: 0.0} replaces the first frame's time with 0
+        if time_indices_map:
+            for idx, val in time_indices_map.items():
+                if 0 <= idx < len(t_seq):
+                    t_seq[idx] = val
+                    
+        img_ids[:, :, :, 0] = img_ids[:, :, :, 0] + t_seq.reshape(-1, 1, 1)
         img_ids[:, :, :, 1] = img_ids[:, :, :, 1] + torch.linspace(0, h_len - 1, steps=steps_h, device=device, dtype=dtype).reshape(1, -1, 1)
         img_ids[:, :, :, 2] = img_ids[:, :, :, 2] + torch.linspace(0, w_len - 1, steps=steps_w, device=device, dtype=dtype).reshape(1, 1, -1)
         img_ids = img_ids.reshape(1, -1, img_ids.shape[-1])
@@ -570,7 +580,9 @@ class Wan21Model(ModelMixin):
         if self.ref_conv is not None and reference_latent is not None:
             t_len += 1      # the single latent that has been passed
 
-        freqs = self.rope_encode(t_len, h, w, device=x.device, dtype=x.dtype)
+        t_start = kwargs.get("t_start", 0)
+        time_indices_map = kwargs.get("time_indices_map", None)
+        freqs = self.rope_encode(t_len, h, w, t_start, time_indices_map=time_indices_map, device=x.device, dtype=x.dtype)
         return self.forward_orig(x, timestep, cross_attn, clip_fea=visual_embedding, freqs=freqs, reference_latent=reference_latent, **kwargs)[:, :, :t, :h, :w]
 
     def unpatchify(self, x, grid_sizes):

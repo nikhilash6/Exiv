@@ -8,7 +8,7 @@ import uuid
 
 from .conditioning_mixin import ConditioningMixin
 from .lora_mixin import LoraMixin
-from .helper_methods import get_state_dict, set_module_tensor_to_device
+from .helper_methods import estimate_peak_activation_size, get_state_dict, set_module_tensor_to_device
 from ..components.enum import ModelType
 from ..model_utils.common_classes import Conditioning, ConditioningType, ModelForwardInput
 from ..components.samplers.sampler_types import get_model_sampling
@@ -19,7 +19,7 @@ from ..utils.logging import app_logger
 from ..config import BYTES_IN_MB
 from ..quantizers.base import QuantType, Quantizer, get_quantizer
 from ..model_patching.efficient_loading_hook import enable_efficient_loading
-
+from ..model_patching.hook_registry import HookLocation
 
 # bypassing weight creation at model init
 class ModuleMeta(type(nn.Module)):
@@ -132,9 +132,22 @@ class ModelMixin(nn.Module, LoraMixin, ConditioningMixin, metaclass=ModuleMeta):
             current_shape = tuple(input_tensor.shape)
             
         if current_shape != (prev_cached:=getattr(self, "_cached_input_shape", None)):
-            app_logger.info(f"Input shape changed {prev_cached} -> {current_shape}. Recalculating memory split.")
-            enable_efficient_loading(self, target_shape=current_shape)
-            self._cached_input_shape = current_shape
+            should_reload = False
+            if prev_cached is None:
+                app_logger.warning(f"Initializing Efficient Loading for first run: {current_shape}")
+                should_reload = True
+            else:
+                mem_params = self.get_memory_footprint_params()
+                prev_mem = estimate_peak_activation_size(mem_params, prev_cached)
+                curr_mem = estimate_peak_activation_size(mem_params, current_shape)
+                # recalculate split in case of significant mem requirements divergence
+                if abs(curr_mem - prev_mem) > 1024:
+                    should_reload = True
+                    
+            if should_reload:
+                app_logger.info(f"Input shape changed {prev_cached} -> {current_shape}. Recalculating memory split.")
+                enable_efficient_loading(self, target_shape=current_shape)
+                self._cached_input_shape = current_shape
         else:
             # if there is no input tensor and no hook applied
             registry = getattr(self, "hook_registry", None)
@@ -161,7 +174,7 @@ class ModelMixin(nn.Module, LoraMixin, ConditioningMixin, metaclass=ModuleMeta):
             
         registry = getattr(self, "hook_registry", None)
         if registry and registry.head.next_hook != registry.tail:
-            wrapped_call = registry.get_modified_call(original_call)
+            wrapped_call = registry.get_wrapped_fn(original_call, location=HookLocation.MODEL_RUN.value)
             return wrapped_call(*args, **kwargs)
         else:
             return original_call(*args, **kwargs)

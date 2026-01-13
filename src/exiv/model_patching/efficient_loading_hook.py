@@ -3,9 +3,9 @@ from torch import nn
 import numpy as np
 
 import weakref
-from typing import List, Any, Tuple
+from typing import Callable, List, Any, Tuple
 
-from .hook_registry import HookRegistry, HookType, ModelHook
+from .hook_registry import HookLocation, HookRegistry, HookType, ModelHook
 from ..model_utils.helper_methods import estimate_peak_activation_size
 from ..utils.logging import app_logger
 from ..utils.device import OFFLOAD_DEVICE, RESERVED_MEM, MemoryManager
@@ -33,14 +33,16 @@ class EfficientModelLoaderHook(ModelHook):
     
     def __init__(self, full_load: List[Tuple[weakref.ref, str]]):
         self.hook_type = HookType.EFFICIENT_MODEL_LOADER.value
+        self.hook_location = HookLocation.FORWARD.value
         self.full_load = full_load
     
     # module here is the main model
-    def pre_forward(self, module, *args, **kwargs):
+    def execute(self, module, original_fn: Callable, *args, **kwargs):
+        # ------ pre forward hook
         app_logger.info(f"*****##### Loading {module.__class__.__name__}")
         app_logger.debug(f"full load modules count: {len(self.full_load)}")
         self._full_load(module)
-        return args, kwargs
+        return original_fn(*args, **kwargs)
     
     def _full_load(self, model):
         
@@ -68,14 +70,16 @@ class EfficientModuleLoaderHook(ModelHook):
         super().__init__()
         
         self.hook_type = HookType.EFFICIENT_MODULE_LOADER.value
+        self.hook_location = HookLocation.FORWARD.value
+        
         self.model_ref = weakref.ref(model_ref) 
         self.module_name = module_name
         self.full_load_module = full_load_module
 
-    def pre_forward(self, module: torch.nn.Module, *args, **kwargs):
+    def execute(self, module: torch.nn.Module, original_fn: Callable, *args, **kwargs):
         model = self.model_ref()
         if model is None:
-            return args, kwargs
+            return original_fn(*args, **kwargs)
 
         if not self.full_load_module:
             app_logger.debug(f"Loading via hook: {self.module_name}")
@@ -102,27 +106,22 @@ class EfficientModuleLoaderHook(ModelHook):
             app_logger.debug("---- patching lora weights delta")
             module.weight.data.add_(delta)
             self._applied_delta = delta
+        
+        try:
+            output = original_fn(*args, **kwargs)
+        finally:
+            # ----- post forward unpatch lora
+            if getattr(self, "_applied_delta", None) is not None:
+                app_logger.debug("---- UNpatching lora weights delta")
+                module.weight.data.sub_(self._applied_delta)
+                self._applied_delta = None
             
-        return args, kwargs
+            if not self.full_load_module:
+                app_logger.debug(f"Moving back {self.module_name} to cpu via hook")
+                move_module_or_params(model, module, target_device=OFFLOAD_DEVICE, module_name=self.module_name)
+                MemoryManager.clear_memory()
 
-    def post_forward(self, module: torch.nn.Module, output: Any):
-        model = self.model_ref()
-        if model is None: 
-            return output
-        
-        # unpatch lora
-        if getattr(self, "_applied_delta", None) is not None:
-            app_logger.debug("---- UNpatching lora weights delta")
-            module.weight.data.sub_(self._applied_delta)
-            self._applied_delta = None
-        
-        if not self.full_load_module:
-            app_logger.debug(f"Moving back {self.module_name} to cpu via hook")
-            move_module_or_params(model, module, target_device=OFFLOAD_DEVICE, module_name=self.module_name)
-            MemoryManager.clear_memory()
-            
         return output
-
     
 """
 There are three modes for loading the model:
