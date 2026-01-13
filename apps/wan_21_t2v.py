@@ -12,10 +12,12 @@ from exiv.components.text_vision_encoder.vision_encoder import create_vision_enc
 from exiv.components.vae.base import get_vae
 from exiv.components.vae.wan_vae import Wan21VAE
 from exiv.model_patching.cache_hook import enable_step_caching
+from exiv.model_patching.sliding_context_hook import enable_sliding_context
 from exiv.model_utils.common_classes import AuxCondType, AuxConditioning, BatchedConditioning, ConcatConditioning, Conditioning, ConditioningType, Latent
 from exiv.model_utils.common_classes import ModelWrapper
 from exiv.model_utils.helper_methods import move_model
 from exiv.server.app_core import App, AppOutputType, Input, Output
+from exiv.utils.common import fix_frame_count
 from exiv.utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, MemoryManager
 from exiv.utils.file import MediaProcessor, ensure_model_availability
 from exiv.utils.file_path import FilePathData, FilePaths
@@ -166,7 +168,8 @@ def main(**params):
     scheduler_name = params.get("scheduler_name")
     
     progress_callback(0.1, "Loading Images")
-    height, width, output_frame_count = 512, 512, 81
+    height, width, output_frame_count = 512, 512, 160
+    output_frame_count = fix_frame_count(output_frame_count)
     input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/boy_anime.jpg")[0]
     input_img = common_upscale(input_img.unsqueeze(0), height, width)
     
@@ -208,7 +211,8 @@ def main(**params):
     cur_model = "wan21_1_3B.safetensors"
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
     wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
-    enable_step_caching(wan_dit_model)
+    # enable_step_caching(wan_dit_model)
+    enable_sliding_context(wan_dit_model)
     model_wrapper = ModelWrapper(model=wan_dit_model)
 
     progress_callback(0.35, "Sampling loop")

@@ -81,9 +81,9 @@ class SlidingContextHook(ModelHook):
             app_logger.warning(f"Shape {x.shape} is not supported by this hook, skipping processing")
         else:
             num_frames = x.shape[self.config.frame_dim]
-            # if num_frames <= self.config.ctx_len:
-            #     out = super().wrap_model_run(module, mod_run, x, t, **input)
-            #     return out
+            if num_frames <= self.config.ctx_len:
+                out = super().execute(module, mod_run, x, t, **input)
+                return out
             
             # creating a list of windows to iterate upon
             windows = []
@@ -101,7 +101,7 @@ class SlidingContextHook(ModelHook):
             # accumulate and blend the outputs
             final_output = torch.zeros_like(x, device=OFFLOAD_DEVICE)
             count_mask = torch.zeros_like(x, device=OFFLOAD_DEVICE)
-            for indices in windows:
+            for i, indices in enumerate(windows):
                 # slice the window for inputs
                 slices = [slice(None)] * x.ndim
                 slices[self.config.frame_dim] = indices
@@ -122,16 +122,17 @@ class SlidingContextHook(ModelHook):
                     else:
                         input_slice[k] = v
                 
-                input_slice['t_start'] = indices[0]
-                if input_slice['t_start'] > 0:
-                    input_slice['t_start'] -= 1
-                    input_slice['time_indices_map'] = {0:0}
-                    t_anchor = torch.zeros((t.shape[0], 1), device=t.device, dtype=t.dtype)
-                    t = torch.cat([t_anchor, t], dim=1)
-                    anchor_frame = x[:, :, 0:1] 
-                    x_slice = torch.cat([anchor_frame, x_slice], dim=2)
+                # TODO: complete latent injection
+                # input_slice['t_start'] = indices[0]
+                # if input_slice['t_start'] > 0:
+                #     input_slice['t_start'] -= 1
+                #     input_slice['time_indices_map'] = {0:0}
+                #     t_anchor = torch.zeros((t.shape[0], 1), device=t.device, dtype=t.dtype)
+                #     t = torch.cat([t_anchor, t], dim=1)
+                #     anchor_frame = x[:, :, 0:1] 
+                #     x_slice = torch.cat([anchor_frame, x_slice], dim=2)
                 
-                output_slice = super().wrap_model_run(module, mod_run, x_slice, t, **input_slice)
+                output_slice = super().execute(module, mod_run, x_slice, t, **input_slice)
                 
                 if input_slice.get('time_indices_map') is not None:
                     # slicing [1:] removes the first frame (anchor)
@@ -151,7 +152,7 @@ class SlidingContextHook(ModelHook):
                 
             return final_output / (count_mask + 1e-5)
             
-        return super().wrap_model_run(module, mod_run, x, t, **input)
+        return super().execute(module, mod_run, x, t, **input)
 
 def enable_sliding_context(model: 'ModelMixin', config = None):
     """

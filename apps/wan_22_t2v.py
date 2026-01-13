@@ -128,8 +128,8 @@ def main(**params):
     cur_model = "wan22_5B_ti2v_fp16"
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
     wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
-    enable_step_caching(wan_dit_model)
-    # enable_sliding_context(wan_dit_model)
+    # enable_step_caching(wan_dit_model)
+    enable_sliding_context(wan_dit_model)
     model_wrapper = ModelWrapper(model=wan_dit_model)
 
     progress_callback(0.35, "Sampling loop")
