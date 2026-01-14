@@ -12,7 +12,7 @@ from exiv.components.text_vision_encoder.vision_encoder import create_vision_enc
 from exiv.components.vae.base import get_vae
 from exiv.components.vae.wan_vae import Wan21VAE
 from exiv.model_patching.cache_hook import enable_step_caching
-from exiv.model_patching.sliding_context_hook import enable_sliding_context
+from exiv.model_patching.sliding_context_hook import BlendType, SlidingContextConfig, enable_sliding_context
 from exiv.model_utils.common_classes import AuxCondType, AuxConditioning, BatchedConditioning, ConcatConditioning, Conditioning, ConditioningType, Latent
 from exiv.model_utils.common_classes import ModelWrapper
 from exiv.model_utils.helper_methods import move_model
@@ -212,7 +212,8 @@ def main(**params):
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
     wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
     # enable_step_caching(wan_dit_model)
-    enable_sliding_context(wan_dit_model)
+    config = SlidingContextConfig(ctx_len=20, ctx_overlap=5, blend_type=BlendType.NO_BLEND.value)
+    enable_sliding_context(wan_dit_model, config=config)
     model_wrapper = ModelWrapper(model=wan_dit_model)
 
     progress_callback(0.35, "Sampling loop")
