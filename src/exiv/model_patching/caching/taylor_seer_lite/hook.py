@@ -1,12 +1,13 @@
 from typing import Callable
 from .state import TaylorSeerState
 from ...hook_registry import HookLocation, HookType, ModelHook
+from ....utils.logging import app_logger
 
 class TaylorSeerLiteModelHook(ModelHook):
     def __init__(self, n_derivatives=1, max_warmup_steps=3, skip_interval_steps=2):
         super().__init__()
         self.hook_type = HookType.TAYLOR_SEER_LITE_MODEL_HOOK.value
-        self.hook_location = HookLocation.FORWARD.value
+        self.hook_location = HookLocation.SAMPLER_STEP.value
         
         self.seer_state = TaylorSeerState(
             n_derivatives=n_derivatives, 
@@ -22,4 +23,5 @@ class TaylorSeerLiteModelHook(ModelHook):
             self.seer_state.update(hidden_states)
             return hidden_states
         else:
+            app_logger.debug("caching/approximating this step")
             return self.seer_state.approximate()

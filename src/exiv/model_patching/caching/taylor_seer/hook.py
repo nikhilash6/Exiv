@@ -12,7 +12,7 @@ class TaylorSeerModuleHook(ModelHook):
     def __init__(self, n_derivatives=1, max_warmup_steps=3, skip_interval_steps=2):
         super().__init__()
         self.hook_type = HookType.TAYLOR_SEER_MODULE_HOOK.value
-        self.hook_location = HookLocation.FORWARD.value
+        self.hook_location = HookLocation.SAMPLER_STEP.value
         
         self.seer_state = TaylorSeerState(
             n_derivatives=n_derivatives, 
@@ -78,13 +78,14 @@ class TaylorSeerModuleHook(ModelHook):
             self.seer_state.update(hidden_states)
             return hidden_states
         else:
+            app_logger.debug("caching/approximating this step")
             return self.seer_state.approximate()
 
 class TaylorSeerModelHook(ModelHook):
     def __init__(self):
         super().__init__()
         self.hook_type = HookType.TAYLOR_SEER_MODEL_HOOK.value
-        self.hook_location = HookLocation.FORWARD.value
+        self.hook_location = HookLocation.SAMPLER_STEP.value
 
     def execute(self, module, original_fn: Callable, *args, **kwargs):
         x = args[0]

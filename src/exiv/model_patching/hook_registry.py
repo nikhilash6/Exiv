@@ -126,13 +126,13 @@ class HookRegistry:
         sorted_hooks = self.get_sorted_hooks(location, hook_order)
         
         wrapped_fn = original_fn
-        def create_new_wrap(hook, og_sampler_wrap):
+        def create_new_wrap(hook, og_fn):
             def new_call(*args, **kwargs):
-                return hook.execute(self._module_ref, og_sampler_wrap, *args, **kwargs)
+                return hook.execute(self._module_ref, og_fn, *args, **kwargs)
             return new_call
         
         for hook in sorted_hooks:
-            wrapped_fn = create_new_wrap(hook=hook, og_sampler_wrap=wrapped_fn)
+            wrapped_fn = create_new_wrap(hook=hook, og_fn=wrapped_fn)
         
         self._cached_wrappers[cache_key] = wrapped_fn
         return wrapped_fn

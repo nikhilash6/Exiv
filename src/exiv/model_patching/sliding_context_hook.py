@@ -21,7 +21,7 @@ class SlidingContextConfig:
     ctx_len: int = 20
     ctx_overlap: int = 5
     frame_dim: int = 2           # for (B, C, T, H, W). 1 if (B, T, C, H, W)
-    blend_type: str = "pyramid"
+    blend_type: str = BlendType.PYRAMIND.value
     
     @property
     def stride(self):
@@ -166,7 +166,6 @@ class SlidingContextHook(ModelHook):
                 temp_out = output_slice * window_mask
                 final_output[tuple(slices)] += temp_out.to(OFFLOAD_DEVICE)
                 count_mask[tuple(slices)] += window_mask.to(OFFLOAD_DEVICE)
-                print("here")
                 
             return final_output / (count_mask + 1e-5)
             

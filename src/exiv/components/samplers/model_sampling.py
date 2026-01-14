@@ -139,8 +139,16 @@ def sample(
         seed
     )
     
+    # injecting sampler hook
+    registry = HookRegistry.get_hook_registry(wrapped_model.model)
+    wrapped_call = registry.get_wrapped_fn(
+        model_sampling_step,
+        location=HookLocation.SAMPLER_STEP.value,
+        hook_order=[HookType.TAYLOR_SEER_LITE_MODEL_HOOK.value],
+    )
+    
     def denoiser_function(x, sigma, **kwargs):
-        return model_sampling_step(
+        return wrapped_call(
             wrapped_model,
             x,
             sigma,

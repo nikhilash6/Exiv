@@ -168,7 +168,7 @@ def main(**params):
     scheduler_name = params.get("scheduler_name")
     
     progress_callback(0.1, "Loading Images")
-    height, width, output_frame_count = 512, 512, 160
+    height, width, output_frame_count = 512, 512, 81
     output_frame_count = fix_frame_count(output_frame_count)
     input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/boy_anime.jpg")[0]
     input_img = common_upscale(input_img.unsqueeze(0), height, width)
@@ -211,9 +211,9 @@ def main(**params):
     cur_model = "wan21_1_3B.safetensors"
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
     wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
-    # enable_step_caching(wan_dit_model)
-    config = SlidingContextConfig(ctx_len=20, ctx_overlap=5, blend_type=BlendType.NO_BLEND.value)
-    enable_sliding_context(wan_dit_model, config=config)
+    enable_step_caching(wan_dit_model)
+    # config = SlidingContextConfig(ctx_len=20, ctx_overlap=5, blend_type=BlendType.PYRAMIND.value)
+    # enable_sliding_context(wan_dit_model, config=config)
     model_wrapper = ModelWrapper(model=wan_dit_model)
 
     progress_callback(0.35, "Sampling loop")
