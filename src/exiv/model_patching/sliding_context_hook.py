@@ -2,19 +2,26 @@ import torch
 
 from dataclasses import dataclass
 
+from ..utils.enum import ExtendedEnum
 from ..utils.device import OFFLOAD_DEVICE, VRAM_DEVICE
 from ..utils.logging import app_logger
 from ..model_patching.hook_registry import HookLocation, HookRegistry, HookType, ModelHook
 
 # debug var
 low_blend = 0
+left_blend_factor = 2
+
+class BlendType(ExtendedEnum):
+    LINEAR = "linear"
+    PYRAMIND = "pyramid"
+    NO_BLEND = "no_blend"
 
 @dataclass
 class SlidingContextConfig:
-    ctx_len = 20
-    ctx_overlap = 10
-    frame_dim = 2           # for (B, C, T, H, W). 1 if (B, T, C, H, W)
-    blend_type = "pyramid"   # supports 'linear' and 'pyramid' 
+    ctx_len: int = 20
+    ctx_overlap: int = 5
+    frame_dim: int = 2           # for (B, C, T, H, W). 1 if (B, T, C, H, W)
+    blend_type: str = "pyramid"
     
     @property
     def stride(self):
@@ -64,10 +71,21 @@ class SlidingContextHook(ModelHook):
             mask = torch.cat([ramp[:-1], ramp.flip(0)])
             
         return mask
+    
+    def _get_no_blend_mask(self, window_length, overlap, is_first):
+        """
+        no_blend/Autoregressive Mask:
+        - First Window: All 1s (writes everything).
+        - Subsequent Windows: 0s on the left overlap (preserves previous history), 1s on the rest.
+        """
+        mask = torch.ones(window_length, device=self.device)
+        if not is_first and overlap > 0:
+            mask[:overlap] = 0.0  # Don't overwrite the left context
+        return mask
         
-    def _get_mask(self, window_length):
+    def _get_mask(self, window_length, is_first = False, is_last = False):
         blend_type = self.config.blend_type
-        if blend_type not in ["linear", "pyramid"]:
+        if blend_type not in BlendType.value_list():
             app_logger.warning(f"blend_type {blend_type} not supported. Defaulting to linear")
             blend_type = "linear"
             
@@ -75,6 +93,8 @@ class SlidingContextHook(ModelHook):
             return self._get_linear_mask(window_length, self.config.ctx_overlap)
         elif blend_type == "pyramid":
             return self._get_pyramid_mask(window_length, self.config.ctx_overlap)
+        elif blend_type == "no_blend":
+            return self._get_no_blend_mask(window_length, self.config.ctx_overlap, is_first)
         
     def execute(self, module, mod_run, x, t, **input):
         if len(x.shape) != 5:
@@ -117,13 +137,11 @@ class SlidingContextHook(ModelHook):
                         # this is a heuristic; be careful with other tensors of same size
                         slices_k = [slice(None)] * v.ndim
                         slices_k[self.config.frame_dim] = indices
-                        anchor_frame = x[:, :, 0:1]
-                        x_slice = torch.cat([anchor_frame, x_slice], dim=2)
                     else:
                         input_slice[k] = v
                 
+                input_slice['t_start'] = indices[0]
                 # TODO: complete latent injection
-                # input_slice['t_start'] = indices[0]
                 # if input_slice['t_start'] > 0:
                 #     input_slice['t_start'] -= 1
                 #     input_slice['time_indices_map'] = {0:0}
@@ -131,7 +149,7 @@ class SlidingContextHook(ModelHook):
                 #     t = torch.cat([t_anchor, t], dim=1)
                 #     anchor_frame = x[:, :, 0:1] 
                 #     x_slice = torch.cat([anchor_frame, x_slice], dim=2)
-                
+                # TODO: t needs to be sliced here
                 output_slice = super().execute(module, mod_run, x_slice, t, **input_slice)
                 
                 if input_slice.get('time_indices_map') is not None:
@@ -139,7 +157,7 @@ class SlidingContextHook(ModelHook):
                     output_slice = output_slice.narrow(self.config.frame_dim, 1, output_slice.shape[self.config.frame_dim] - 1)
                 
                 # (20)
-                window_mask = self._get_mask(len(indices))
+                window_mask = self._get_mask(len(indices), is_first=i == 0, is_last=i == len(windows) - 1)
                 # reshape to (1, 1, 20, 1, 1)
                 mask_shape = [1] * x.ndim
                 mask_shape[self.config.frame_dim] = len(indices)
