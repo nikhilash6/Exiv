@@ -5,7 +5,7 @@ from typing import List, Any
 
 from ..utils.logging import app_logger
 from ..utils.tensor import common_upscale, repeat_to_batch_size
-from .common_classes import AuxCondType, Conditioning, ConditioningType, ModelForwardInput
+from .common_classes import AuxCondType, ConcatConditioning, Conditioning, ConditioningType, ModelForwardInput
 
 class ConditioningMixin:
     """
@@ -84,6 +84,40 @@ class ConditioningMixin:
             mask = repeat_to_batch_size(mask, noise.shape[0])
 
         return image, mask, mask_index
+    
+    @staticmethod
+    def encode_concat_condition(img_tensor, vae, height, width, num_frames) -> ConcatConditioning:
+        device = img_tensor.device
+        dtype = vae.dtype
+        img_tensor = img_tensor.to(dtype=dtype)
+
+        # NOTE: assuming img_tensor to be (B, C, H, W)
+        pixel_seq = torch.ones((num_frames, height, width, img_tensor.shape[1]), device=device, dtype=dtype)
+        pixel_seq = pixel_seq * self.get_fill_value()   # NOTE: fill_value is model specific
+
+        # latent dimensions
+        t_lat = ((num_frames - 1) // vae.temporal_compression_ratio) + 1
+        h_lat = height // vae.spatial_compression_ratio
+        w_lat = width // vae.spatial_compression_ratio
+
+        # 1 -> generate new, 0 -> keep the condition
+        mask = torch.ones((1, 1, t_lat, h_lat, w_lat), device=device, dtype=dtype)
+
+        fill_count = min(batch_size, num_frames)
+        for i in range(fill_count):
+            pixel_seq[i] = img_tensor[i].permute(1, 2, 0)
+            latent_idx = i // vae.temporal_compression_ratio
+            if latent_idx < t_lat:
+                mask[:, :, latent_idx] = 0.0
+
+        vae_input = self.format_vae_input(pixel_seq)
+        concat_encoded = vae.encode(vae_input)
+
+        return ConcatConditioning(
+            data=concat_encoded,
+            mask=mask,
+            mask_index=0 # Wan specific mask index (Channel 0)
+        )
     
     def prepare_concat_latent(self, cond, noise):
         # NOTE: needs to be overidden inside the model

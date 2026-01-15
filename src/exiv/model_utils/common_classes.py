@@ -16,7 +16,7 @@ class Latent:
     image_path_list: List[str] = field(default_factory=list)        # user provided
     samples: List[Tensor] | None = None
     batch_index: List[int] | None = None
-    # initially a user input [1, 0, 1, ...]
+    # initially a user input -> [1, 0, 1, ...]
     # but modified to a complete mask during prepare_latent
     noise_mask: Optional[Tensor] = None
     concat_latent: Optional[Tensor] = None
@@ -33,68 +33,105 @@ class Latent:
                 height
             )   # (B, C, H, W)
     
-    def prepare_latent(
+    def prepare_layout_and_schedule(
         self, 
-        height: int, 
-        width: int, 
-        num_frames: int,
-        latent_format: LatentFormat,
-        vae: 'VAEBase',
+        width, 
+        height, 
+        num_frames, 
+        num_inputs, 
+        vae: 'VAEBase', 
+        mode="continuous"
     ):
         """
-        - creates 'samples' tensor given the initial image list
-        - creates a noise_mask for it
-        - requires the latent shape (height, width, num_frames)
-        - handles all the inpainting use cases
+        - updates self.noise_mask
+        - returns
+            - indices : positions where the encoded image latents need to be placed
+            - dims    : final / target dimension of the vae encoded latent
         """
+        h_lat = height // vae.spatial_compression_ratio
+        w_lat = width // vae.spatial_compression_ratio
+        t_lat = ((num_frames - 1) // vae.temporal_compression_ratio) + 1
         
-        # vae compression 
-        spatial_compression_factor = vae.spatial_compression_ratio
-        temporal_compression_factor = vae.temporal_compression_ratio
-        vae_channels = latent_format.latent_channels
-        vae_dtype = vae.dtype
-        h_lat = height // spatial_compression_factor
-        w_lat = width // spatial_compression_factor
-        t_lat = ((num_frames - 1) // temporal_compression_factor) + 1
+        # c_present - conditioning present / keep image
+        c_present = 0
         
-        latent = torch.zeros([1, vae_channels, t_lat, h_lat, w_lat], device=VRAM_DEVICE, dtype=vae_dtype)
-        if len(self.image_path_list): self._load_images(height, width)
-        
-        # mask is only created if there is something to be masked
-        if self.samples is not None and len(self.samples) > 0:
-            # 1 -> image exists here, 0 -> empty latent
-            if self.noise_mask is None:
-                # creating spaced 1s only for the provided images
-                num_images = len(self.image_path_list)
-                step = (t_lat - 1) / (num_images - 1) if num_images > 1 else 0
-                indices = {round(i * step) for i in range(num_images)}
-                self.noise_mask = [1 if i in indices else 0 for i in range(t_lat)]
-            
-            # [1] -> [1, 0, 0, ...] pad to match frame count
-            if isinstance(self.noise_mask, list) and len(self.noise_mask) != t_lat:
-                self.noise_mask = self.noise_mask[:t_lat]
-                self.noise_mask += [0] * (t_lat - len(self.noise_mask))
+        indices = set()
+        def get_indices():
+            if mode == "interpolate" and num_inputs > 1:
+                # spaced: [0, 50, 100...]
+                step = (t_lat - 1) / (num_inputs - 1)
+                indices = {round(i * step) for i in range(num_inputs)}
+            else:
+                # continuous: [0, 1, 2...]
+                limit = min(num_inputs, t_lat * vae.temporal_compression_ratio)
+                indices = {i // vae.temporal_compression_ratio for i in range(limit)}
+                
+            return indices
 
-            # default 1
-            tensor_mask = torch.ones([1, 1, t_lat, h_lat, w_lat], device=VRAM_DEVICE, dtype=vae_dtype)
+        if num_inputs > 0:
+            # case A: no mask provided (auto-generate one)
+            if self.noise_mask is None:
+                indices = get_indices()
+                self.noise_mask = [c_present if i in indices else (1 - c_present) for i in range(t_lat)]
             
-            sample_idx = 0
-            for frame_idx, has_image in enumerate(self.noise_mask):
-                if has_image == 1 and sample_idx < len(self.samples):
-                    # encode: (B, C, H, W) -> (B, C, 1, H, W)
-                    img = self.samples[sample_idx].to(VRAM_DEVICE, dtype=vae_dtype).unsqueeze(2)
-                    encoded = vae.encode(img)                   # requires  (B, C, T, H, W)
-                    latent[:, :, frame_idx] = encoded[:, :, 0]
-                    tensor_mask[:, :, frame_idx] = 0.0          # setting mask to zero for this latent
+            # case B: mask provided
+            else:
+                # case B1: spatial / pixel mask (tensor)
+                # checking for (T, H, W) or (B, C, H, W)
+                if isinstance(self.noise_mask, torch.Tensor) and self.noise_mask.ndim > 1:
+                    mask_tensor = self.noise_mask.to(device=VRAM_DEVICE, dtype=vae.dtype)
+                    # (T,H,W) -> (1,1,T,H,W) and (1,T,H,W) -> (1,1,T,H,W)
+                    if mask_tensor.ndim == 3:
+                        mask_tensor = mask_tensor.unsqueeze(0).unsqueeze(0)
+                    elif mask_tensor.ndim == 4 and mask_tensor.shape[0] == 1:
+                        mask_tensor = mask_tensor.unsqueeze(1)
+                        
+                    # resize to latent dimensions
+                    self.noise_mask = torch.nn.functional.interpolate(
+                        mask_tensor, 
+                        size=(t_lat, h_lat, w_lat), 
+                        mode="trilinear",
+                        align_corners=False
+                    )
+                    indices = get_indices()
                     
-                    sample_idx += 1
-            
-            latent = latent_format.process_out(latent) * tensor_mask + latent * (1.0 - tensor_mask)
-            self.noise_mask = tensor_mask
+                # case B2: per frame mask (list/flat tensor)
+                else:
+                    mask_list = self.noise_mask
+                    if isinstance(mask_list, Tensor): mask_list = mask_list.flatten().cpu().tolist()
+                    mask_list = mask_list[:t_lat] + [(1 - c_present)] * max(0, t_lat - len(mask_list))    # pad / trim
+                    # update indices based on where the 1s are
+                    indices = {i for i, val in enumerate(mask_list) if val == c_present}
+                    self.noise_mask = mask_list
+
+        # changing noise to a tensor
+        if isinstance(self.noise_mask, list):
+            self.noise_mask = torch.tensor(self.noise_mask, device=VRAM_DEVICE, dtype=vae.dtype)
+        if self.noise_mask.ndim == 1:
+            self.noise_mask = self.noise_mask.view(1, 1, -1, 1, 1)
+            # self.noise_mask = self.noise_mask.expand(1, 1, -1, h_lat, w_lat)
+        
+        return sorted(list(indices)), (t_lat, h_lat, w_lat)
+    
+    def encode_keyframe_condition(self, width, height, num_frames, latent_format: LatentFormat, vae: 'VAEBase', encode_img=True):
+        # if we don't want keyframing (inpainting stuff), we can set encode_img = False, which will just set empty / zero latents
+        
+        if len(self.image_path_list): self._load_images(height, width)
+        num_inputs = len(self.samples) if self.samples else 0
+        indices, dims = self.prepare_layout_and_schedule(width, height, num_frames, num_inputs, vae, mode="interpolate")
+        # creating an empty canvas and populating with encoded imgs
+        latents = torch.zeros((1, latent_format.latent_channels, *dims), device=VRAM_DEVICE, dtype=vae.dtype)
+        if indices and len(indices) and enabled: 
+            # encode and insert at the indices
+            for i, latent_idx in enumerate(indices):
+                if i < num_inputs:
+                    img = self.samples[i].to(latents.device, dtype=latents.dtype).unsqueeze(2) # (B, C, 1, H, W)
+                    encoded_frame = vae.encode(img) 
+                    latents[:, :, latent_idx] = encoded_frame[:, :, 0]
+            latents = latent_format.process_out(latents) * self.noise_mask + latents * (1.0 - self.noise_mask)
         else:
             self.noise_mask = None
-            
-        self.samples = latent
+        self.samples = latents
 
 
 class ModelArchConfig:

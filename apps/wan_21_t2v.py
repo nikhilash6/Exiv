@@ -35,7 +35,7 @@ def encode_concat_condition(
         num_frames: int
     ):
         """
-        Prepares the concat conditioning (I2V/Control signal) from a raw tensor.
+        Converts raw pixels into 
         Args:
             img_tensor: (B, C, H, W) - Input images (usually B=1 for standard I2V)
         """
@@ -83,12 +83,14 @@ def encode_concat_condition(
             mask_index=0 # Wan specific mask index (Channel 0)
         )
 
+
 def preprocess_wan_conditionals(
         pos_embed: TextEncoderOutput, 
         neg_embed: TextEncoderOutput, 
         clip_embed: VisionEncoderOutput, 
-        input_img: Tensor, 
+        concat_img: Latent, 
         height: int, width: int, frame_count: int,
+        enable_concat_cond: bool = False,
     ) -> tuple[BatchedConditioning, Latent]:
     
     pos_cond = Conditioning(
@@ -113,24 +115,23 @@ def preprocess_wan_conditionals(
         pos_cond.aux = [aux_clip]
         neg_cond.aux = [aux_clip]
 
+    wan_vae = get_vae(
+        vae_type=VAEType.WAN21.value,
+        vae_dtype=vae_dtype,
+        use_tiling=use_vae_tiling
+    )
+    
     # creating concat conditioning
-    if input_img is not None:
-        wan_vae = get_vae(
-            vae_type=VAEType.WAN21.value,
-            vae_dtype=vae_dtype,
-            use_tiling=use_vae_tiling
-        )
-        
-        concat_latent = encode_concat_condition(
+    if concat_img is not None and enable_concat_cond:
+        concat_cond = concat_img.encode_concat_condition(
             input_img,
             wan_vae,
             height, 
             width, 
             frame_count,
         )
-        
-        pos_cond.concat = concat_latent
-        neg_cond.concat = concat_latent
+        pos_cond.concat = concat_cond
+        neg_cond.concat = concat_cond
 
 
     batched_cond = BatchedConditioning(
@@ -172,6 +173,7 @@ def main(**params):
     output_frame_count = fix_frame_count(output_frame_count)
     input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/boy_anime.jpg")[0]
     input_img = common_upscale(input_img.unsqueeze(0), height, width)
+    concat_img = Latent(image_path_list=["./tests/test_utils/assets/media/dog_realistic.jpg"])
     
     progress_callback(0.2, "Encoding prompts")
     # generate text embeddings
@@ -196,14 +198,15 @@ def main(**params):
     
     # preprocess conditionals
     batched_cond, blank_latent = preprocess_wan_conditionals(
-                                            pos_embed_dict, 
-                                            neg_embed_dict, 
-                                            clip_embed_dict,
-                                            input_img, 
-                                            height, 
-                                            width, 
-                                            output_frame_count,
-                                        )
+                                    pos_embed_dict, 
+                                    neg_embed_dict, 
+                                    clip_embed_dict,
+                                    concat_img, 
+                                    height, 
+                                    width, 
+                                    output_frame_count,
+                                    enable_concat_cond=True,
+                                )
     
     MemoryManager.clear_memory()
     

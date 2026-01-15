@@ -609,6 +609,10 @@ class Wan21Model(ModelMixin):
         u = u.reshape(b, c, *[i * j for i, j in zip(grid_sizes, self.patch_size)])
         return u
 
+    # ------------------------------------------------------------------------------------------
+    # MODEL OVERRIDES
+    # ------------------------------------------------------------------------------------------
+    
     def get_mapped_lora_key(self, model_key=None, lora_key=None):
         if hasattr(self, "_cached_key_map"):
             return self._cached_key_map
