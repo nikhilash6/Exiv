@@ -49,6 +49,10 @@ def detect_wan_params(state_dict):
             config["model_type"] = Model.WANT2V.value
     
     config["in_dim"] = input_channels
+    if "ref_conv.weight" in state_dict:
+        config["in_dim_ref_conv"] = state_dict["ref_conv.weight"].shape[1]
+    else:
+        config["in_dim_ref_conv"] = None
     return cls, config, dtype
 
 # NOTE: these methods detect the model arch (dims, layer counts etc.) from the 

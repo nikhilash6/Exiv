@@ -17,9 +17,8 @@ class Latent:
     samples: List[Tensor] | None = None
     batch_index: List[int] | None = None
     # initially a user input -> [1, 0, 1, ...]
-    # but modified to a complete mask during prepare_latent
+    # but modified to a complete mask during prepare_layout_and_schedule
     noise_mask: Optional[Tensor] = None
-    concat_latent: Optional[Tensor] = None
     
     def _load_images(self, height, width):
         from ..utils.tensor import common_upscale
@@ -104,24 +103,21 @@ class Latent:
                     indices = {i for i, val in enumerate(mask_list) if val == c_present}
                     self.noise_mask = mask_list
 
-        # changing noise to a tensor
-        if isinstance(self.noise_mask, list):
-            self.noise_mask = torch.tensor(self.noise_mask, device=VRAM_DEVICE, dtype=vae.dtype)
-        if self.noise_mask.ndim == 1:
-            self.noise_mask = self.noise_mask.view(1, 1, -1, 1, 1)
-            # self.noise_mask = self.noise_mask.expand(1, 1, -1, h_lat, w_lat)
+            # changing noise to a tensor
+            if isinstance(self.noise_mask, list):
+                self.noise_mask = torch.tensor(self.noise_mask, device=VRAM_DEVICE, dtype=vae.dtype)
+            if self.noise_mask.ndim == 1:
+                self.noise_mask = self.noise_mask.view(1, 1, -1, 1, 1)
         
         return sorted(list(indices)), (t_lat, h_lat, w_lat)
     
-    def encode_keyframe_condition(self, width, height, num_frames, latent_format: LatentFormat, vae: 'VAEBase', encode_img=True):
-        # if we don't want keyframing (inpainting stuff), we can set encode_img = False, which will just set empty / zero latents
-        
+    def encode_keyframe_condition(self, width, height, num_frames, latent_format: LatentFormat, vae: 'VAEBase'):
         if len(self.image_path_list): self._load_images(height, width)
         num_inputs = len(self.samples) if self.samples else 0
         indices, dims = self.prepare_layout_and_schedule(width, height, num_frames, num_inputs, vae, mode="interpolate")
         # creating an empty canvas and populating with encoded imgs
         latents = torch.zeros((1, latent_format.latent_channels, *dims), device=VRAM_DEVICE, dtype=vae.dtype)
-        if indices and len(indices) and enabled: 
+        if indices and len(indices):
             # encode and insert at the indices
             for i, latent_idx in enumerate(indices):
                 if i < num_inputs:
@@ -188,15 +184,6 @@ class ModelForwardInput:
     def to_dict(self):
         return {k: v for k, v in self.__dict__.items() if v is not None}
 
-# TODO: will be generalized more as more models are added
-@dataclass
-class ConcatConditioning:
-    """
-    Stuff directly concated to the input channels (e.g. Wan refs)
-    """
-    data: Tensor                   # VAE-encoded reference image (for now)
-    mask: Tensor                   # inpainting mask
-    mask_index: int = 0            # channel index to insert the mask (Model specific)
 
 class AuxCondType:
     TIME_HINT = "time_hint"                 # time (duration, camera pose, etc.)
@@ -239,8 +226,6 @@ class Conditioning:
     # - List[float]: Per-step strength schedule (e.g. [0.0, 0.5, 1.0...])
     strength: Union[float, Tensor, List[float]] = 1.0
 
-    # structural / geometry
-    concat: Optional[ConcatConditioning] = None
     # auxiliary / modifiers
     aux: Optional[List[AuxConditioning]] = None
     

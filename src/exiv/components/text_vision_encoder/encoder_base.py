@@ -277,6 +277,9 @@ class VisionEncoder(ModelMixin):
         mean = self.config.get("image_mean", [0.48145466, 0.4578275, 0.40821073])
         std = self.config.get("image_std", [0.26862954, 0.26130258, 0.27577711])
         
+        # IMPORTANT: need the image here in B,H,W,C
+        image = image.permute(0, 2, 3, 1)
+        
         # normalizing
         image = image[:, :, :, :3] if image.shape[3] > 3 else image
         mean = torch.tensor(mean, device=image.device, dtype=image.dtype)

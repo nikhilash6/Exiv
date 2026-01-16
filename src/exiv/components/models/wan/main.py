@@ -15,7 +15,7 @@ from ...latent_format import LatentFormat, Wan21VAELatentFormat, Wan22VAELatentF
 from ....components.samplers.sampler_types import get_model_sampling
 from ....model_utils.helper_methods import get_state_dict
 from ....model_utils.model_mixin import ModelMixin
-from ....model_utils.common_classes import Conditioning, ConditioningType, ModelArchConfig, ModelForwardInput
+from ....model_utils.common_classes import AuxCondType, Conditioning, ConditioningType, ModelArchConfig, ModelForwardInput
 from ....utils.tensor import common_upscale, pad_to_patch_size, repeat_to_batch_size
 from ....utils.dev import get_tensor_hash
 
@@ -452,13 +452,6 @@ class Wan21Model(ModelMixin):
             self.ref_conv = nn.Conv2d(in_dim_ref_conv, dim, kernel_size=patch_size[1:], stride=patch_size[1:])
         else:
             self.ref_conv = None
-          
-    def prepare_concat_latent(self, cond: Conditioning, noise: Tensor):
-        # extra channels supported by the model
-        extra_channels = self.patch_embedding.weight.shape[1] - noise.shape[1]
-        image, mask, mask_index = self.get_concat_components(cond, noise, extra_channels=extra_channels, mask_channels=4)
-        if any(x is None for x in [image, mask, mask_index]): return None
-        return torch.cat((image[:, :mask_index], mask, image[:, mask_index:]), dim=1)
             
     def forward_orig(
         self,
@@ -574,8 +567,23 @@ class Wan21Model(ModelMixin):
 
     def forward(self, x, timestep, cross_attn, visual_embedding=None, reference_latent=None, **kwargs):
         bs, c, t, h, w = x.shape
-        x = pad_to_patch_size(x, self.patch_size)
+        if reference_latent is not None:
+            # Input (16) + Cond (20) -> 36 Channels
+            x = torch.cat([x, reference_latent], dim=1)
+        else:
+            # PONDER: should this be a model specific logic or a general cleaning step
+            # filling up extra channels 
+            extra_channels = self.patch_embedding.weight.shape[1] - c
+            if extra_channels > 0:
+                null_conditioning = torch.zeros(
+                    (x.shape[0], extra_channels, t, h, w), 
+                    device=x.device, 
+                    dtype=x.dtype
+                )
+                x = torch.cat([x, null_conditioning], dim=1)
 
+        
+        x = pad_to_patch_size(x, self.patch_size)
         t_len = t
         if self.ref_conv is not None and reference_latent is not None:
             t_len += 1      # the single latent that has been passed
@@ -583,7 +591,8 @@ class Wan21Model(ModelMixin):
         t_start = kwargs.get("t_start", 0)
         time_indices_map = kwargs.get("time_indices_map", None)
         freqs = self.rope_encode(t_len, h, w, t_start, time_indices_map=time_indices_map, device=x.device, dtype=x.dtype)
-        return self.forward_orig(x, timestep, cross_attn, clip_fea=visual_embedding, freqs=freqs, reference_latent=reference_latent, **kwargs)[:, :, :t, :h, :w]
+        out = self.forward_orig(x, timestep, cross_attn, clip_fea=visual_embedding, freqs=freqs, reference_latent=reference_latent, **kwargs)[:, :, :t, :h, :w]
+        return out      # new variable for debugging purposes
 
     def unpatchify(self, x, grid_sizes):
         r"""
@@ -636,7 +645,7 @@ class Wan21Model(ModelMixin):
             "patch_size": self.patch_size,      # (1, 2, 2)
             "hidden_dim": self.dim,             # 5120
             "ffn_dim": self.ffn_dim,            # 13824
-            "attn_factor": 2.0,
+            "attn_factor": 30.0,
             "ffn_factor": 1.5,
             "dtype_size": dtype_size,
         }
