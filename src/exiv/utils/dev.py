@@ -267,8 +267,25 @@ def get_tensor_hash(t, visualize_latent=False):
     # Fix: cast to float() immediately to avoid bf16 numpy errors
     t = t.detach().float().cpu()
     data = t.contiguous().numpy()
-    hash = hashlib.sha256(data.tobytes()).hexdigest()[:8] # First 8 chars are usually enough
-    print(f"[Probe] | Shape: {tuple(t.shape)} | Mean: {t.mean():.4f} | Std: {t.std():.4f} | Min: {t.min():.4f} | Max: {t.max():.4f} | Hash: {hash}")
+    hash_str = hashlib.sha256(data.tobytes()).hexdigest()[:8]
+    
+    msg = f"[Probe] | Shape: {tuple(t.shape)} | Mean: {t.mean():.4f} | Std: {t.std():.4f} | Min: {t.min():.4f} | Max: {t.max():.4f}"
+    
+    # Add Motion Stats if it's a Video Latent (Batch, C, Time, H, W)
+    if t.ndim == 5 and t.shape[2] > 1:
+        # 1. Frame-to-Frame Delta (Velocity)
+        # Compare frame T with T-1
+        diffs = t[:, :, 1:] - t[:, :, :-1]
+        motion_score = diffs.abs().mean()
+        
+        # 2. Temporal Standard Deviation
+        # Calculate std deviation across the Time dimension (dim 2)
+        temp_std = torch.std(t, dim=2).mean()
+        
+        msg += f" | Motion: {motion_score:.4f} | T_Std: {temp_std:.4f}"
+        
+    msg += f" | Hash: {hash_str}"
+    print(msg)
     
     if visualize_latent:
         try:

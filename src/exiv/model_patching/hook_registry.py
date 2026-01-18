@@ -51,7 +51,7 @@ class ModelHook:
 class HookRegistry:
     
     def __init__(self, module_ref: torch.nn.Module) -> None:
-        self.hooks_lookup: Dict[str, ModelHook] = {}
+        self.hooks_lookup: Dict[str, ModelHook] = {}    # hook_type, hook obj
         self._module_ref = module_ref
         
         self.head = ModelHook()     # dummy head and tail

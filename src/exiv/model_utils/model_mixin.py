@@ -20,6 +20,7 @@ from ..config import BYTES_IN_MB
 from ..quantizers.base import QuantType, Quantizer, get_quantizer
 from ..model_patching.efficient_loading_hook import enable_efficient_loading
 from ..model_patching.hook_registry import HookLocation
+from ..model_patching.common import get_effective_shape
 
 # bypassing weight creation at model init
 class ModuleMeta(type(nn.Module)):
@@ -130,6 +131,7 @@ class ModelMixin(nn.Module, LoraMixin, ConditioningMixin, metaclass=ModuleMeta):
         current_shape = None
         if torch.is_tensor(input_tensor):
             current_shape = tuple(input_tensor.shape)
+            current_shape = get_effective_shape(self, current_shape)
             
         if current_shape != (prev_cached:=getattr(self, "_cached_input_shape", None)):
             should_reload = False

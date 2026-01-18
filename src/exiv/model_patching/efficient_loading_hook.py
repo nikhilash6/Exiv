@@ -133,46 +133,69 @@ There are three modes for loading the model:
 
 def split_model_for_loading(model: 'ModelMixin', target_shape = None):
     MemoryManager.clear_memory()
-    
-    # this determines which modules can be fully loaded permanently on the vram
-    # and which has to be dynamically loaded
-    full_load_modules: List[Tuple[weakref.ref, str]] = []
+    loading_mode = getattr(model, 'force_load_mode', None) or global_config.loading_mode
     
     current_mem_used = 0
     act_mb = estimate_peak_activation_size(model.get_memory_footprint_params(), target_shape)
-    available_mem = MemoryManager.available_memory(model.gpu_device) - max(RESERVED_MEM, act_mb)
+    runtime_mem_usage = max(RESERVED_MEM, act_mb)
+    if loading_mode == LOADING_MODE.NO_OOM.value:
+        # no full_load modules in this
+        # returning the largest leaft module's size
+        for m_name, m in model.named_modules():
+            if m is model or not model.is_leaf_module(m):
+                continue
+            current_mem_used = max(current_mem_used, model._module_size(m)) 
+        return [], current_mem_used + runtime_mem_usage
     
-    module_by_size = []     # contains modules sorted by size (asc)
-    for m_name, m in model.named_modules():
-        if m is model or not should_preload(model, m):
-            continue
-        module_by_size.append((model._module_size(m), m_name, m))
+    elif loading_mode == LOADING_MODE.NORMAL_LOAD.value:
+        # normal load, everything should be in full_load
+        full_load: List[Tuple[weakref.ref, str]] = []
+        for m_name, m in model.named_modules():
+            if m is model or not should_preload(model, m):
+                continue
+            # NOTE / TODO: here we are ignoring the weights of the internal params
+            # if those have large weights then this would cause problems with mem calc down the line
+            current_mem_used += model._module_size(m) if model.is_leaf_module(m) else 0
+            full_load.append((weakref.ref(m), m_name))
+        return full_load, current_mem_used + runtime_mem_usage
     
-    module_by_size.sort(key=lambda x: x[0])
-    
-    # calculating max_after, that gives the max element after the current element
-    # in the sorted module_by_size array
-    sizes = [s for s, _, _ in module_by_size]
-    max_after = [None] * len(sizes)
-    current_max = float('-inf')
-    for i in reversed(range(len(sizes))):
-        max_after[i] = current_max if i < len(sizes) - 1 else None
-        current_max = max(current_max, sizes[i])
-    
-    
-    for (m_size, m_name, m), max_next in zip(module_by_size, max_after):
-        if m_size >= available_mem:
-            raise RuntimeError(f"Single layer mem size of {m_size} exceeds the total available memory of {available_mem}")
+    elif loading_mode == LOADING_MODE.LOW_VRAM.value:
+        # this determines which modules can be fully loaded permanently on the vram
+        # and which has to be dynamically loaded
+        full_load_modules: List[Tuple[weakref.ref, str]] = []
+        available_mem = MemoryManager.available_memory(model.gpu_device) - runtime_mem_usage
         
-        current_mem_used += m_size
-        if current_mem_used < available_mem and (max_next is None or max_next < (available_mem - current_mem_used)):
-            # if we can add this to the existing available mem limit + after adding this the next
-            # biggest module can be safely loaded / unloaded, then we fully load this
-            full_load_modules.append((weakref.ref(m), m_name))
-        else:
-            break
+        module_by_size = []     # contains modules sorted by size (asc)
+        for m_name, m in model.named_modules():
+            if m is model or not should_preload(model, m):
+                continue
+            module_by_size.append((model._module_size(m), m_name, m))
         
-    return full_load_modules
+        module_by_size.sort(key=lambda x: x[0])
+        
+        # calculating max_after, that gives the max element after the current element
+        # in the sorted module_by_size array
+        sizes = [s for s, _, _ in module_by_size]
+        max_after = [None] * len(sizes)
+        current_max = float('-inf')
+        for i in reversed(range(len(sizes))):
+            max_after[i] = current_max if i < len(sizes) - 1 else None
+            current_max = max(current_max, sizes[i])
+        
+        
+        for (m_size, m_name, m), max_next in zip(module_by_size, max_after):
+            if m_size >= available_mem:
+                raise RuntimeError(f"Single layer mem size of {m_size} exceeds the total available memory of {available_mem}")
+            
+            current_mem_used += m_size
+            if current_mem_used < available_mem and (max_next is None or max_next < (available_mem - current_mem_used)):
+                # if we can add this to the existing available mem limit + after adding this the next
+                # biggest module can be safely loaded / unloaded, then we fully load this
+                full_load_modules.append((weakref.ref(m), m_name))
+            else:
+                break
+            
+        return full_load_modules, current_mem_used + runtime_mem_usage
 
 def remove_efficient_loading(model: 'ModelMixin'):
     for m_name, m in model.named_modules():
@@ -192,24 +215,8 @@ def enable_efficient_loading(model: 'ModelMixin', target_shape = None):
     
     model._fully_loaded = False
     full_load: List[Tuple[weakref.ref, str]] = []
-    loading_mode = getattr(model, 'force_load_mode', None) or global_config.loading_mode
-    
-    if loading_mode == LOADING_MODE.NO_OOM.value:
-        # no full_load modules in this
-        full_load = []
-        
-    elif loading_mode == LOADING_MODE.LOW_VRAM.value:
-        # full_load modules
-        full_load = split_model_for_loading(model, target_shape)
+    full_load, _ = split_model_for_loading(model, target_shape)
 
-    else:
-        # normal load, everything should be in full_load
-        for m_name, m in model.named_modules():
-            if m is model or not should_preload(model, m):
-                continue
-            
-            full_load.append((weakref.ref(m), m_name))
-    
     total_modules = 0
     for m_name, m in model.named_modules():
         if m is model or not should_preload(model, m):
