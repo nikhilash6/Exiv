@@ -70,7 +70,7 @@ class ConditioningMixin:
         
         # Spatial interpolation on the last two dimensions
         if mask.shape[-2:] != target_shape[-2:]:
-            mask = common_upscale(mask, target_shape[-1], target_shape[-2], upscale_method="bilinear", crop="none")
+            mask = common_upscale(mask, target_shape[-1], target_shape[-2], upscale_method="bilinear", crop="none")[0]
 
         # Adjust channel dimension (shape[1])
         if mask.shape[1] != target_shape[1]:

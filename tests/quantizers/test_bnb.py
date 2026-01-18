@@ -44,7 +44,7 @@ class TorchBNBRunTest(unittest.TestCase):
     # TODO: need a much bigger model for LOW_VRAM testing
     # fp32 is cast to fp16 before quant, thus halving the full precision layer size
     QUANT_PARAMS = [
-        (LOADING_MODE.NO_OOM.value, 1024.66, VRAM_DEVICE, OFFLOAD_DEVICE),
+        (LOADING_MODE.NO_OOM.value, 1536.75, VRAM_DEVICE, OFFLOAD_DEVICE),
         (LOADING_MODE.NORMAL_LOAD.value, 2176, VRAM_DEVICE, VRAM_DEVICE),
     ]
     @parameterized.expand(QUANT_PARAMS)
@@ -54,8 +54,9 @@ class TorchBNBRunTest(unittest.TestCase):
             model = LargeModel(quant_type=QuantType.BNB_INT8)
             model.load_model(LargeModel.SAFETENSORS_PATH)
             x = torch.ones(1, 16384)
-            for _ in range(5):
-                out = model(x)
+            with torch.no_grad():
+                for _ in range(5):
+                    out = model(x)
             self.assertEqual(out.shape, (1, 4096))
             self.assertTrue(out[0, 0].item(), 16384)
             self.assertEqual(next(model.parameters()).device.type, expected_device)

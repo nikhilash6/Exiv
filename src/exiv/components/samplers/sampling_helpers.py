@@ -4,13 +4,9 @@ from torch import Tensor
 import dataclasses
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from ...model_utils.helper_methods import estimate_peak_activation_size
-from ...utils.device import RESERVED_MEM, MemoryManager
+from ...utils.device import MemoryManager
 from ...utils.logging import app_logger
-from ...model_utils.conditioning_mixin import ConditioningMixin
-from ...model_utils.common_classes import BatchedConditioning, Conditioning, ExecutionBatch, ModelForwardInput, ModelWrapper
-from ...utils.tensor import common_upscale, repeat_to_batch_size
-from ...model_patching.hook_registry import ModelHook
+from ...model_utils.common_classes import BatchedConditioning, Conditioning, ExecutionBatch, ModelWrapper
 
 
 def filter_active_conds(
