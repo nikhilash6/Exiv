@@ -191,15 +191,19 @@ def lanczos(samples, width, height):
     result = torch.stack(images)
     return result.to(samples.device, samples.dtype)
 
-def common_upscale(samples, width, height, upscale_method = "lanczos", crop = "center"):
-        orig_shape = tuple(samples.shape)
+def common_upscale(samples: List[Tensor] | Tensor, width, height, upscale_method = "lanczos", crop = "center") -> List[Tensor]:
+    if not isinstance(samples, list): samples = [samples]
+    output = []
+    for sample in samples:
+        while sample.ndim < 4: sample = sample.unsqueeze(0)    # getting in (B, C, H, W) form
+        orig_shape = tuple(sample.shape)
         if len(orig_shape) > 4:
-            samples = samples.reshape(samples.shape[0], samples.shape[1], -1, samples.shape[-2], samples.shape[-1])
-            samples = samples.movedim(2, 1)
-            samples = samples.reshape(-1, orig_shape[1], orig_shape[-2], orig_shape[-1])
+            sample = sample.reshape(sample.shape[0], sample.shape[1], -1, sample.shape[-2], sample.shape[-1])
+            sample = sample.movedim(2, 1)
+            sample = sample.reshape(-1, orig_shape[1], orig_shape[-2], orig_shape[-1])
         if crop == "center":
-            old_width = samples.shape[-1]
-            old_height = samples.shape[-2]
+            old_width = sample.shape[-1]
+            old_height = sample.shape[-2]
             old_aspect = old_width / old_height
             new_aspect = width / height
             x = 0
@@ -208,9 +212,9 @@ def common_upscale(samples, width, height, upscale_method = "lanczos", crop = "c
                 x = round((old_width - old_width * (new_aspect / old_aspect)) / 2)
             elif old_aspect < new_aspect:
                 y = round((old_height - old_height * (old_aspect / new_aspect)) / 2)
-            s = samples.narrow(-2, y, old_height - y * 2).narrow(-1, x, old_width - x * 2)
+            s = sample.narrow(-2, y, old_height - y * 2).narrow(-1, x, old_width - x * 2)
         else:
-            s = samples
+            s = sample
 
         if upscale_method == "bislerp":
             out = bislerp(s, width, height)
@@ -220,10 +224,12 @@ def common_upscale(samples, width, height, upscale_method = "lanczos", crop = "c
             out = torch.nn.functional.interpolate(s, size=(height, width), mode=upscale_method)
 
         if len(orig_shape) == 4:
-            return out
-
-        out = out.reshape((orig_shape[0], -1, orig_shape[1]) + (height, width))
-        return out.movedim(2, 1).reshape(orig_shape[:-2] + (height, width))
+            output.append(out)
+        else:
+            out = out.reshape((orig_shape[0], -1, orig_shape[1]) + (height, width))
+            out = out.movedim(2, 1).reshape(orig_shape[:-2] + (height, width))
+            output.append(out)
+    return output
     
 def pad_to_patch_size(img, patch_size=(2, 2), padding_mode="circular"):
     # torchscript doesn't support circular padding

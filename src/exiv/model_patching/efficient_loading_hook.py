@@ -1,10 +1,9 @@
 import torch
-from torch import nn
-import numpy as np
 
 import weakref
 from typing import Callable, List, Any, Tuple
 
+from .common import prepare_and_cache_cpu_state, restore_cpu_state
 from .hook_registry import HookLocation, HookRegistry, HookType, ModelHook
 from ..model_utils.helper_methods import estimate_peak_activation_size
 from ..utils.logging import app_logger
@@ -81,7 +80,10 @@ class EfficientModuleLoaderHook(ModelHook):
         if model is None:
             return original_fn(*args, **kwargs)
 
+        cpu_cache = None
         if not self.full_load_module:
+            cpu_cache = prepare_and_cache_cpu_state(module)
+                
             app_logger.debug(f"Loading via hook: {self.module_name}")
             move_module_or_params(
                 model=model,
@@ -116,9 +118,8 @@ class EfficientModuleLoaderHook(ModelHook):
                 module.weight.data.sub_(self._applied_delta)
                 self._applied_delta = None
             
-            if not self.full_load_module:
-                app_logger.debug(f"Moving back {self.module_name} to cpu via hook")
-                move_module_or_params(model, module, target_device=OFFLOAD_DEVICE, module_name=self.module_name)
+            if cpu_cache is not None:
+                restore_cpu_state(module, cpu_cache)
 
         return output
     

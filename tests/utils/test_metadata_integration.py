@@ -75,8 +75,9 @@ class TestMediaProcessorIntegration(unittest.TestCase):
         }
         output_paths = MediaProcessor.save_latents_to_media(video_tensor, metadata=metadata_in)
         self.assertEqual(len(output_paths), 1)
-        self.assertTrue(os.path.exists(output_paths[0]))
-        self._verify_metadata(output_paths[0], metadata_in)
+        full_path = os.path.join(self.test_dir, output_paths[0])
+        self.assertTrue(os.path.exists(full_path))
+        self._verify_metadata(full_path, metadata_in)
 
     def test_mp4_metadata(self):
         path = os.path.join(self.test_dir, "test.mp4")

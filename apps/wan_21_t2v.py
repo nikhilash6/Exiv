@@ -30,7 +30,7 @@ use_vae_tiling = False
 vae_dtype = torch.float32 # torch.bfloat16
 
 def get_i2v_conditioning(start_image, vae, length, width, height, latent_format: LatentFormat):
-    start_image = common_upscale(start_image, width, height, "bilinear", "center")
+    start_image = common_upscale(start_image, width, height, "bilinear", "center")[0]
     video = torch.ones((1, 3, length, height, width), device=start_image.device, dtype=start_image.dtype) * 0.5
     video[:, :, 0, :, :] = start_image
     
@@ -146,7 +146,7 @@ def main(**params):
     height, width, output_frame_count = 512, 512, 81
     output_frame_count = fix_frame_count(output_frame_count)
     input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/boy_anime.jpg")[0]
-    input_img = common_upscale(input_img.unsqueeze(0), height, width)
+    input_img = common_upscale(input_img.unsqueeze(0), height, width)[0]
     
     progress_callback(0.2, "Encoding prompts")
     # generate text embeddings
@@ -183,7 +183,8 @@ def main(**params):
     MemoryManager.clear_memory()
     
     # create a model wrapper
-    cur_model = "wan21_480p_i2v_fp16_14B.safetensors"
+    # cur_model = "wan21_480p_i2v_fp16_14B.safetensors"
+    cur_model = "wan21_1_3B.safetensors"
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
     wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
     enable_step_caching(wan_dit_model)

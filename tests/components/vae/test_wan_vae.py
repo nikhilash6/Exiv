@@ -29,8 +29,8 @@ class VisionEncoderTest(unittest.TestCase):
         MemoryManager.clear_memory()
     
     LOADING_PARAMS = [
-        ("no_oom",   {"no_oom": True,  "low_vram": False, "normal_load": False}, 2106, VRAM_DEVICE, True),       # this will force revert to normal_load mode
-        ("normal",   {"no_oom": False, "low_vram": False, "normal_load": True},  2106, VRAM_DEVICE, True),
+        ("no_oom",   {"no_oom": True,  "low_vram": False, "normal_load": False}, 1840, VRAM_DEVICE, True),       # this will force revert to normal_load mode
+        ("normal",   {"no_oom": False, "low_vram": False, "normal_load": True},  1840, VRAM_DEVICE, True),
         ("normal",   {"no_oom": False, "low_vram": False, "normal_load": True},  5997, VRAM_DEVICE, False),
     ]
     @parameterized.expand(LOADING_PARAMS)
@@ -40,7 +40,7 @@ class VisionEncoderTest(unittest.TestCase):
         with check_memory_usage(expected_mem=expected_mem, device=expected_device):
             height, width, frame_count = 512, 512, 81
             input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/boy_anime.jpg")
-            input_img = common_upscale(input_img, height, width)    # B, C, H, W
+            input_img = common_upscale(input_img, height, width)[0]    # B, C, H, W
             
             image = torch.ones((frame_count, height, width, input_img.shape[1]), device=input_img.device, dtype=input_img.dtype) * 0.5
             # (T, C, H, W) --> (T, H, W, C)
@@ -69,6 +69,7 @@ class VisionEncoderTest(unittest.TestCase):
             del wan_vae
             
             image = image.to(VRAM_DEVICE)
+            decoded_image = decoded_image.to(VRAM_DEVICE)
             mse_loss = F.mse_loss(decoded_image, image)
             self.assertLess(mse_loss.item(), 1e-04)
             self.assertEqual(image.shape, decoded_image.shape)
@@ -86,7 +87,7 @@ class VisionEncoderTest(unittest.TestCase):
         with check_memory_usage(expected_mem=expected_mem, device=expected_device):
             height, width, frame_count = 512, 512, 81
             input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/boy_anime.jpg")
-            input_img = common_upscale(input_img, height, width)    # B, C, H, W
+            input_img = common_upscale(input_img, height, width)[0]    # B, C, H, W
             
             image = torch.ones((frame_count, height, width, input_img.shape[1]), device=input_img.device, dtype=input_img.dtype) * 0.5
             # (T, C, H, W) --> (T, H, W, C)
@@ -114,6 +115,7 @@ class VisionEncoderTest(unittest.TestCase):
             del wan_vae
             
             image = image.to(VRAM_DEVICE)
+            decoded_image = decoded_image.to(VRAM_DEVICE)
             mse_loss = F.mse_loss(decoded_image, image)
             self.assertLess(mse_loss.item(), 1e-04)
             self.assertEqual(image.shape, decoded_image.shape)

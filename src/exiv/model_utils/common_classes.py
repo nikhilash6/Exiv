@@ -30,7 +30,7 @@ class Latent:
                 self.samples[i].unsqueeze(0), 
                 width, 
                 height
-            )   # (B, C, H, W)
+            )[0]   # (B, C, H, W)
     
     def prepare_layout_and_schedule(
         self, 

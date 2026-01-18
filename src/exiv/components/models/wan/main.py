@@ -567,13 +567,13 @@ class Wan21Model(ModelMixin):
 
     def forward(self, x, timestep, cross_attn, visual_embedding=None, reference_latent=None, **kwargs):
         bs, c, t, h, w = x.shape
-        if reference_latent is not None:
+        extra_channels = self.patch_embedding.weight.shape[1] - c
+        if reference_latent is not None and extra_channels == reference_latent.shape[1]:
             # Input (16) + Cond (20) -> 36 Channels
             x = torch.cat([x, reference_latent], dim=1)
         else:
             # PONDER: should this be a model specific logic or a general cleaning step
             # filling up extra channels 
-            extra_channels = self.patch_embedding.weight.shape[1] - c
             if extra_channels > 0:
                 null_conditioning = torch.zeros(
                     (x.shape[0], extra_channels, t, h, w), 

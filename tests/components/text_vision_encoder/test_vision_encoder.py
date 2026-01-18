@@ -3,6 +3,7 @@ import torch
 import unittest
 from parameterized import parameterized
 
+from exiv.components.text_vision_encoder.common import VisionEncoderOutput
 from exiv.components.text_vision_encoder.vision_encoder import create_vision_encoder
 from exiv.utils.file import MediaProcessor
 from exiv.utils.file_path import FilePathData, FilePaths
@@ -34,15 +35,15 @@ class VisionEncoderTest(unittest.TestCase):
         with check_memory_usage(expected_mem=expected_mem, device=expected_device):
             height, width = 512, 512
             input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/boy_anime.jpg")
-            input_img = common_upscale(input_img, height, width)
+            input_img = common_upscale(input_img, height, width)[0]
 
             cur_model = "CLIP-ViT-H-fp16.safetensors"
             model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vision_encoder")
             clip_model = create_vision_encoder(model_path=model_path_data.path, download_url=model_path_data.url, dtype=torch.float16)
             clip_model.load_model()
-            clip_embed = clip_model.encode_image(input_img)
+            clip_embed: VisionEncoderOutput = clip_model.encode_image(input_img)
             
             self.assertIsNotNone(clip_embed.image_embedding)
-            self.assertIsNotNone(clip_embed.penultimate_hidden_states)
+            self.assertIsNotNone(clip_embed.intermediate_hidden_states)
             del clip_model, clip_embed, input_img
             # TODO: add exact output check later
