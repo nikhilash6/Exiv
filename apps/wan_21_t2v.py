@@ -1,7 +1,9 @@
 import torch
 from torch import Tensor
+import torch.nn.functional as F
 
 from exiv.components.enum import KSamplerType, SchedulerType, VAEType
+from exiv.components.latent_format import LatentFormat
 from exiv.components.models.wan.constructor import get_wan_instance
 from exiv.components.models.wan.main import Wan21ModelArchConfig
 from exiv.components.samplers.model_sampling import KSampler
@@ -13,7 +15,7 @@ from exiv.components.vae.base import get_vae
 from exiv.components.vae.wan_vae import Wan21VAE
 from exiv.model_patching.cache_hook import enable_step_caching
 from exiv.model_patching.sliding_context_hook import BlendType, SlidingContextConfig, enable_sliding_context
-from exiv.model_utils.common_classes import AuxCondType, AuxConditioning, BatchedConditioning, ConcatConditioning, Conditioning, ConditioningType, Latent
+from exiv.model_utils.common_classes import AuxCondType, AuxConditioning, BatchedConditioning, Conditioning, ConditioningType, Latent
 from exiv.model_utils.common_classes import ModelWrapper
 from exiv.model_utils.helper_methods import move_model
 from exiv.server.app_core import App, AppOutputType, Input, Output
@@ -27,67 +29,36 @@ from exiv.utils.logging import app_logger
 use_vae_tiling = False
 vae_dtype = torch.float32 # torch.bfloat16
 
-def encode_concat_condition(
-        img_tensor: Tensor, 
-        vae, 
-        height: int, 
-        width: int, 
-        num_frames: int
-    ):
-        """
-        Prepares the concat conditioning (I2V/Control signal) from a raw tensor.
-        Args:
-            img_tensor: (B, C, H, W) - Input images (usually B=1 for standard I2V)
-        """
-        # Ensure tensor is on the correct device/dtype
-        vae_dtype = vae.dtype
-        img_tensor = img_tensor.to(device=VRAM_DEVICE, dtype=vae_dtype)
-        
-        batch_size, c_channels, _, _ = img_tensor.shape
-        
-        # 1. Wan-Specific Logic: Prepare Pixel Sequence (T, H, W, C)
-        # Gray background initialization (specific to Wan training distribution)
-        pixel_seq = torch.ones((num_frames, height, width, c_channels), device=VRAM_DEVICE, dtype=vae_dtype) * 0.5
-        
-        # 2. Create Mask (0.0 = keep/condition, 1.0 = generate)
-        # Dimensions based on VAE compression
-        t_lat = ((num_frames - 1) // vae.temporal_compression_ratio) + 1
-        h_lat = height // vae.spatial_compression_ratio
-        w_lat = width // vae.spatial_compression_ratio
-        
-        mask = torch.ones((1, 1, t_lat, h_lat, w_lat), device=VRAM_DEVICE, dtype=vae_dtype)
-        
-        # TODO / NOTE: this is super incorrect logic, will fix when i am doing i2v
-        # 3. Fill pixel sequence and update mask
-        # We fill as many frames as provided in the batch (usually just the first one)
-        fill_count = min(batch_size, num_frames)
-        
-        for i in range(fill_count):
-            # (C, H, W) -> (H, W, C)
-            pixel_seq[i] = img_tensor[i].permute(1, 2, 0)
-            
-            # Unmask the corresponding latent frames so the model knows they are "given"
-            latent_idx = i // vae.temporal_compression_ratio
-            if latent_idx < t_lat:
-                mask[:, :, latent_idx] = 0.0
-
-        # 4. VAE Encoding
-        # (T, H, W, C) -> (1, C, T, H, W)
-        vae_input = pixel_seq.permute(3, 0, 1, 2).unsqueeze(0)      
-        concat_encoded = vae.encode(vae_input)
-        
-        # 5. Return the Conditioning Object
-        return ConcatConditioning(
-            data=concat_encoded,
-            mask=mask,
-            mask_index=0 # Wan specific mask index (Channel 0)
-        )
+def get_i2v_conditioning(start_image, vae, length, width, height, latent_format: LatentFormat):
+    start_image = common_upscale(start_image, width, height, "bilinear", "center")
+    video = torch.ones((1, 3, length, height, width), device=start_image.device, dtype=start_image.dtype) * 0.5
+    video[:, :, 0, :, :] = start_image
+    
+    concat_latent_image = vae.encode(video)
+    concat_latent_image = latent_format.process_in(concat_latent_image)
+    mask = torch.zeros(
+        (
+            1, 
+            4, 
+            ((length - 1) // vae.temporal_compression_ratio) + 1, 
+            concat_latent_image.shape[-2], 
+            concat_latent_image.shape[-1]
+        ), 
+        device=start_image.device,
+        dtype=start_image.dtype
+    )
+    mask[:, :, :((start_image.shape[0] - 1) // vae.temporal_compression_ratio) + 1] = 1.0
+    
+    mask = mask.to(VRAM_DEVICE)
+    concat_latent_image = concat_latent_image.to(VRAM_DEVICE)
+    conditioning = torch.cat([mask, concat_latent_image], dim=1)
+    return conditioning
 
 def preprocess_wan_conditionals(
         pos_embed: TextEncoderOutput, 
         neg_embed: TextEncoderOutput, 
-        clip_embed: VisionEncoderOutput, 
-        input_img: Tensor, 
+        input_img: Tensor,
+        clip_embed: VisionEncoderOutput,
         height: int, width: int, frame_count: int,
     ) -> tuple[BatchedConditioning, Latent]:
     
@@ -107,31 +78,43 @@ def preprocess_wan_conditionals(
     if clip_embed is not None:
         aux_clip = AuxConditioning(
             type=AuxCondType.VISUAL_EMBEDDING,
-            data=clip_embed,
+            data=clip_embed.intermediate_hidden_states,
         )
 
         pos_cond.aux = [aux_clip]
         neg_cond.aux = [aux_clip]
 
-    # creating concat conditioning
+    wan_vae = get_vae(
+        vae_type=VAEType.WAN21.value,
+        vae_dtype=vae_dtype,
+        use_tiling=use_vae_tiling
+    )
+    
+    latent_format = Wan21ModelArchConfig().latent_format
+    blank_latent = Latent()
+    blank_latent.encode_keyframe_condition(
+        height, 
+        width, 
+        frame_count, 
+        latent_format, 
+        wan_vae,
+    )
+    
     if input_img is not None:
-        wan_vae = get_vae(
-            vae_type=VAEType.WAN21.value,
-            vae_dtype=vae_dtype,
-            use_tiling=use_vae_tiling
+        data = get_i2v_conditioning(
+            start_image=input_img,
+            vae=wan_vae,
+            length=frame_count,
+            width=width,
+            height=height,
+            latent_format=latent_format
         )
-        
-        concat_latent = encode_concat_condition(
-            input_img,
-            wan_vae,
-            height, 
-            width, 
-            frame_count,
+        ref_latent = AuxConditioning(
+            type=AuxCondType.REF_LATENT,
+            data=data,
         )
-        
-        pos_cond.concat = concat_latent
-        neg_cond.concat = concat_latent
-
+        pos_cond.aux.append(ref_latent)
+        neg_cond.aux.append(ref_latent)
 
     batched_cond = BatchedConditioning(
         groups={
@@ -141,14 +124,6 @@ def preprocess_wan_conditionals(
         execution_order=["positive", "negative"]
     )
     
-    blank_latent = Latent()
-    blank_latent.prepare_latent(
-        height, 
-        width, 
-        frame_count, 
-        Wan21ModelArchConfig().latent_format, 
-        wan_vae
-    )
     return batched_cond, blank_latent
 
 def main(**params):
@@ -180,8 +155,8 @@ def main(**params):
     t5_xxl = UMT5XXL(model_path=model_path_data.path, dtype=torch.float16)
     wan_encoder = WanEncoder(t5_xxl=t5_xxl)
     wan_encoder.load_model(t5_xxl_download_url=model_path_data.url)
-    pos_embed_dict = wan_encoder.encode(positive_prompt)
-    neg_embed_dict = wan_encoder.encode(negative_prompt)
+    pos_embed: TextEncoderOutput = wan_encoder.encode(positive_prompt)
+    neg_embed: TextEncoderOutput = wan_encoder.encode(negative_prompt)
     del t5_xxl
     del wan_encoder
     
@@ -191,24 +166,24 @@ def main(**params):
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vision_encoder")
     clip_model = create_vision_encoder(model_path=model_path_data.path, download_url=model_path_data.url, dtype=torch.float16)
     clip_model.load_model()
-    clip_embed_dict = clip_model.encode_image(input_img)
+    clip_embed: VisionEncoderOutput = clip_model.encode_image(input_img)
     del clip_model
     
     # preprocess conditionals
     batched_cond, blank_latent = preprocess_wan_conditionals(
-                                            pos_embed_dict, 
-                                            neg_embed_dict, 
-                                            clip_embed_dict,
-                                            input_img, 
-                                            height, 
-                                            width, 
-                                            output_frame_count,
-                                        )
+                                    pos_embed, 
+                                    neg_embed, 
+                                    input_img,
+                                    clip_embed,
+                                    height, 
+                                    width, 
+                                    output_frame_count,
+                                )
     
     MemoryManager.clear_memory()
     
     # create a model wrapper
-    cur_model = "wan21_1_3B.safetensors"
+    cur_model = "wan21_480p_i2v_fp16_14B.safetensors"
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
     wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
     enable_step_caching(wan_dit_model)
@@ -253,7 +228,7 @@ app = App(
         'positive': Input(
             label="Positive Prompt",
             type="str",
-            default="a dog running in the park",
+            default="Cinematic anime style, medium close-up of a teenage boy with messy dark hair. 0-2s: The boy is looking down with a somber expression, his eyes shadowed. 2-4s: He slowly lifts his head to look directly into the camera, his expression shifting to one of sudden realization and determination, eyes widening with a subtle catchlight. Background is a soft-focus urban rooftop at sunset. Cel-shaded, vibrant colors, fluid character animation, high-quality rendering.",
             resizable=True,
         ),
         'negative': Input(

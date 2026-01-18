@@ -71,7 +71,8 @@ class WanEncoder(ModelEncoder):
         
     def encode(self, text):
         tokens, special_tokens = self.tokenize(text)
-        return self.t5_xxl.encode_token_weights(tokens, special_tokens)
+        out = self.t5_xxl.encode_token_weights(tokens, special_tokens)
+        return out
     
     def tokenize(self, text, return_word_ids=False) -> Tuple:
         # returns (tokens, special_tokens)

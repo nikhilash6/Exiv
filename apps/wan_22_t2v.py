@@ -70,9 +70,9 @@ def preprocess_wan_conditionals(
         use_tiling=use_vae_tiling
     )
     
-    inpaint_img.prepare_latent(
-        height, 
+    inpaint_img.encode_keyframe_condition(
         width, 
+        height, 
         frame_count, 
         Wan22ModelArchConfig().latent_format, 
         wan_vae

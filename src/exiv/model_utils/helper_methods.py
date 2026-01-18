@@ -9,7 +9,6 @@ from ..config import BYTES_IN_MB, global_config
 from ..utils.logging import app_logger
 from ..utils.device import is_same_device
 
-
 def move_model(model, device):
     # handling device movement through our custom logic
     for name, module in model.named_modules():
@@ -281,3 +280,14 @@ def estimate_peak_activation_size(memory_footprint_config = None, target_shape =
         return total_bytes / BYTES_IN_MB
     else:
         return default_mem_estimate
+
+# PONDER: is this better placed inside the ModelMixin
+def get_mem_usage(model, shape):
+    # gives the approximate mem usage of running a particular model
+    # with a given input shape
+    from ..model_patching.common import get_effective_shape
+    from ..model_patching.efficient_loading_hook import split_model_for_loading
+    
+    effective_shape = get_effective_shape(model, shape)
+    _, loaded_model_mem = split_model_for_loading(model, effective_shape)
+    return loaded_model_mem

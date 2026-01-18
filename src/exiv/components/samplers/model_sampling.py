@@ -1,7 +1,7 @@
-from functools import partial
 import torch
 from torch import Tensor
 
+from functools import partial
 from typing import Dict, List
 
 from .utils import normalize_seed
@@ -16,6 +16,7 @@ from ...utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, ProcDevice
 from ...utils.common import null_func
 from ...utils.logging import app_logger
 from ...model_patching.hook_registry import HookLocation, HookRegistry, HookType
+from ...model_utils.helper_methods import get_mem_usage
 
 class KSampler:
     def __init__(
@@ -223,15 +224,11 @@ def compute_batched_output(
 
     active_batched_conds = filter_active_conds(batched_conds, timestep)
     registry = HookRegistry.get_hook_registry(wrapped_model.model)
-    sliding_context_hook = registry.get_hook(HookType.SLIDING_CONTEXT.value)
-    # TODO / NOTE: as more hooks are added that affect memory calc, we will the model itself
-    # the underlying code can fetch the list of conds and pick whatever hook it wants
     execution_batch_list: List[ExecutionBatch] = batch_compatible_conds(
         active_batched_conds, 
         x_in, 
         timestep,
-        wrapped_model.model.get_memory_footprint_params(),
-        sliding_context_hook=sliding_context_hook
+        mem_calc_fn=partial(get_mem_usage, wrapped_model.model)
     )
 
     # **** main model run ****

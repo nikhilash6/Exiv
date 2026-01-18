@@ -37,6 +37,10 @@ DOWNLOAD_MAP = {
         "type": "checkpoint",
         "url": "https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B/resolve/main/diffusion_pytorch_model.safetensors?download=true"
     },
+    "wan21_480p_i2v_fp16_14B.safetensors": {
+        "type": "checkpoint",
+        "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_i2v_480p_14B_fp16.safetensors"
+    },
     "wan21_14B.safetensors": {
         "type": "checkpoint",
         "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_14B_fp16.safetensors?download=true"

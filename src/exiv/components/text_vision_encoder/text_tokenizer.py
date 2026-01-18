@@ -146,7 +146,7 @@ class UMTT5XXLTokenizer(SDTokenizer):
         super().__init__(
             "google/umt5-xxl",
             max_length=512, 
-            pad_with_end=True, 
+            pad_with_end=False,                         # should be 'True' mainly for CLIP models 
             embedding_directory=embedding_directory, 
             embedding_size=4096, 
             embedding_key='umt5xxl',
