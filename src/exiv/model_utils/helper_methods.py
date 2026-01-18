@@ -21,28 +21,56 @@ def move_model(model, device):
 
     return model
 
+
+def _iter_tensor_attributes(module: nn.Module):
+    """
+    Centralized logic to yield all tensors (params, buffers, attributes, state) 
+    associated with a module
+    Yields: (key_name, parent_object, attribute_name)
+    """
+    # params and their attributes
+    for name, param in module.named_parameters(recurse=False):
+        yield name, param, "data"
+        
+        # __dict__ for generic tensors
+        if hasattr(param, "__dict__"):
+            for attr, val in param.__dict__.items():
+                if torch.is_tensor(val): yield name, param, attr
+        
+        # explicit BNB/Quant attributes (if not in __dict__)
+        for attr in ["CB", "SCB", "quant_state", "absmax"]:
+            val = getattr(param, attr, None)
+            if val is not None and torch.is_tensor(val): yield name, param, attr
+            
+    # buffers
+    for name, buf in module.named_buffers(recurse=False):
+        yield name, buf, "data"
+        
+    # module state (BNB specific)
+    if hasattr(module, "state"):
+        for attr, val in module.state.__dict__.items():
+            if torch.is_tensor(val): yield "state", module.state, attr
+
 def move_immediate_params(module, device, non_blocking=False):
     """
-    Moves only the immediate parameters of the module
+    Moves all immediate tensors to device, handles BNB/Quant attributes automatically
     """
-    for param in module.parameters(recurse=False):
-        if param is not None:
-            param.data = param.data.to(device, non_blocking=non_blocking)
-            if param.grad is not None:
-                param.grad.data = param.grad.data.to(device, non_blocking=non_blocking)
-
-    for name, buf in module.named_buffers(recurse=False):
-        if buf is not None:
-            module._buffers[name] = buf.to(device, non_blocking=non_blocking)
+    for _, obj, attr in _iter_tensor_attributes(module):
+        val = getattr(obj, attr)
+        if val.device != torch.device(device):
+            # setattr for attributes, direct assignment for .data
+            if attr == "data" and isinstance(obj, (nn.Parameter, torch.Tensor)):
+                obj.data = val.to(device, non_blocking=non_blocking)
+                # not needed rn but keeping for completeness
+                if isinstance(obj, nn.Parameter) and obj.grad is not None:
+                     obj.grad.data = obj.grad.data.to(device, non_blocking=non_blocking)
+            else:
+                setattr(obj, attr, val.to(device, non_blocking=non_blocking))
 
 c = 0
 # TODO: dtype and non_blocking params are not handled as of now
 def move_module(model, module, module_name, target_device=None):
-    """
-    This contains the centralized logic for moving different module types 
-    between devices
-    """
-    if module is None: return   # m_ref can turn out to be None
+    if module is None: return
     
     global c
     app_logger.debug(f"Loading the current module: {c}")
@@ -51,44 +79,15 @@ def move_module(model, module, module_name, target_device=None):
     target_device = target_device or model.gpu_device
     app_logger.debug(f"Moving {module_name} to {target_device}")
     
-    module_class_name = module.__class__.__name__
-    is_bnb_module = module_class_name in ["Linear8bitLt", "Linear4bit"]
-
     if any(p.device.type == "meta" for p in module.parameters(recurse=True)):
         module.to_empty(device=target_device)
-    
-    elif is_bnb_module:
-        device_index = torch.device(target_device).index
-        if device_index is None:
-             device_index = torch.cuda.current_device() # Get default index if "cuda"
-        
-        # .cuda(device_index) / to is overridden by bnb
-        module.to(target_device)
-        
-        # handling the movement of linear8bit
-        # after the first forward, quant weights are stored in the state
-        if hasattr(module, "weight") and getattr(module.weight, "CB", None) is not None:
-            module.weight.CB = module.weight.CB.to(target_device)
-            
-        if hasattr(module, "weight") and getattr(module.weight, "SCB", None) is not None:
-            module.weight.SCB = module.weight.SCB.to(target_device)
-        
-        if hasattr(module, "state") and getattr(module.state, "CB", None) is not None:
-            module.state.CB = module.state.CB.to(target_device)
-            
-        if hasattr(module, "state") and getattr(module.state, "SCB", None) is not None:
-            module.state.SCB = module.state.SCB.to(target_device)
-
-        
     else:
-        # standard .to() for all other regular modules
-        module.to(device=target_device)
-        
+        # call .to() for children/submodules if strictly necessary, 
+        # but for leaf modules, move_immediate_params does the heavy lifting
+        module.to(target_device)
+
+    # handles CB, SCB, state, etc. automatically
     move_immediate_params(module, target_device)
-
-    # app_logger.debug(f"modules rn: {[m.__class__.__name__ for mn, m in model.named_modules() if m != model]}")
-    # MemoryManager.clear_memory()
-
 
 # lots of checks that can be skipped
 def set_module_tensor_to_device(
