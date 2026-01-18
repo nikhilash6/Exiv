@@ -81,7 +81,14 @@ class EfficientModuleLoaderHook(ModelHook):
         if model is None:
             return original_fn(*args, **kwargs)
 
+        cpu_params = {}
+        cpu_buffers = {}
         if not self.full_load_module:
+            for n, p in module.named_parameters(recurse=False):
+                cpu_params[n] = p.data
+            for n, b in module.named_buffers(recurse=False):
+                cpu_buffers[n] = b.data
+                
             app_logger.debug(f"Loading via hook: {self.module_name}")
             move_module_or_params(
                 model=model,
@@ -117,8 +124,14 @@ class EfficientModuleLoaderHook(ModelHook):
                 self._applied_delta = None
             
             if not self.full_load_module:
-                app_logger.debug(f"Moving back {self.module_name} to cpu via hook")
-                move_module_or_params(model, module, target_device=OFFLOAD_DEVICE, module_name=self.module_name)
+                for n, p in module.named_parameters(recurse=False):
+                    if n in cpu_params:
+                        p.data = cpu_params[n]
+                for n, b in module.named_buffers(recurse=False):
+                    if n in cpu_buffers:
+                        b.data = cpu_buffers[n]
+                # app_logger.debug(f"Moving back {self.module_name} to cpu via hook")
+                # move_module_or_params(model, module, target_device=OFFLOAD_DEVICE, module_name=self.module_name)
 
         return output
     
