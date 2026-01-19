@@ -26,7 +26,7 @@ from exiv.utils.tensor import common_upscale
 from exiv.utils.logging import app_logger
 
 use_vae_tiling = False
-vae_dtype = torch.float32 # torch.bfloat16
+vae_dtype = torch.float16 # torch.bfloat16
 
 def preprocess_wan_conditionals(
         model_wrapper: ModelWrapper,
@@ -144,8 +144,8 @@ def main(**params):
     del clip_model
     
     # create a model wrapper
-    # cur_model = "wan21_480p_i2v_fp16_14B.safetensors"
-    cur_model = "wan21_1_3B.safetensors"
+    cur_model = "wan21_480p_i2v_fp16_14B.safetensors"
+    # cur_model = "wan21_1_3B.safetensors"
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
     wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
     enable_step_caching(wan_dit_model)

@@ -1,4 +1,7 @@
 import os
+
+from exiv.components.text_vision_encoder.vision_encoder import create_vision_encoder
+from exiv.utils.tensor import common_upscale
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
 import torch
@@ -14,7 +17,7 @@ from exiv.components.samplers.model_sampling import KSampler
 from exiv.components.text_vision_encoder.te_t5 import UMT5XXL
 from exiv.components.text_vision_encoder.text_encoder import WanEncoder
 from exiv.model_patching.cache_hook import enable_step_caching
-from exiv.model_utils.common_classes import Conditioning, BatchedConditioning, ConditioningType, Latent
+from exiv.model_utils.common_classes import AuxCondType, AuxConditioning, Conditioning, BatchedConditioning, ConditioningType, Latent
 from exiv.model_utils.common_classes import ModelWrapper
 from exiv.server.app_core import App, AppOutputType, Input, Output
 from exiv.utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, MemoryManager
@@ -24,7 +27,7 @@ from exiv.utils.logging import app_logger
 
 
 use_vae_tiling = True
-vae_dtype = torch.bfloat16
+vae_dtype = torch.float16 #bfloat16
 
 
 def preprocess_wan_conditionals(
@@ -32,7 +35,7 @@ def preprocess_wan_conditionals(
         pos_embed: TextEncoderOutput, 
         neg_embed: TextEncoderOutput, 
         clip_embed: VisionEncoderOutput, 
-        inpaint_img: Latent, 
+        input_img: Tensor,
         height, width, frame_count
     ) -> tuple[BatchedConditioning, Latent]:
     
@@ -48,7 +51,35 @@ def preprocess_wan_conditionals(
         extra=neg_embed.extra.copy()
     )
     
-    # TODO: incorporate clip_embed in here
+    # if clip_embed is not None:
+    #     aux_clip = AuxConditioning(
+    #         type=AuxCondType.VISUAL_EMBEDDING,
+    #         data=clip_embed.intermediate_hidden_states,
+    #     )
+
+    #     pos_cond.aux = [aux_clip]
+    #     neg_cond.aux = [aux_clip]
+    
+    wan_vae = get_vae(
+        vae_type=VAEType.WAN22.value,
+        vae_dtype=vae_dtype,
+        use_tiling=use_vae_tiling
+    )
+    
+    # if input_img is not None:
+    #     data = model_wrapper.model.model_arch_config.get_ref_latent(
+    #         start_image=input_img,
+    #         vae=wan_vae,
+    #         length=frame_count,
+    #         width=width,
+    #         height=height,
+    #     )
+    #     ref_latent = AuxConditioning(
+    #         type=AuxCondType.REF_LATENT,
+    #         data=data,
+    #     )
+    #     pos_cond.aux.append(ref_latent)
+    #     neg_cond.aux.append(ref_latent)
     
     batched_cond = BatchedConditioning(
         groups={
@@ -64,6 +95,7 @@ def preprocess_wan_conditionals(
         use_tiling=use_vae_tiling
     )
     
+    inpaint_img = Latent(image_path_list=["./tests/test_utils/assets/media/dog_realistic.jpg"])
     inpaint_img.encode_keyframe_condition(
         width, 
         height, 
@@ -89,9 +121,10 @@ def main(**params):
     scheduler_name = params.get("scheduler_name")
     
     progress_callback(0.1, "Loading Images")
-    inpaint_img = Latent(image_path_list=["./tests/test_utils/assets/media/dog_realistic.jpg"])
     height, width, output_frame_count = 480, 832, 81
     output_frame_count = fix_frame_count(output_frame_count)
+    input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/dog_realistic.jpg")[0]
+    input_img = common_upscale(input_img.unsqueeze(0), height, width)[0]
     
     progress_callback(0.2, "Encoding prompts")
     # generate text embeddings
@@ -100,12 +133,21 @@ def main(**params):
     t5_xxl = UMT5XXL(model_path=model_path_data.path, dtype=torch.float16)
     wan_encoder = WanEncoder(t5_xxl=t5_xxl)
     wan_encoder.load_model(t5_xxl_download_url=model_path_data.url)
-    pos_embed_dict = wan_encoder.encode(positive_prompt)
-    neg_embed_dict = wan_encoder.encode(negative_prompt)
+    pos_embed = wan_encoder.encode(positive_prompt)
+    neg_embed = wan_encoder.encode(negative_prompt)
     del t5_xxl
     del wan_encoder
     
     MemoryManager.clear_memory()
+    
+    progress_callback(0.3, "Generating CLIP embeddings")
+    # generate img embeddings
+    cur_model = "CLIP-ViT-H-fp16.safetensors"
+    model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vision_encoder")
+    clip_model = create_vision_encoder(model_path=model_path_data.path, download_url=model_path_data.url, dtype=torch.float16)
+    clip_model.load_model()
+    clip_embed: VisionEncoderOutput = clip_model.encode_image(input_img)
+    del clip_model
     
     # create a model wrapper
     cur_model = "wan22_5B_ti2v_fp16"
@@ -118,10 +160,10 @@ def main(**params):
     # preprocess conditionals
     batched_cond, inpaint_latent = preprocess_wan_conditionals(
                                         model_wrapper,
-                                        pos_embed_dict, 
-                                        neg_embed_dict, 
-                                        None,
-                                        inpaint_img, 
+                                        pos_embed, 
+                                        neg_embed, 
+                                        clip_embed,
+                                        input_img,
                                         height, 
                                         width, 
                                         output_frame_count,

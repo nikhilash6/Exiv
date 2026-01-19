@@ -222,7 +222,7 @@ class Conditioning:
     strength: Union[float, Tensor, List[float]] = 1.0
 
     # auxiliary / modifiers
-    aux: Optional[List[AuxConditioning]] = None
+    aux: Optional[List[AuxConditioning]] = field(default_factory=list)
     
     # model-specific extra params (not in use rn)
     extra: dict = field(default_factory=dict)

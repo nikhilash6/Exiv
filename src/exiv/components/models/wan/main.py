@@ -18,9 +18,9 @@ from ....components.samplers.sampler_types import get_model_sampling
 from ....model_utils.model_mixin import ModelArchConfig, ModelMixin
 from ....utils.tensor import common_upscale, pad_to_patch_size
 
-class WanModelArchConfig(ModelArchConfig):
-    latent_channels = 16
 
+is_text_model = lambda model_type: model_type in [Model.WAN21_1_3B_T2V.value, Model.WAN22_5B_T2V.value]
+is_img_model = lambda model_type: not is_text_model(model_type)
 
 def sinusoidal_embedding_1d(dim, position):
     # preprocess
@@ -330,12 +330,12 @@ class Wan21ModelArchConfig(ModelArchConfig):
         self.latent_format = Wan21VAELatentFormat()
         
     def get_ref_latent(self, start_image, vae, length, width, height):
-        if self.model_type == Model.WANT2V.value:
+        if is_text_model(self.model_type):
             return None
         start_image = common_upscale(start_image, width, height, "bilinear", "center")[0]
         video = torch.ones((1, 3, length, height, width), device=start_image.device, dtype=start_image.dtype) * 0.5
         video[:, :, 0, :, :] = start_image
-        
+        video = video.to(dtype=vae.dtype)
         concat_latent_image = vae.encode(video)
         concat_latent_image = self.latent_format.process_in(concat_latent_image)
         mask = torch.zeros(
@@ -356,15 +356,15 @@ class Wan21ModelArchConfig(ModelArchConfig):
         conditioning = torch.cat([mask, concat_latent_image], dim=1)
         return conditioning
 
-class Wan22ModelArchConfig(ModelArchConfig):
-    def __init__(self, model_type=Model.WANT2V.value):
+class Wan22ModelArchConfig(Wan21ModelArchConfig):
+    def __init__(self, model_type=Model.WAN22_5B_T2V.value):
         self.model_type = model_type
         self.latent_format = Wan22VAELatentFormat()
 
 class Wan21Model(ModelMixin):
     def __init__(
         self,
-        model_type=Model.WANT2V.value,
+        model_type=Model.WAN22_5B_T2V.value,
         patch_size=(1, 2, 2),
         text_len=512,
         in_dim=16,
@@ -422,7 +422,7 @@ class Wan21Model(ModelMixin):
 
         super().__init__()
 
-        assert model_type in [Model.WANT2V.value, Model.WANTI2V.value]
+        assert is_text_model(model_type) or is_img_model(model_type), "Unsupported WAN model, aborting"
         self.model_type = model_type
         self.model_arch_config: ModelArchConfig = Wan21ModelArchConfig(model_type=model_type)
 
@@ -460,7 +460,7 @@ class Wan21Model(ModelMixin):
         self.time_projection = nn.Sequential(nn.SiLU(), nn.Linear(dim, dim * 6))
 
         # blocks
-        cross_attn_type = 't2v_cross_attn' if model_type == Model.WANT2V.value else 'i2v_cross_attn'
+        cross_attn_type = 't2v_cross_attn' if is_text_model(self.model_type) else 'i2v_cross_attn'
         self.blocks = nn.ModuleList([
             wan_attn_block_class(cross_attn_type, dim, ffn_dim, num_heads,
                                  window_size, qk_norm, cross_attn_norm, eps)
@@ -473,7 +473,7 @@ class Wan21Model(ModelMixin):
         d = dim // num_heads
         self.rope_embedder = EmbedND(dim=d, theta=10000.0, axes_dim=[d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)])
 
-        if model_type == Model.WANTI2V.value:
+        if is_img_model(self.model_type):
             self.img_emb = MLPProj(1280, dim, flf_pos_embed_token_number=flf_pos_embed_token_number)
         else:
             self.img_emb = None
@@ -539,7 +539,7 @@ class Wan21Model(ModelMixin):
 
         # clip conditioning
         context_img_len = None
-        if self.model_type in [Model.WANTI2V.value] and clip_fea is not None:
+        if is_img_model(self.model_type) and clip_fea is not None:
             if self.img_emb is not None:
                 context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
                 context = torch.concat([context_clip, context], dim=1)
@@ -612,7 +612,6 @@ class Wan21Model(ModelMixin):
                 )
                 x = torch.cat([x, null_conditioning], dim=1)
 
-        
         x = pad_to_patch_size(x, self.patch_size)
         t_len = t
         if self.ref_conv is not None and reference_latent is not None:

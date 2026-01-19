@@ -123,9 +123,6 @@ def sample(
     # returning if there are 0 steps
     if sigmas.shape[-1] == 0: return latent_image
     
-    if denoise_mask is not None:
-        denoise_mask = ConditioningMixin.prepare_mask(denoise_mask, noise.shape, wrapped_model.model.gpu_device)
-    
     # not scaling the blank latents
     if latent_image is not None and torch.count_nonzero(latent_image) > 0:
         latent_image = wrapped_model.model.process_latent_in(latent_image)

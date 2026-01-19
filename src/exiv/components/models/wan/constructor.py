@@ -3,7 +3,7 @@ from ...enum import Model
 from ....config import LOADING_MODE
 from ....model_utils.helper_methods import get_state_dict
 from ....utils.file import ensure_model_availability
-
+from ....utils.logging import app_logger
 
 def detect_wan_params(state_dict):
     """Detecting WAN config dynamically"""
@@ -40,24 +40,30 @@ def detect_wan_params(state_dict):
     # T2V usually has in_dim=16
     # I2V usually has in_dim=36 (16 latent + 4 mask + 16 image)
     input_channels = state_dict["patch_embedding.weight"].shape[1]
+    model_config = None
     if cls == Wan22Model:
-        config["model_type"] = Model.WANT2V.value
-        model_config = Wan22ModelArchConfig(model_type=Model.WANT2V.value)
+        if config["dim"] == 3072:
+            config["model_type"] = Model.WAN22_5B_T2V.value
+            model_config = Wan22ModelArchConfig(model_type=Model.WAN22_5B_T2V.value)
+        elif config["dim"] == 5120:
+            config["model_type"] = Model.WAN22_14B_TI2V.value
+            model_config = Wan22ModelArchConfig(model_type=Model.WAN22_14B_TI2V.value)
     else:
-        if "img_emb.proj.0.bias" in state_dict or input_channels > 16:
-            config["model_type"] = Model.WANTI2V.value
-            model_config = Wan21ModelArchConfig(model_type=Model.WANTI2V.value)
+        if config["dim"] == 5120:  
+            config["model_type"] = Model.WAN21_14B_TI2V.value
+            model_config = Wan21ModelArchConfig(model_type=Model.WAN21_14B_TI2V.value)
         else:
-            config["model_type"] = Model.WANT2V.value
-            model_config = Wan21ModelArchConfig(model_type=Model.WANT2V.value)
+            config["model_type"] = Model.WAN21_1_3B_T2V.value
+            model_config = Wan21ModelArchConfig(model_type=Model.WAN21_1_3B_T2V.value)
     
     config["in_dim"] = input_channels
     if "ref_conv.weight" in state_dict:
         config["in_dim_ref_conv"] = state_dict["ref_conv.weight"].shape[1]
     else:
         config["in_dim_ref_conv"] = None
-        
     
+    assert model_config is not None, "Model not supported or is in the wrong format. Aborting."
+    app_logger.info(f"Model detected: {cls.__name__} {dtype} {model_config.__class__.__name__} {config['model_type']}")
     return cls, config, dtype, model_config
 
 # NOTE: these methods detect the model arch (dims, layer counts etc.) from the 

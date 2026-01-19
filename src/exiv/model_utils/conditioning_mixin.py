@@ -53,38 +53,3 @@ class ConditioningMixin:
                 app_logger.warning(f"{cond.type} is not supported for the current generation! skipping it.")
         
         return filtered_conds
-
-    @staticmethod
-    def prepare_mask(mask: Tensor, target_shape: tuple, device: Any) -> Tensor:
-        """
-        Ensures the mask is of the proper dimensions.
-        - Matches the number of dimensions of the target shape.
-        - Interpolates the spatial dimensions (last two).
-        - Adjusts the batch and channel dimensions to match the target shape.
-        """
-        mask = mask.to(device)
-        
-        # Ensure mask has the same number of dimensions as shape
-        while mask.ndim < len(target_shape):
-            mask = mask.unsqueeze(0)
-        
-        # Spatial interpolation on the last two dimensions
-        if mask.shape[-2:] != target_shape[-2:]:
-            mask = common_upscale(mask, target_shape[-1], target_shape[-2], upscale_method="bilinear", crop="none")[0]
-
-        # Adjust channel dimension (shape[1])
-        if mask.shape[1] != target_shape[1]:
-            if mask.shape[1] == 1:
-                # Expand works for both 4D [B, C, H, W] and 5D [B, C, T, H, W]
-                mask = mask.expand(mask.shape[0], target_shape[1], *mask.shape[2:])
-            else:
-                mask = repeat_to_batch_size(mask, target_shape[1], dim=1)
-
-        # Adjust batch dimension (shape[0])
-        mask = repeat_to_batch_size(mask, target_shape[0])
-        
-        # Adjust temporal dimension if 5D
-        if mask.ndim == 5 and target_shape[2] != mask.shape[2]:
-            mask = repeat_to_batch_size(mask, target_shape[2], dim=2)
-
-        return mask

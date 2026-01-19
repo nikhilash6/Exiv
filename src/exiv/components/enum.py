@@ -102,8 +102,14 @@ class VisionEncoderType(ExtendedEnum):
     
 
 class Model(ExtendedEnum):
-    WANT2V = "want2v"
-    WANTI2V = "wani2v"
+    # ------------- WAN Models -------------
+    WAN22_5B_T2V = "wan22_5b_t2v"            # supports i2v through inpainting
+    WAN22_14B_TI2V = "wan22_14b_ti2v"        # takes in a separate ref latent
+    
+    WAN21_1_3B_T2V = "wan21_1_3b_t2v"        # no native i2v support
+    WAN21_14B_TI2V = "wan21_14b_ti2v"        # no native i2v support
+
+    # ------------- QWEN Models -------------
     QWEN_IMAGE = "qwen_image"
     
 class VAEType(ExtendedEnum):
