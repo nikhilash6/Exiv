@@ -8,16 +8,15 @@ from einops import rearrange
 import math
 from typing import List
 
+from exiv.utils.device import VRAM_DEVICE
+
 from ...enum import Model, ModelType
 from ...attention import optimized_attention
 from ...positional_embeddings import EmbedND, apply_rope
 from ...latent_format import LatentFormat, Wan21VAELatentFormat, Wan22VAELatentFormat
 from ....components.samplers.sampler_types import get_model_sampling
-from ....model_utils.helper_methods import get_state_dict
-from ....model_utils.model_mixin import ModelMixin
-from ....model_utils.common_classes import AuxCondType, Conditioning, ConditioningType, ModelArchConfig, ModelForwardInput
-from ....utils.tensor import common_upscale, pad_to_patch_size, repeat_to_batch_size
-from ....utils.dev import get_tensor_hash
+from ....model_utils.model_mixin import ModelArchConfig, ModelMixin
+from ....utils.tensor import common_upscale, pad_to_patch_size
 
 class WanModelArchConfig(ModelArchConfig):
     latent_channels = 16
@@ -326,10 +325,41 @@ class MLPProj(torch.nn.Module):
         return clip_extra_context_tokens
 
 class Wan21ModelArchConfig(ModelArchConfig):
-    latent_format: LatentFormat = Wan21VAELatentFormat()
+    def __init__(self, model_type):
+        self.model_type = model_type
+        self.latent_format = Wan21VAELatentFormat()
+        
+    def get_ref_latent(self, start_image, vae, length, width, height):
+        if self.model_type == Model.WANT2V.value:
+            return None
+        start_image = common_upscale(start_image, width, height, "bilinear", "center")[0]
+        video = torch.ones((1, 3, length, height, width), device=start_image.device, dtype=start_image.dtype) * 0.5
+        video[:, :, 0, :, :] = start_image
+        
+        concat_latent_image = vae.encode(video)
+        concat_latent_image = self.latent_format.process_in(concat_latent_image)
+        mask = torch.zeros(
+            (
+                1, 
+                4, 
+                ((length - 1) // vae.temporal_compression_ratio) + 1, 
+                concat_latent_image.shape[-2], 
+                concat_latent_image.shape[-1]
+            ), 
+            device=start_image.device,
+            dtype=start_image.dtype
+        )
+        mask[:, :, :((start_image.shape[0] - 1) // vae.temporal_compression_ratio) + 1] = 1.0
+        
+        mask = mask.to(VRAM_DEVICE)
+        concat_latent_image = concat_latent_image.to(VRAM_DEVICE)
+        conditioning = torch.cat([mask, concat_latent_image], dim=1)
+        return conditioning
 
 class Wan22ModelArchConfig(ModelArchConfig):
-    latent_format: LatentFormat = Wan22VAELatentFormat()
+    def __init__(self, model_type=Model.WANT2V.value):
+        self.model_type = model_type
+        self.latent_format = Wan22VAELatentFormat()
 
 class Wan21Model(ModelMixin):
     def __init__(
@@ -394,7 +424,7 @@ class Wan21Model(ModelMixin):
 
         assert model_type in [Model.WANT2V.value, Model.WANTI2V.value]
         self.model_type = model_type
-        self.model_arch_config: ModelArchConfig = Wan21ModelArchConfig()
+        self.model_arch_config: ModelArchConfig = Wan21ModelArchConfig(model_type=model_type)
 
         self.patch_size = patch_size
         self.text_len = text_len

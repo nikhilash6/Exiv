@@ -23,11 +23,12 @@ from exiv.utils.file_path import FilePathData, FilePaths
 from exiv.utils.logging import app_logger
 
 
-use_vae_tiling = False
+use_vae_tiling = True
 vae_dtype = torch.bfloat16
 
 
 def preprocess_wan_conditionals(
+        model_wrapper: ModelWrapper,
         pos_embed: TextEncoderOutput, 
         neg_embed: TextEncoderOutput, 
         clip_embed: VisionEncoderOutput, 
@@ -67,7 +68,7 @@ def preprocess_wan_conditionals(
         width, 
         height, 
         frame_count, 
-        Wan22ModelArchConfig().latent_format, 
+        model_wrapper.model.model_arch_config.latent_format, 
         wan_vae
     )
     return batched_cond, inpaint_img
@@ -104,17 +105,6 @@ def main(**params):
     del t5_xxl
     del wan_encoder
     
-    # preprocess conditionals
-    batched_cond, inpaint_latent = preprocess_wan_conditionals(
-                                            pos_embed_dict, 
-                                            neg_embed_dict, 
-                                            None,
-                                            inpaint_img, 
-                                            height, 
-                                            width, 
-                                            output_frame_count,
-                                        )
-    
     MemoryManager.clear_memory()
     
     # create a model wrapper
@@ -124,6 +114,18 @@ def main(**params):
     enable_step_caching(wan_dit_model)
     # enable_sliding_context(wan_dit_model)
     model_wrapper = ModelWrapper(model=wan_dit_model)
+    
+    # preprocess conditionals
+    batched_cond, inpaint_latent = preprocess_wan_conditionals(
+                                        model_wrapper,
+                                        pos_embed_dict, 
+                                        neg_embed_dict, 
+                                        None,
+                                        inpaint_img, 
+                                        height, 
+                                        width, 
+                                        output_frame_count,
+                                    )
 
     progress_callback(0.35, "Sampling loop")
     # the main sampling loop
@@ -189,8 +191,8 @@ app = App(
         'seed': Input(
             label="Seed",
             type="number",
-            # default=-1,
-            default=256347,
+            default=-1,
+            # default=256347,
         ),
         'steps': Input(
             label="Steps",

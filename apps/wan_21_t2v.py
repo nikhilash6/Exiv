@@ -17,11 +17,10 @@ from exiv.model_patching.cache_hook import enable_step_caching
 from exiv.model_patching.sliding_context_hook import BlendType, SlidingContextConfig, enable_sliding_context
 from exiv.model_utils.common_classes import AuxCondType, AuxConditioning, BatchedConditioning, Conditioning, ConditioningType, Latent
 from exiv.model_utils.common_classes import ModelWrapper
-from exiv.model_utils.helper_methods import move_model
 from exiv.server.app_core import App, AppOutputType, Input, Output
 from exiv.utils.common import fix_frame_count
-from exiv.utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, MemoryManager
-from exiv.utils.file import MediaProcessor, ensure_model_availability
+from exiv.utils.device import MemoryManager
+from exiv.utils.file import MediaProcessor
 from exiv.utils.file_path import FilePathData, FilePaths
 from exiv.utils.tensor import common_upscale
 from exiv.utils.logging import app_logger
@@ -29,32 +28,8 @@ from exiv.utils.logging import app_logger
 use_vae_tiling = False
 vae_dtype = torch.float32 # torch.bfloat16
 
-def get_i2v_conditioning(start_image, vae, length, width, height, latent_format: LatentFormat):
-    start_image = common_upscale(start_image, width, height, "bilinear", "center")[0]
-    video = torch.ones((1, 3, length, height, width), device=start_image.device, dtype=start_image.dtype) * 0.5
-    video[:, :, 0, :, :] = start_image
-    
-    concat_latent_image = vae.encode(video)
-    concat_latent_image = latent_format.process_in(concat_latent_image)
-    mask = torch.zeros(
-        (
-            1, 
-            4, 
-            ((length - 1) // vae.temporal_compression_ratio) + 1, 
-            concat_latent_image.shape[-2], 
-            concat_latent_image.shape[-1]
-        ), 
-        device=start_image.device,
-        dtype=start_image.dtype
-    )
-    mask[:, :, :((start_image.shape[0] - 1) // vae.temporal_compression_ratio) + 1] = 1.0
-    
-    mask = mask.to(VRAM_DEVICE)
-    concat_latent_image = concat_latent_image.to(VRAM_DEVICE)
-    conditioning = torch.cat([mask, concat_latent_image], dim=1)
-    return conditioning
-
 def preprocess_wan_conditionals(
+        model_wrapper: ModelWrapper,
         pos_embed: TextEncoderOutput, 
         neg_embed: TextEncoderOutput, 
         input_img: Tensor,
@@ -90,7 +65,7 @@ def preprocess_wan_conditionals(
         use_tiling=use_vae_tiling
     )
     
-    latent_format = Wan21ModelArchConfig().latent_format
+    latent_format = model_wrapper.model.model_arch_config.latent_format
     blank_latent = Latent()
     blank_latent.encode_keyframe_condition(
         height, 
@@ -101,13 +76,12 @@ def preprocess_wan_conditionals(
     )
     
     if input_img is not None:
-        data = get_i2v_conditioning(
+        data = model_wrapper.model.model_arch_config.get_ref_latent(
             start_image=input_img,
             vae=wan_vae,
             length=frame_count,
             width=width,
             height=height,
-            latent_format=latent_format
         )
         ref_latent = AuxConditioning(
             type=AuxCondType.REF_LATENT,
@@ -169,8 +143,19 @@ def main(**params):
     clip_embed: VisionEncoderOutput = clip_model.encode_image(input_img)
     del clip_model
     
+    # create a model wrapper
+    # cur_model = "wan21_480p_i2v_fp16_14B.safetensors"
+    cur_model = "wan21_1_3B.safetensors"
+    model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
+    wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
+    enable_step_caching(wan_dit_model)
+    # config = SlidingContextConfig(ctx_len=20, ctx_overlap=5, blend_type=BlendType.PYRAMIND.value)
+    # enable_sliding_context(wan_dit_model, config=config)
+    model_wrapper = ModelWrapper(model=wan_dit_model)
+    
     # preprocess conditionals
     batched_cond, blank_latent = preprocess_wan_conditionals(
+                                    model_wrapper,
                                     pos_embed, 
                                     neg_embed, 
                                     input_img,
@@ -181,16 +166,6 @@ def main(**params):
                                 )
     
     MemoryManager.clear_memory()
-    
-    # create a model wrapper
-    # cur_model = "wan21_480p_i2v_fp16_14B.safetensors"
-    cur_model = "wan21_1_3B.safetensors"
-    model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
-    wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
-    enable_step_caching(wan_dit_model)
-    # config = SlidingContextConfig(ctx_len=20, ctx_overlap=5, blend_type=BlendType.PYRAMIND.value)
-    # enable_sliding_context(wan_dit_model, config=config)
-    model_wrapper = ModelWrapper(model=wan_dit_model)
 
     progress_callback(0.35, "Sampling loop")
     # the main sampling loop

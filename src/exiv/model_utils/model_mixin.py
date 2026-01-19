@@ -1,16 +1,14 @@
-import dataclasses
 import torch
 import torch.nn as nn
 from torch import Tensor
 
 from typing import List
-import uuid
 
 from .conditioning_mixin import ConditioningMixin
 from .lora_mixin import LoraMixin
 from .helper_methods import estimate_peak_activation_size, get_state_dict, set_module_tensor_to_device
+from ..components.latent_format import LatentFormat
 from ..components.enum import ModelType
-from ..model_utils.common_classes import Conditioning, ConditioningType, ModelForwardInput
 from ..components.samplers.sampler_types import get_model_sampling
 from ..utils.dtype import cast_to
 from ..utils.device import VRAM_DEVICE,ProcDevice
@@ -53,6 +51,16 @@ class ModuleMeta(type(nn.Module)):
         
         return instance
 
+class ModelArchConfig:
+    # TODO: add model specific checks like what hooks / conditions
+    # this model supports. will update as more models are added
+    def __init__(self, model_type=None):
+        self.model_type = model_type
+        self.latent_format: LatentFormat = None
+
+    def get_ref_latent(self, *args, **kwargs):
+        # NOTE: this has to be overriden in model specific config
+        return None
 
 class ModelMixin(nn.Module, LoraMixin, ConditioningMixin, metaclass=ModuleMeta):
     '''

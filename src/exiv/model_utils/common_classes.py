@@ -129,11 +129,6 @@ class Latent:
             self.noise_mask = None
         self.samples = latents
 
-
-class ModelArchConfig:
-    # will extend this as more models are added
-    latent_format: LatentFormat = None
-
 class ModelWrapper:
     '''
     contains
