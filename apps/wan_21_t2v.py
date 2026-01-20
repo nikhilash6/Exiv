@@ -4,8 +4,8 @@ import torch.nn.functional as F
 
 from typing import List
 
-from exiv.components.enum import KSamplerType, SchedulerType, TextEncoderType, VAEType
-from exiv.components.jit import get_text_embeddings
+from exiv.components.enum import KSamplerType, SchedulerType, TextEncoderType, VAEType, VisionEncoderType
+from exiv.components.jit import get_text_embeddings, get_vision_embeddings
 from exiv.components.latent_format import LatentFormat
 from exiv.components.models.wan.constructor import get_wan_instance
 from exiv.components.models.wan.main import Wan21ModelArchConfig
@@ -130,12 +130,7 @@ def main(**params):
     
     progress_callback(0.3, "Generating CLIP embeddings")
     # generate img embeddings
-    cur_model = "CLIP-ViT-H-fp16.safetensors"
-    model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vision_encoder")
-    clip_model = create_vision_encoder(model_path=model_path_data.path, download_url=model_path_data.url, dtype=torch.float16)
-    clip_model.load_model()
-    clip_embed: VisionEncoderOutput = clip_model.encode_image(input_img)
-    del clip_model
+    clip_embed: VisionEncoderOutput = get_vision_embeddings(input_img, ve_model_type=VisionEncoderType.CLIP_H.value)[0]
     
     # create a model wrapper
     # cur_model = "wan21_480p_i2v_fp16_14B.safetensors"

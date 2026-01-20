@@ -6,13 +6,13 @@ os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 import torch
 from torch import Tensor
 
-from exiv.components.jit import get_text_embeddings
+from exiv.components.jit import get_text_embeddings, get_vision_embeddings
 from exiv.components.text_vision_encoder.vision_encoder import create_vision_encoder
 from exiv.utils.tensor import common_upscale
 from exiv.components.text_vision_encoder.common import TextEncoderOutput, VisionEncoderOutput
 from exiv.components.vae.base import get_vae
 from exiv.utils.common import fix_frame_count
-from exiv.components.enum import KSamplerType, SchedulerType, TextEncoderType, VAEType
+from exiv.components.enum import KSamplerType, SchedulerType, TextEncoderType, VAEType, VisionEncoderType
 from exiv.components.models.wan.constructor import get_wan_instance
 from exiv.components.models.wan.main import Wan22ModelArchConfig
 from exiv.components.samplers.model_sampling import KSampler
@@ -133,12 +133,7 @@ def main(**params):
     
     progress_callback(0.3, "Generating CLIP embeddings")
     # generate img embeddings
-    cur_model = "CLIP-ViT-H-fp16.safetensors"
-    model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vision_encoder")
-    clip_model = create_vision_encoder(model_path=model_path_data.path, download_url=model_path_data.url, dtype=torch.float16)
-    clip_model.load_model()
-    clip_embed: VisionEncoderOutput = clip_model.encode_image(input_img)
-    del clip_model
+    clip_embed: VisionEncoderOutput = get_vision_embeddings(input_img, ve_model_type=VisionEncoderType.CLIP_H.value)[0]
     
     # create a model wrapper
     cur_model = "wan22_5B_ti2v_fp16"

@@ -228,6 +228,7 @@ class CLIPViTL(VisionEncoder):
 
 class CLIPViTH(VisionEncoder):
     def __init__(self, model_path, dtype=None, device=None):
+        self.default_model_filename = "CLIP-ViT-H-fp16.safetensors"
         super().__init__(model_path, dtype=dtype, device=device)
         
         self.config = self._get_config()

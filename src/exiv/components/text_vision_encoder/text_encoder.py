@@ -68,9 +68,12 @@ class TextPipeline:
     def tokenize(self, text, return_word_ids=False) -> Tuple:
         # returns (tokens, special_tokens)
         return self.tokenizer.tokenize_with_weights(text, return_word_ids)
-    
 
-def create_text_pipeline(filename: Optional[str] = None, model_type: Optional[str] = None, dtype=torch.float16) -> TextPipeline:
+def create_text_pipeline(
+    filename: Optional[str] = None, 
+    model_type: Optional[str] = None, 
+    dtype=torch.float16
+) -> TextPipeline:
     assert filename is not None or model_type is not None, "atleast one of filename or model_type is required to create the text encoder"
     
     model_path = None   # NOTE: TE models use the default model from their config

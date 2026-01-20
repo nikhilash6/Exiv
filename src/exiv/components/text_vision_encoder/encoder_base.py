@@ -274,6 +274,12 @@ class TextEncoder(ModelMixin):
 
 class VisionEncoder(ModelMixin):
     def __init__(self, model_path, dtype=None, device=None):
+        if not model_path:
+            if (filename:=getattr(self, 'default_model_filename', None)) is not None:   # TODO: refactor to make more streamlined
+                model_path_data: FilePathData = FilePaths.get_path(filename=filename, file_type="vision_encoder")
+                model_path: str = ensure_model_availability(model_path_data.path, model_path_data.url)
+            else:
+                raise Exception("Can't initialize the model, no path provided")
         super().__init__(model_path=model_path, dtype=dtype, device=device)
     
     # common preprocessor for current vision encoders

@@ -1,8 +1,12 @@
 import torch
+from torch import Tensor
 
 from typing import List
 
-from ..components.enum import TextEncoderType
+from exiv.components.text_vision_encoder.encoder_base import VisionEncoder
+from exiv.components.text_vision_encoder.vision_encoder import create_vision_encoder
+
+from ..components.enum import TextEncoderType, VisionEncoderType
 from ..components.text_vision_encoder.common import VisionEncoderOutput, TextEncoderOutput
 from ..components.text_vision_encoder.te_t5 import UMT5XXL
 from ..components.text_vision_encoder.text_encoder import TextPipeline, create_text_pipeline
@@ -15,10 +19,8 @@ def get_text_embeddings(
     te_model_filename = None,               # can be overriden to a custom model
     te_model_type = None
 ) -> List[TextEncoderOutput]:
-    
-    assert isinstance(input_data, (TextEncoderOutput, list, str)), f"{type(input_data)} not supported" 
-    if isinstance(input_data, TextEncoderOutput): return input_data     # return as-is
-    if isinstance(input_data, str): input_data = [input_data]
+    if not isinstance(input_data, list): input_data = [input_data] 
+    if all(isinstance(i_d, TextEncoderOutput) for i_d in input_data): return input_data     # return as-is
 
     # load the model and generate the embedding
     te_pipeline: TextPipeline = create_text_pipeline(te_model_filename, te_model_type, dtype=torch.float16)
@@ -30,4 +32,26 @@ def get_text_embeddings(
     
     del te_pipeline
     MemoryManager.clear_memory()
+    return res
+
+
+def get_vision_embeddings(
+    input_data: List[VisionEncoderOutput] | List[Tensor] | Tensor,
+    ve_model_filename = None,
+    ve_model_type = None,
+) -> List[VisionEncoderOutput]:
+    if not isinstance(input_data, list): input_data = [input_data] 
+    if all(isinstance(i_d, VisionEncoderOutput) for i_d in input_data): return input_data     # return as-is
+    
+    ve_encoder: VisionEncoder = create_vision_encoder(
+        filename=ve_model_filename, 
+        model_type=ve_model_type, 
+        dtype=torch.float16
+    )
+    ve_encoder.load_model()
+    res = []
+    for img in input_data:
+        clip_embed: VisionEncoderOutput = ve_encoder.encode_image(img)
+        res.append(clip_embed)
+    del ve_encoder
     return res
