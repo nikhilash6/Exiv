@@ -10,6 +10,7 @@ from typing import List
 
 from exiv.utils.device import VRAM_DEVICE
 
+from .config import is_text_model, is_img_model, Wan21ModelArchConfig, Wan22ModelArchConfig
 from ...enum import Model, ModelType
 from ...attention import optimized_attention
 from ...positional_embeddings import EmbedND, apply_rope
@@ -18,9 +19,6 @@ from ....components.samplers.sampler_types import get_model_sampling
 from ....model_utils.model_mixin import ModelArchConfig, ModelMixin
 from ....utils.tensor import common_upscale, pad_to_patch_size
 
-
-is_text_model = lambda model_type: model_type in [Model.WAN21_1_3B_T2V.value, Model.WAN22_5B_T2V.value]
-is_img_model = lambda model_type: not is_text_model(model_type)
 
 def sinusoidal_embedding_1d(dim, position):
     # preprocess
@@ -33,7 +31,6 @@ def sinusoidal_embedding_1d(dim, position):
         position, torch.pow(10000, -torch.arange(half).to(position).div(half)))
     x = torch.cat([torch.cos(sinusoid), torch.sin(sinusoid)], dim=1)
     return x
-
 
 class WanSelfAttention(nn.Module):
 
@@ -323,43 +320,6 @@ class MLPProj(torch.nn.Module):
 
         clip_extra_context_tokens = self.proj(image_embeds)
         return clip_extra_context_tokens
-
-class Wan21ModelArchConfig(ModelArchConfig):
-    def __init__(self, model_type):
-        self.model_type = model_type
-        self.latent_format = Wan21VAELatentFormat()
-        
-    def get_ref_latent(self, start_image, vae, length, width, height):
-        if is_text_model(self.model_type):
-            return None
-        start_image = common_upscale(start_image, width, height, "bilinear", "center")[0]
-        video = torch.ones((1, 3, length, height, width), device=start_image.device, dtype=start_image.dtype) * 0.5
-        video[:, :, 0, :, :] = start_image
-        video = video.to(dtype=vae.dtype)
-        concat_latent_image = vae.encode(video)
-        concat_latent_image = self.latent_format.process_in(concat_latent_image)
-        mask = torch.zeros(
-            (
-                1, 
-                4, 
-                ((length - 1) // vae.temporal_compression_ratio) + 1, 
-                concat_latent_image.shape[-2], 
-                concat_latent_image.shape[-1]
-            ), 
-            device=start_image.device,
-            dtype=start_image.dtype
-        )
-        mask[:, :, :((start_image.shape[0] - 1) // vae.temporal_compression_ratio) + 1] = 1.0
-        
-        mask = mask.to(VRAM_DEVICE)
-        concat_latent_image = concat_latent_image.to(VRAM_DEVICE)
-        conditioning = torch.cat([mask, concat_latent_image], dim=1)
-        return conditioning
-
-class Wan22ModelArchConfig(Wan21ModelArchConfig):
-    def __init__(self, model_type=Model.WAN22_5B_T2V.value):
-        self.model_type = model_type
-        self.latent_format = Wan22VAELatentFormat()
 
 class Wan21Model(ModelMixin):
     def __init__(

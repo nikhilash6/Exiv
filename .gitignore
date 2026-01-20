@@ -37,7 +37,7 @@ env/
 venv/
 input/
 output/
-models/
+/models/
 note.md
 temp.py
 apps/dummy_test.py
