@@ -452,5 +452,5 @@ class T5XXL(T5):
   
 class UMT5XXL(T5):
     def __init__(self, model_path, config = UMT5XXLConfig()):
-        super().__init__(model_path, config, TextEncoderType.T5_XXL.value)
+        super().__init__(model_path, config, TextEncoderType.UMT5_XXL.value)
         

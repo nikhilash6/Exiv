@@ -1,21 +1,21 @@
 import os
+from typing import List
 
-from exiv.components.text_vision_encoder.vision_encoder import create_vision_encoder
-from exiv.utils.tensor import common_upscale
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
 import torch
 from torch import Tensor
 
+from exiv.components.jit import get_text_embeddings
+from exiv.components.text_vision_encoder.vision_encoder import create_vision_encoder
+from exiv.utils.tensor import common_upscale
 from exiv.components.text_vision_encoder.common import TextEncoderOutput, VisionEncoderOutput
 from exiv.components.vae.base import get_vae
 from exiv.utils.common import fix_frame_count
-from exiv.components.enum import KSamplerType, SchedulerType, VAEType
+from exiv.components.enum import KSamplerType, SchedulerType, TextEncoderType, VAEType
 from exiv.components.models.wan.constructor import get_wan_instance
 from exiv.components.models.wan.main import Wan22ModelArchConfig
 from exiv.components.samplers.model_sampling import KSampler
-from exiv.components.text_vision_encoder.te_t5 import UMT5XXL
-from exiv.components.text_vision_encoder.text_encoder import WanEncoder
 from exiv.model_patching.cache_hook import enable_step_caching
 from exiv.model_utils.common_classes import AuxCondType, AuxConditioning, Conditioning, BatchedConditioning, ConditioningType, Latent
 from exiv.model_utils.common_classes import ModelWrapper
@@ -128,17 +128,8 @@ def main(**params):
     
     progress_callback(0.2, "Encoding prompts")
     # generate text embeddings
-    cur_model = "umt5_xxl_fp16.safetensors"
-    model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="text_encoder")
-    t5_xxl = UMT5XXL(model_path=model_path_data.path, dtype=torch.float16)
-    wan_encoder = WanEncoder(t5_xxl=t5_xxl)
-    wan_encoder.load_model(t5_xxl_download_url=model_path_data.url)
-    pos_embed = wan_encoder.encode(positive_prompt)
-    neg_embed = wan_encoder.encode(negative_prompt)
-    del t5_xxl
-    del wan_encoder
-    
-    MemoryManager.clear_memory()
+    te_embeds: List[TextEncoderOutput] = get_text_embeddings([positive_prompt, negative_prompt], te_model_type=TextEncoderType.UMT5_XXL.value)
+    pos_embed, neg_embed = te_embeds[0], te_embeds[1]
     
     progress_callback(0.3, "Generating CLIP embeddings")
     # generate img embeddings

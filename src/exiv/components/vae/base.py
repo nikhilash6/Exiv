@@ -254,30 +254,27 @@ class VAEBase(ModelMixin):
 
 # IMPORTANT: this method not only initializes the VAE but also moves it on the VRAM device
 def get_vae(
-        vae_type: str,
-        vae_dtype = torch.bfloat16,
-        use_tiling = True,
-        override_filename = None,   # if provided it will use this instead of the default file name/paths
-    ) -> VAEBase:
+    vae_type: str,
+    vae_dtype = torch.bfloat16,
+    use_tiling = True,
+    override_filename = None,   # if provided it will use this instead of the default file name/paths
+) -> VAEBase:
     from .wan_vae import Wan21VAE
     from .wan_vae22 import Wan22VAE
     
+    def _load_vae(cls, default_name):
+        fname = override_filename or default_name
+        path_data = FilePaths.get_path(filename=fname, file_type="vae")
+        model_path = ensure_model_availability(path_data.path, path_data.url)
+        instance = cls(dtype=vae_dtype, use_tiling=use_tiling)
+        instance.load_model(model_path)
+        move_model(instance, VRAM_DEVICE)
+        return instance
+    
     if vae_type == VAEType.WAN21.value:
-        cur_model = override_filename or "wan_2_1_vae.safetensors"
-        model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vae")
-        model_path = ensure_model_availability(model_path=model_path_data.path, download_url=model_path_data.url)
-        wan_vae = Wan21VAE(dtype=vae_dtype, use_tiling=use_tiling)
-        wan_vae.load_model(model_path=model_path)
-        move_model(wan_vae, VRAM_DEVICE)
-        return wan_vae
+        return _load_vae(Wan21VAE, "wan_2_1_vae.safetensors")
     elif vae_type == VAEType.WAN22.value:
-        cur_model = override_filename or "wan_2_2_vae.safetensors"
-        model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vae")
-        model_path = ensure_model_availability(model_path=model_path_data.path, download_url=model_path_data.url)
-        wan_vae = Wan22VAE(dtype=vae_dtype, use_tiling=use_tiling)
-        wan_vae.load_model(model_path=model_path)
-        move_model(wan_vae, VRAM_DEVICE)
-        return wan_vae
+        return _load_vae(Wan22VAE, "wan_2_2_vae.safetensors")
     
     raise Exception(f"{vae_type} vae not supported")
 

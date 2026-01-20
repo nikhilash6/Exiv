@@ -4,6 +4,9 @@ from torch import Tensor
 from dataclasses import dataclass
 from typing import Any, Dict
 
+from exiv.utils.file import ensure_model_availability
+from exiv.utils.file_path import FilePathData, FilePaths
+
 from .common import TextEncoderOutput, VisionEncoderOutput
 from ...utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, ProcDevice
 from ...model_utils.model_mixin import ModelMixin
@@ -12,6 +15,12 @@ from ...utils.logging import app_logger
 # this is the base of all the encoder models like T5 and CLIP
 class TextEncoder(ModelMixin):
     def __init__(self, model_path, config, te_type, **kwargs):
+        if not model_path:
+            if config.default_model_filename:   # TODO: refactor to make more streamlined
+                model_path_data: FilePathData = FilePaths.get_path(filename=config.default_model_filename, file_type="text_encoder")
+                model_path: str = ensure_model_availability(model_path_data.path, model_path_data.url)
+            else:
+                raise Exception("Can't initialize the model, no path provided")
         self.model_path = model_path
         self.config = config
         self.te_type = te_type
@@ -21,7 +30,7 @@ class TextEncoder(ModelMixin):
         self.layer = kwargs.get("layer", "last")        # ['last', 'hidden']
         self.layer_idx = kwargs.get("layer_idx", -2)
         self.zero_out_masked = kwargs.get("zero_out_masked", False)     # zero out padding / eos stuff
-        super().__init__(model_path=model_path)
+        super().__init__(model_path=model_path, **kwargs)
     
     def gen_empty_tokens(self, length, special_tokens: tuple):
         start_token, end_token, pad_token = special_tokens
@@ -325,9 +334,13 @@ class VisionEncoder(ModelMixin):
             extra=out.extra
         )
 
+@dataclass
+class TEConfig:
+    default_model_filename = None
+
 
 @dataclass
-class T5Config:
+class T5Config(TEConfig):
     d_ff = 3072
     d_kv = 64
     d_model = 768
@@ -352,7 +365,7 @@ class T5Config:
     vocab_size = 32128
     
 @dataclass
-class T5XXLConfig:
+class T5XXLConfig(TEConfig):
     d_ff = 10240
     d_kv = 64
     d_model = 4096
@@ -378,5 +391,8 @@ class T5XXLConfig:
 
 @dataclass
 class UMT5XXLConfig(T5XXLConfig):
+    # default init config -----
+    default_model_filename = "umt5_xxl_fp16.safetensors"
+    # model config ------
     model_type = "umt5_xxl"
     vocab_size = 256384
