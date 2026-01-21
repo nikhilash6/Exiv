@@ -3,7 +3,7 @@ import torch
 from torch import Tensor
 import torch.nn.functional as F
 
-from typing import List
+from typing import Dict, List
 
 from exiv.components.enum import KSamplerType, SchedulerType, TextEncoderType, VAEType, VisionEncoderType
 from exiv.components.cond_preprocess import get_text_embeddings, get_vision_embeddings, preprocess_conds
@@ -32,7 +32,6 @@ use_vae_tiling = False
 vae_dtype = torch.float16 # torch.bfloat16
 
 def main(**params):
-    
     context = params.get("context")
     if context:
         context.start_anchor("Setup", steps=1) # 5%
@@ -44,10 +43,10 @@ def main(**params):
     
     # main settingss
     conditions = params.get("conditions")
-    cond_list: List[Conditioning] = []
+    cond_dict: Dict[str, Conditioning] = []
     for c in conditions:
         if c_obj:=Conditioning.from_json(c) is not None:
-            cond_list.append(c_obj)
+            cond_dict.append(c.get("group", "positive"), c_obj)
         else:
             app_logger.warning("Malformed cond dict, aborting process")
             
@@ -74,11 +73,11 @@ def main(**params):
     
     # preprocess conditionals
     batched_cond, blank_latent = preprocess_conds(
-                                    model_wrapper,
-                                    cond_list,
-                                    height, 
-                                    width, 
-                                    frame_count,
+                                    model_wrapper=model_wrapper,
+                                    cond_dict=cond_dict,
+                                    height=height, 
+                                    width=width, 
+                                    frame_count=frame_count,
                                 )
     
     MemoryManager.clear_memory()

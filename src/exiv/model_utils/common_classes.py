@@ -10,6 +10,7 @@ from ..utils.file import MediaProcessor
 from ..utils.enum import ExtendedEnum
 from ..components.latent_format import LatentFormat
 from ..components.samplers.cfg_methods import default_cfg
+from ..utils.logging import app_logger
 
 @dataclass
 class Latent:
@@ -266,6 +267,7 @@ class Conditioning:
                 extra=extra
             )
         except Exception:
+            app_logger.warning("Unable to parse the conditioning JSON")
             return None
 
     def set_extra(self, **kwargs):

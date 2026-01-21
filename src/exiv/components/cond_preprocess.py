@@ -1,14 +1,19 @@
 import torch
 from torch import Tensor
 
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Optional
+
+from exiv.components.vae.base import VAEBase, get_vae
+from exiv.utils.common import fix_frame_count
+from exiv.utils.file import MediaProcessor
+from exiv.utils.tensor import common_upscale
 
 from ..components.text_vision_encoder.common import TextEncoderOutput, VisionEncoderOutput
 from ..components.text_vision_encoder.encoder_base import VisionEncoder
 from ..components.text_vision_encoder.text_encoder import TextPipeline, create_text_pipeline
 from ..components.text_vision_encoder.vision_encoder import create_vision_encoder
 from ..utils.device import MemoryManager
-from ..model_utils.common_classes import BatchedConditioning, Conditioning, ConditioningType, Latent, ModelWrapper
+from ..model_utils.common_classes import AuxCondType, BatchedConditioning, Conditioning, ConditioningType, Latent, ModelWrapper
 
 _PREPROCESSORS = {}     # global registry
 def register_preprocessor(model_type):
@@ -20,8 +25,12 @@ def register_preprocessor(model_type):
         return func
     return decorator
 
-def preprocess_conds(wrapper, positive, negative, resource_config=None, **kwargs):
-    model_type = wrapper.model.model_type
+def preprocess_conds(
+    model_wrapper: ModelWrapper, 
+    cond_dict: Dict[str, Conditioning],
+    **kwargs
+):
+    model_type = model_wrapper.model.model_type
     
     if model_type not in _PREPROCESSORS:
         raise NotImplementedError(
@@ -29,101 +38,13 @@ def preprocess_conds(wrapper, positive, negative, resource_config=None, **kwargs
             f"Did you forget to import the model's processor module?"
         )
     
-    return _PREPROCESSORS[model_type](wrapper, positive, negative, resource_config, **kwargs)
+    return _PREPROCESSORS[model_type](model_wrapper, cond_dict, **kwargs)
 
-def preprocess_wan_conditionals(
-        model_wrapper: ModelWrapper,
-        conditions: Dict,
-        input_img: Tensor,
-        clip_embed: VisionEncoderOutput,
-        height: int, width: int, frame_count: int,
-        progress_callback: Callable = None
-) -> tuple[BatchedConditioning, Latent]:
-    
-    progress_callback(0.1, "Loading Images")
-    height, width, output_frame_count = 512, 512, 81
-    output_frame_count = fix_frame_count(output_frame_count)
-    input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/boy_anime.jpg")[0]
-    input_img = common_upscale(input_img.unsqueeze(0), height, width)[0]
-    
-    progress_callback(0.2, "Encoding prompts")
-    # generate text embeddings
-    te_embeds: List[TextEncoderOutput] = get_text_embeddings([positive_prompt, negative_prompt], te_model_type=TextEncoderType.UMT5_XXL.value)
-    pos_embed, neg_embed = te_embeds[0], te_embeds[1]
-    
-    progress_callback(0.3, "Generating CLIP embeddings")
-    # generate img embeddings
-    clip_embed: VisionEncoderOutput = get_vision_embeddings(input_img, ve_model_type=VisionEncoderType.CLIP_H.value)[0]
-    
-    
-    pos_cond = Conditioning(
-        data=pos_embed.last_hidden_state,
-        type=ConditioningType.EMBEDDING,
-        extra=pos_embed.extra.copy()
-    )
-    
-    neg_cond = Conditioning(
-        data=neg_embed.last_hidden_state,
-        type=ConditioningType.EMBEDDING,
-        extra=neg_embed.extra.copy()
-    )
-    
-    # creating aux visual embedding
-    if clip_embed is not None:
-        aux_clip = AuxConditioning(
-            type=AuxCondType.VISUAL_EMBEDDING,
-            data=clip_embed.intermediate_hidden_states,
-        )
-
-        pos_cond.aux = [aux_clip]
-        neg_cond.aux = [aux_clip]
-
-    wan_vae = get_vae(
-        vae_type=VAEType.WAN21.value,
-        vae_dtype=vae_dtype,
-        use_tiling=use_vae_tiling
-    )
-    
-    latent_format = model_wrapper.model.model_arch_config.latent_format
-    blank_latent = Latent()
-    blank_latent.encode_keyframe_condition(
-        height, 
-        width, 
-        frame_count, 
-        latent_format, 
-        wan_vae,
-    )
-    
-    if input_img is not None:
-        data = model_wrapper.model.model_arch_config.get_ref_latent(
-            start_image=input_img,
-            vae=wan_vae,
-            length=frame_count,
-            width=width,
-            height=height,
-        )
-        ref_latent = AuxConditioning(
-            type=AuxCondType.REF_LATENT,
-            data=data,
-        )
-        pos_cond.aux.append(ref_latent)
-        neg_cond.aux.append(ref_latent)
-
-    batched_cond = BatchedConditioning(
-        groups={
-            "positive": [pos_cond],
-            "negative": [neg_cond],
-        },
-        execution_order=["positive", "negative"]
-    )
-    
-    return batched_cond, blank_latent
-
-
-def create_base_batch(pos_data, neg_data):
-    p = Conditioning(data=pos_data.last_hidden_state, type=ConditioningType.EMBEDDING, extra=pos_data.extra.copy())
-    n = Conditioning(data=neg_data.last_hidden_state, type=ConditioningType.EMBEDDING, extra=neg_data.extra.copy())
-    return BatchedConditioning({"positive": [p], "negative": [n]}, ["positive", "negative"]), p, n
+def get_image_tensor(img: Tensor | str, height: int, width: int):
+    if isinstance(img, Tensor): return img
+    img = MediaProcessor.load_image_list(img)[0]
+    img = common_upscale(img.unsqueeze(0), height, width)[0]
+    return img
 
 def get_text_embeddings(
     input_data: List[TextEncoderOutput] | List[str] | str,      # if encoder output is not provided, it is calculated based on the str
