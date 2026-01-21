@@ -19,23 +19,28 @@ from exiv.model_patching.cache_hook import enable_step_caching
 from exiv.model_patching.sliding_context_hook import BlendType, SlidingContextConfig, enable_sliding_context
 from exiv.model_utils.common_classes import AuxCondType, AuxConditioning, BatchedConditioning, Conditioning, ConditioningType, Latent
 from exiv.model_utils.common_classes import ModelWrapper
-from exiv.server.app_core import App, AppOutputType, Input, Output
+from exiv.server.app_core import App, AppOutputType, Input, Output, TaskContext
 from exiv.utils.common import fix_frame_count
 from exiv.utils.device import MemoryManager
 from exiv.utils.file import MediaProcessor
 from exiv.utils.file_path import FilePathData, FilePaths
 from exiv.utils.tensor import common_upscale
 from exiv.utils.logging import app_logger
+from apps.utils.defaults import get_default_cond
 
 use_vae_tiling = False
 vae_dtype = torch.float16 # torch.bfloat16
 
 def main(**params):
     
-    report_progress = params.get("report_progress")
+    context = params.get("context")
+    if context:
+        context.start_anchor("Setup", steps=1) # 5%
+
     def progress_callback(progress_fraction, stage): 
         app_logger.debug(f"Percent: {progress_fraction}  -- Stage: {stage}")
-        report_progress(progress_fraction, {"stage": stage, "status": "Processing"}) 
+        if context:
+            context.progress(progress_fraction, "Processing", stage=stage) 
     
     # main settingss
     conditions = params.get("conditions")
@@ -54,6 +59,8 @@ def main(**params):
     height = params.get("height")
     width = params.get("width")
     frame_count = params.get("frame_count")
+
+    if context: context.start_anchor("Preprocessing", steps=6) # 30%
     
     # create a model wrapper
     # cur_model = "wan21_480p_i2v_fp16_14B.safetensors"
@@ -76,7 +83,8 @@ def main(**params):
     
     MemoryManager.clear_memory()
 
-    progress_callback(0.35, "Sampling loop")
+    if context: context.start_anchor("Sampling", steps=12) # 60%
+    
     # the main sampling loop
     main_sampler = KSampler(
         wrapped_model=model_wrapper,
@@ -89,12 +97,13 @@ def main(**params):
         latent_image=blank_latent
     )
     
-    out = main_sampler.run_sampling(callback=lambda i, s: progress_callback(0.35 + round(i * 0.6, 2), s))
+    # callback now returns local progress (0 - 1.0)
+    out = main_sampler.run_sampling(callback=lambda i, s: progress_callback(i, s))
     wan_dit_model.to("cpu")
     del wan_dit_model, model_wrapper
     MemoryManager.clear_memory()
     
-    progress_callback(0.95, "Decoding output latents")
+    if context: context.start_anchor("Decoding", steps=1) # 5%
     out = out.to(dtype=vae_dtype)
     wan_vae = get_vae(
         vae_type=VAEType.WAN21.value,
@@ -106,26 +115,11 @@ def main(**params):
     
     return {"1": output_paths[0]}
 
-DEFAULT_CONDS = [
-    {
-        "group": "positive",
-        "input_metadata": "Cinematic anime style, medium close-up of a teenage boy.",
-        "timestep_range": [0.0, -1],
-        "frame_range": [0.0, -1],
-        # "aux": [{ "type": "clip_image", "input_metadata": "assets/ref.jpg" }]
-    },
-    {
-        "group": "negative",
-        "timestep_range": [0.0, -1],
-        "frame_range": [0.0, -1],
-        "input_metadata": "bad quality, blurry, low res",
-    }
-]
-
+DEFAULT_CONDS = get_default_cond()
 app = App(
     name="Text to Video",
     inputs={
-        'conditions': Input(label="Conditions (JSON)", type="json", default=json.dumps(DEFAULT_CONDS, indent=2),),
+        'conditions': Input(label="Conditions (JSON)", type="json", default=DEFAULT_CONDS,),
         'seed': Input(label="Seed", type="number", default=256347,),
         'steps': Input(label="Steps", type="number", default=30, increment_controls=True, increment_step=2,),
         'cfg': Input(label="CFG", type="number", default=6, increment_controls=True, increment_step=0.2,),
