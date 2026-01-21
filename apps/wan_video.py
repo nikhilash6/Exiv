@@ -16,6 +16,7 @@ from exiv.components.text_vision_encoder.vision_encoder import create_vision_enc
 from exiv.components.vae.base import get_vae
 from exiv.components.vae.wan_vae import Wan21VAE
 from exiv.model_patching.cache_hook import enable_step_caching
+from exiv.model_patching.common import apply_hook_json
 from exiv.model_patching.sliding_context_hook import BlendType, SlidingContextConfig, enable_sliding_context
 from exiv.model_utils.common_classes import AuxCondType, AuxConditioning, BatchedConditioning, Conditioning, ConditioningType, Latent
 from exiv.model_utils.common_classes import ModelWrapper
@@ -26,7 +27,7 @@ from exiv.utils.file import MediaProcessor
 from exiv.utils.file_path import FilePathData, FilePaths
 from exiv.utils.tensor import common_upscale
 from exiv.utils.logging import app_logger
-from utils.defaults import get_default_cond, get_default_hook
+from utils.defaults import get_dummy_cond, get_dummy_hook
 
 use_vae_tiling = False
 vae_dtype = torch.float16 # torch.bfloat16
@@ -49,7 +50,7 @@ def main(**params):
             cond_dict[c.get("group", "positive")] = c_obj
         else:
             raise RuntimeError("Malformed cond dict, aborting process")
-            
+    hooks = params.get("hooks")
     seed = params.get("seed")
     steps = params.get("steps")
     cfg = params.get("cfg")
@@ -67,9 +68,7 @@ def main(**params):
     cur_model = "wan22_5B_ti2v_fp16"
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
     wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
-    enable_step_caching(wan_dit_model)
-    # config = SlidingContextConfig(ctx_len=20, ctx_overlap=5, blend_type=BlendType.PYRAMIND.value)
-    # enable_sliding_context(wan_dit_model, config=config)
+    apply_hook_json(wan_dit_model, hooks)
     model_wrapper = ModelWrapper(model=wan_dit_model)
     
     # preprocess conditionals
@@ -97,9 +96,8 @@ def main(**params):
         batched_conditioning=batched_cond,
         latent_image=blank_latent
     )
-    
-    # callback now returns local progress (0 - 1.0)
     out = main_sampler.run_sampling(callback=lambda i, s: progress_callback(i, s))
+    
     wan_dit_model.to("cpu")
     del wan_dit_model, model_wrapper
     MemoryManager.clear_memory()
@@ -116,8 +114,8 @@ def main(**params):
     
     return {"1": output_paths[0]}
 
-DEFAULT_CONDS = get_default_cond()
-DEFAULT_HOOKS = get_default_hook()
+DEFAULT_CONDS = get_dummy_cond()
+DEFAULT_HOOKS = get_dummy_hook(enable_step_caching=True, enable_inpainting=True)
 app = App(
     name="Text to Video",
     inputs={

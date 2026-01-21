@@ -3,13 +3,13 @@ import json
 from typing import List, Dict, Union
 
 from exiv.model_patching.cache_hook import CacheType
-from exiv.model_patching.hook_registry import HookType
+from exiv.model_patching.hook_registry import FeatureType, HookType
 from exiv.model_patching.sliding_context_hook import BlendType
 from exiv.model_utils.common_classes import AuxCondType
 
 temp_img = "./tests/test_utils/assets/media/boy_anime.jpg"
 
-def get_default_cond(
+def get_dummy_cond(
     positive: str = "Cinematic anime style, medium close-up of a teenage boy with messy dark hair. 0-2s: The boy is looking down with a somber expression, his eyes shadowed. 2-4s: He slowly lifts his head to look directly into the camera, his expression shifting to one of sudden realization and determination, eyes widening with a subtle catchlight. Background is a soft-focus urban rooftop at sunset. Cel-shaded, vibrant colors, fluid character animation, high-quality rendering.",
     negative: str = "bad image, blurry, low quality"
 ) -> str:
@@ -37,7 +37,7 @@ def get_default_cond(
     ]
     return json.dumps(defaults, indent=2)
 
-def get_default_hook(
+def get_dummy_hook(
     enable_sliding_context=False,
     enable_inpainting=False,
     enable_step_caching=False,
@@ -46,27 +46,20 @@ def get_default_hook(
     
     if enable_sliding_context:
         hook = {
-            "type": HookType.SLIDING_CONTEXT.value,
+            "type": FeatureType.SLIDING_CONTEXT.value,
             "kwarg_data": {
-                "ctx_len": 20,
-                "ctx_overlap": 5,
-                "blend_type": BlendType.PYRAMIND.value,
+                "config": {
+                    "ctx_len": 20,
+                    "ctx_overlap": 5,
+                    "blend_type": BlendType.PYRAMIND.value,
+                },
             }
         }
         defaults.append(hook)
         
-    if enable_inpainting:
-        hook = {
-            "type": HookType.INPAINT_HOOK.value,
-            "kwarg_data": {
-                "image_path_list": [temp_img],
-            }
-        }   # TODO: add noise_mask
-        defaults.append(hook)
-        
     if enable_step_caching:
         hook = {
-            "type": HookType.TAYLOR_SEER_LITE_MODEL_HOOK.vale,
+            "type": FeatureType.STEP_CACHING.vale,
             "kwarg_data": {
                 "cache_type": CacheType.TAYLOR_SEER_LITE.value
             }

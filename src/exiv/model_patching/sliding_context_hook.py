@@ -1,3 +1,4 @@
+from typing import Union
 import torch
 
 from dataclasses import dataclass
@@ -5,7 +6,7 @@ from dataclasses import dataclass
 from ..utils.enum import ExtendedEnum
 from ..utils.device import OFFLOAD_DEVICE, VRAM_DEVICE
 from ..utils.logging import app_logger
-from ..model_patching.hook_registry import HookLocation, HookRegistry, HookType, ModelHook
+from ..model_patching.hook_registry import FeatureType, HookLocation, HookRegistry, HookType, ModelHook, register_hook_method
 
 # debug var
 low_blend = 0
@@ -171,10 +172,16 @@ class SlidingContextHook(ModelHook):
             
         return super().execute(module, mod_run, x, t, **input)
 
-def enable_sliding_context(model: 'ModelMixin', config = None):
+@register_hook_method(FeatureType.SLIDING_CONTEXT.value)
+def enable_sliding_context(model: 'ModelMixin', config: Union[SlidingContextConfig, dict, None] = None):
     """
     Adds generation of output in smaller context chunks and blends the overlapping regions
     """
+    if isinstance(config, dict):
+        try:
+            config = SlidingContextConfig(**config)
+        except TypeError as e:
+            raise RuntimeError(f"Invalid keys for SlidingContextConfig: {e}")
     
     HookRegistry.remove_hook_from_module(model, HookType.SLIDING_CONTEXT.value)
     context_hook = SlidingContextHook(config)
