@@ -1,12 +1,12 @@
+import json
 import torch
 from torch import Tensor
 import torch.nn.functional as F
 
-import json
 from typing import List
 
 from exiv.components.enum import KSamplerType, SchedulerType, TextEncoderType, VAEType, VisionEncoderType
-from exiv.components.cond_preprocess import get_text_embeddings, get_vision_embeddings
+from exiv.components.cond_preprocess import get_text_embeddings, get_vision_embeddings, preprocess_conds
 from exiv.components.latent_format import LatentFormat
 from exiv.components.models.wan.constructor import get_wan_instance
 from exiv.components.models.wan.main import Wan21ModelArchConfig
@@ -30,78 +30,6 @@ from exiv.utils.logging import app_logger
 use_vae_tiling = False
 vae_dtype = torch.float16 # torch.bfloat16
 
-def preprocess_wan_conditionals(
-        model_wrapper: ModelWrapper,
-        pos_embed: TextEncoderOutput, 
-        neg_embed: TextEncoderOutput, 
-        input_img: Tensor,
-        clip_embed: VisionEncoderOutput,
-        height: int, width: int, frame_count: int,
-    ) -> tuple[BatchedConditioning, Latent]:
-    
-    pos_cond = Conditioning(
-        data=pos_embed.last_hidden_state,
-        type=ConditioningType.EMBEDDING,
-        extra=pos_embed.extra.copy()
-    )
-    
-    neg_cond = Conditioning(
-        data=neg_embed.last_hidden_state,
-        type=ConditioningType.EMBEDDING,
-        extra=neg_embed.extra.copy()
-    )
-    
-    # creating aux visual embedding
-    if clip_embed is not None:
-        aux_clip = AuxConditioning(
-            type=AuxCondType.VISUAL_EMBEDDING,
-            data=clip_embed.intermediate_hidden_states,
-        )
-
-        pos_cond.aux = [aux_clip]
-        neg_cond.aux = [aux_clip]
-
-    wan_vae = get_vae(
-        vae_type=VAEType.WAN21.value,
-        vae_dtype=vae_dtype,
-        use_tiling=use_vae_tiling
-    )
-    
-    latent_format = model_wrapper.model.model_arch_config.latent_format
-    blank_latent = Latent()
-    blank_latent.encode_keyframe_condition(
-        height, 
-        width, 
-        frame_count, 
-        latent_format, 
-        wan_vae,
-    )
-    
-    if input_img is not None:
-        data = model_wrapper.model.model_arch_config.get_ref_latent(
-            start_image=input_img,
-            vae=wan_vae,
-            length=frame_count,
-            width=width,
-            height=height,
-        )
-        ref_latent = AuxConditioning(
-            type=AuxCondType.REF_LATENT,
-            data=data,
-        )
-        pos_cond.aux.append(ref_latent)
-        neg_cond.aux.append(ref_latent)
-
-    batched_cond = BatchedConditioning(
-        groups={
-            "positive": [pos_cond],
-            "negative": [neg_cond],
-        },
-        execution_order=["positive", "negative"]
-    )
-    
-    return batched_cond, blank_latent
-
 def main(**params):
     
     report_progress = params.get("report_progress")
@@ -109,25 +37,23 @@ def main(**params):
         app_logger.debug(f"Percent: {progress_fraction}  -- Stage: {stage}")
         report_progress(progress_fraction, {"stage": stage, "status": "Processing"}) 
     
-    # outside inputs
-    positive_prompt = params.get("positive")
-    negative_prompt = params.get("negative")
+    # main settingss
+    conditions = params.get("conditions")
+    cond_list: List[Conditioning] = []
+    for c in conditions:
+        if c_obj:=Conditioning.from_json(c) is not None:
+            cond_list.append(c_obj)
+        else:
+            app_logger.warning("Malformed cond dict, aborting process")
+            
     seed = params.get("seed")
     steps = params.get("steps")
     cfg = params.get("cfg")
     sampler_name = params.get("sampler_name")
     scheduler_name = params.get("scheduler_name")
-    
-    progress_callback(0.1, "Loading Images")
-    height, width, output_frame_count = 512, 512, 81
-    output_frame_count = fix_frame_count(output_frame_count)
-    input_img = MediaProcessor.load_image_list("./tests/test_utils/assets/media/boy_anime.jpg")[0]
-    input_img = common_upscale(input_img.unsqueeze(0), height, width)[0]
-    
-    
-    progress_callback(0.3, "Generating CLIP embeddings")
-    # generate img embeddings
-    clip_embed: VisionEncoderOutput = get_vision_embeddings(input_img, ve_model_type=VisionEncoderType.CLIP_H.value)[0]
+    height = params.get("height")
+    width = params.get("width")
+    frame_count = params.get("frame_count")
     
     # create a model wrapper
     # cur_model = "wan21_480p_i2v_fp16_14B.safetensors"
@@ -140,15 +66,12 @@ def main(**params):
     model_wrapper = ModelWrapper(model=wan_dit_model)
     
     # preprocess conditionals
-    batched_cond, blank_latent = preprocess_wan_conditionals(
+    batched_cond, blank_latent = preprocess_conds(
                                     model_wrapper,
-                                    pos_embed, 
-                                    neg_embed, 
-                                    input_img,
-                                    clip_embed,
+                                    cond_list,
                                     height, 
                                     width, 
-                                    output_frame_count,
+                                    frame_count,
                                 )
     
     MemoryManager.clear_memory()
@@ -178,7 +101,7 @@ def main(**params):
         vae_dtype=vae_dtype,
         use_tiling=use_vae_tiling
     )
-    out = wan_vae.decode(out, (height, width, output_frame_count))
+    out = wan_vae.decode(out, (height, width, frame_count))
     output_paths = MediaProcessor.save_latents_to_media(out)
     
     return {"1": output_paths[0]}
@@ -202,43 +125,17 @@ DEFAULT_CONDS = [
 app = App(
     name="Text to Video",
     inputs={
-        'conditions': Input(
-            label="Conditions (JSON)",
-            type="json",
-            default=json.dumps(DEFAULT_CONDS, indent=2),
-        ),
-        'seed': Input(
-            label="Seed",
-            type="number",
-            # default=-1,
-            default=256347,
-        ),
-        'steps': Input(
-            label="Steps",
-            type="number",
-            default=30,
-            increment_controls=True,
-            increment_step=2,
-        ),
-        'cfg': Input(
-            label="CFG",
-            type="number",
-            default=6,
-            increment_controls=True,
-            increment_step=0.2,
-        ),
-        'sampler_name': Input(
-            label="Sampler Name",
-            type="select",
-            options=KSamplerType.value_list(),
-            default=KSamplerType.EULER.value,
-        ),
-        'scheduler_name': Input(
-            label="Scheduler Name",
-            type="select",
-            options=SchedulerType.value_list(),
-            default=SchedulerType.SIMPLE.value,
-        )
+        'conditions': Input(label="Conditions (JSON)", type="json", default=json.dumps(DEFAULT_CONDS, indent=2),),
+        'seed': Input(label="Seed", type="number", default=256347,),
+        'steps': Input(label="Steps", type="number", default=30, increment_controls=True, increment_step=2,),
+        'cfg': Input(label="CFG", type="number", default=6, increment_controls=True, increment_step=0.2,),
+        'sampler_name': Input(label="Sampler Name", type="select", options=KSamplerType.value_list(), \
+            default=KSamplerType.EULER.value,),
+        'scheduler_name': Input(label="Scheduler Name", type="select", options=SchedulerType.value_list(), \
+            default=SchedulerType.SIMPLE.value,),
+        'height': Input(label="Height", type="number", default=512),
+        'width': Input(label="Width", type="number", default=512),
+        'frame_count': Input(label="Frame Count", type="number", default=81),
     },
     outputs=[Output(id=1, type=AppOutputType.VIDEO.value)],
     handler=main

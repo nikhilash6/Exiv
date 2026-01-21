@@ -193,6 +193,7 @@ class AuxConditioning:
     """
     type: str | None = None
     data: Optional[Tensor] | List[Tensor] = None
+    input_metadata: Optional[Union[dict, str]] = None
     timestep_range: Tuple[float, float] = (0.0, -1)    # (0.0=start, -1.0=end)
     frame_range: Optional[Tuple[int, int]] = None       # (start_idx, end_idx)
 
@@ -202,9 +203,9 @@ class Conditioning:
     Common conditioning type that supports ALL conditioning inputs
     during the model inference
     """
-    data: Tensor
+    data: Optional[Tensor] = None
+    input_metadata: Optional[Union[dict, str]] = None
     type: ConditioningType = ConditioningType.EMBEDDING
-
     # --- Timings & Ranges ---
     timestep_range: Tuple[float, float] = (0, -1)          # (start, end), -1 means it spans the complete range
     frame_range: Optional[Tuple[int, int]] = (0, -1)       # (start_idx, end_idx)
@@ -213,22 +214,59 @@ class Conditioning:
     # during output masking in the sampler in "combined_mask" property
     # (H, W): Spatial mask applied to all frames
     mask: Tensor | None = None
-
     # --- Strength / Intensity ---
     # Supports:
     # - float: Constant strength (e.g. 1.0)
     # - Tensor: Per-frame/pixel strength (e.g. shape [T] or [B, H, W])
     # - List[float]: Per-step strength schedule (e.g. [0.0, 0.5, 1.0...])
     strength: Union[float, Tensor, List[float]] = 1.0
-
     # auxiliary / modifiers
     aux: Optional[List[AuxConditioning]] = field(default_factory=list)
-    
     # model-specific extra params (not in use rn)
     extra: dict = field(default_factory=dict)
-    
     # final processed inputs, ready for the inference step
     model_input: Optional[ModelForwardInput] = None
+    
+    @classmethod
+    def from_json(cls, data: dict) -> Optional['Conditioning']:
+        try:
+            # main conditioning data
+            content = data.get("input_metadata")
+            if content is None: 
+                return None
+            
+            # ranges & strength
+            t_range = data.get("timestep_range", (0, -1))
+            f_range = data.get("frame_range", (0, -1))
+            if f_range:
+                f_range = [int(f) for f in f_range]
+            
+            strength = data.get("strength", 1.0)
+            extra = data.get("extra", {})
+
+            # aux inputs
+            aux_list = []
+            if "aux" in data and isinstance(data["aux"], list):
+                for item in data["aux"]:
+                    if isinstance(item, dict):
+                        aux_list.append(AuxConditioning(
+                            type=item.get("type"),
+                            input_metadata=item.get("input_metadata"),
+                            timestep_range=tuple(item.get("timestep_range", (0, -1))),
+                            frame_range=tuple(item.get("frame_range", (0, -1))) if item.get("frame_range") else None
+                        ))
+            
+            return cls(
+                data=None, # will be processed later
+                input_metadata=content,
+                timestep_range=tuple(t_range),
+                frame_range=tuple(f_range),
+                strength=strength,
+                aux=aux_list,
+                extra=extra
+            )
+        except Exception:
+            return None
 
     def set_extra(self, **kwargs):
         self.extra.update(kwargs)
