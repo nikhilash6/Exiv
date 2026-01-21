@@ -257,7 +257,7 @@ class Conditioning:
                             frame_range=tuple(item.get("frame_range", (0, -1))) if item.get("frame_range") else None
                         ))
             
-            return cls(
+            out = cls(
                 data=None, # will be processed later
                 input_metadata=content,
                 timestep_range=tuple(t_range),
@@ -266,8 +266,9 @@ class Conditioning:
                 aux=aux_list,
                 extra=extra
             )
-        except Exception:
-            app_logger.warning("Unable to parse the conditioning JSON")
+            return out
+        except Exception as e:
+            app_logger.error(f"Unable to parse the conditioning JSON: {str(e)}")
             return None
 
     def set_extra(self, **kwargs):

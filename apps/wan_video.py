@@ -20,13 +20,13 @@ from exiv.model_patching.sliding_context_hook import BlendType, SlidingContextCo
 from exiv.model_utils.common_classes import AuxCondType, AuxConditioning, BatchedConditioning, Conditioning, ConditioningType, Latent
 from exiv.model_utils.common_classes import ModelWrapper
 from exiv.server.app_core import App, AppOutputType, Input, Output, TaskContext
-from exiv.utils.common import fix_frame_count
+from exiv.utils.common import fix_frame_count, null_func
 from exiv.utils.device import MemoryManager
 from exiv.utils.file import MediaProcessor
 from exiv.utils.file_path import FilePathData, FilePaths
 from exiv.utils.tensor import common_upscale
 from exiv.utils.logging import app_logger
-from apps.utils.defaults import get_default_cond
+from utils.defaults import get_default_cond, get_default_hook
 
 use_vae_tiling = False
 vae_dtype = torch.float16 # torch.bfloat16
@@ -43,12 +43,12 @@ def main(**params):
     
     # main settingss
     conditions = params.get("conditions")
-    cond_dict: Dict[str, Conditioning] = []
-    for c in conditions:
-        if c_obj:=Conditioning.from_json(c) is not None:
-            cond_dict.append(c.get("group", "positive"), c_obj)
+    cond_dict: Dict[str, Conditioning] = {}
+    for c in json.loads(conditions):
+        if (c_obj:=Conditioning.from_json(c)) is not None:
+            cond_dict[c.get("group", "positive")] = c_obj
         else:
-            app_logger.warning("Malformed cond dict, aborting process")
+            raise RuntimeError("Malformed cond dict, aborting process")
             
     seed = params.get("seed")
     steps = params.get("steps")
@@ -63,7 +63,8 @@ def main(**params):
     
     # create a model wrapper
     # cur_model = "wan21_480p_i2v_fp16_14B.safetensors"
-    cur_model = "wan21_1_3B.safetensors"
+    # cur_model = "wan21_1_3B.safetensors"
+    cur_model = "wan22_5B_ti2v_fp16"
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
     wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
     enable_step_caching(wan_dit_model)
@@ -78,6 +79,7 @@ def main(**params):
                                     height=height, 
                                     width=width, 
                                     frame_count=frame_count,
+                                    progress_callback=lambda percent, tag: context.progress(percent, tag) if context else null_func
                                 )
     
     MemoryManager.clear_memory()
@@ -115,10 +117,12 @@ def main(**params):
     return {"1": output_paths[0]}
 
 DEFAULT_CONDS = get_default_cond()
+DEFAULT_HOOKS = get_default_hook()
 app = App(
     name="Text to Video",
     inputs={
         'conditions': Input(label="Conditions (JSON)", type="json", default=DEFAULT_CONDS,),
+        'hooks': Input(label="Hooks (JSON)", type="json", default=DEFAULT_HOOKS),
         'seed': Input(label="Seed", type="number", default=256347,),
         'steps': Input(label="Steps", type="number", default=30, increment_controls=True, increment_step=2,),
         'cfg': Input(label="CFG", type="number", default=6, increment_controls=True, increment_step=0.2,),

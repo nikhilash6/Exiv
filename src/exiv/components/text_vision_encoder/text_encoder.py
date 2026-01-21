@@ -81,13 +81,13 @@ def create_text_pipeline(
         model_path_data: FilePathData = FilePaths.get_path(filename=filename, file_type="text_encoder")
         model_path: str = ensure_model_availability(model_path_data.path, model_path_data.url)
         state_dict = get_state_dict(model_path, device=OFFLOAD_DEVICE)
-        te_type: str = te_type(state_dict)
+        encoder_type: str = te_type(state_dict)
         del state_dict
     else:
-        te_type: str = model_type
+        encoder_type: str = model_type
     
-    if te_type is None or te_type not in TE_TYPE_CLS_MAP:
+    if encoder_type is None or encoder_type not in TE_TYPE_CLS_MAP:
         raise Exception("Text encoder not supported")
     
-    te_cls, tokenizer_cls = TE_TYPE_CLS_MAP[te_type]
+    te_cls, tokenizer_cls = TE_TYPE_CLS_MAP[encoder_type]
     return TextPipeline(te_cls(model_path, dtype=dtype), tokenizer_cls())
