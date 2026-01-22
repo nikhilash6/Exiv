@@ -64,32 +64,21 @@ class Wan22ModelArchConfig(Wan21ModelArchConfig):
         self.default_vae_type = VAEType.WAN22.value
 
 def _process_visual_embeddings(cond_list, model_wrapper, height, width, progress_callback):
-    map = {}
+    pending_embeds = []
     for c in cond_list:
-        # map of cond <-> clip_embed
         for aux_c in c.aux:
-            # NOTE: clip embed can be passed / attached from the user's end as well, in which
-            # case aux_c.data won't be None
             if aux_c.type == AuxCondType.VISUAL_EMBEDDING and aux_c.data is None:
-                map[id(c)] = aux_c.input_metadata
+                pending_embeds.append(aux_c)
     
-    if len(map.keys()):
-        # creating aux visual embedding
-        progress_callback(0.3, "Generating CLIP embeddings")
-        # generate img embeddings
-        clip_embed_list: List[VisionEncoderOutput] = get_vision_embeddings(
-            [get_image_tensor(img, height, width) for img in map.values()], 
-            ve_model_filename=model_wrapper.model.model_arch_config.default_vision_encoder
-        )
-        i = 0
-        for c_id, _ in map.items():
-            for c in cond_list:
-                if id(c) == c_id:
-                    for aux_c in c.aux:
-                        if aux_c.type == AuxCondType.VISUAL_EMBEDDING:
-                            aux_c.data = clip_embed_list[i].intermediate_hidden_states
-                            i += 1
-                            break
+    if not pending_embeds: return
+    progress_callback(0.3, "Generating CLIP embeddings")
+    images = [get_image_tensor(aux.input_metadata, height, width) for aux in pending_embeds]
+    clip_embed_list: List[VisionEncoderOutput] = get_vision_embeddings(
+        images, 
+        ve_model_filename=model_wrapper.model.model_arch_config.default_vision_encoder
+    )
+    for aux_c, embed in zip(pending_embeds, clip_embed_list):
+        aux_c.data = embed.intermediate_hidden_states
                 
 def _process_ref_latents(cond_list, model_wrapper, wan_vae, height, width, frame_count, progress_callback):
     progress_callback(0.4, "Generating referece latents")
