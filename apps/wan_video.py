@@ -27,7 +27,7 @@ from exiv.utils.file import MediaProcessor
 from exiv.utils.file_path import FilePathData, FilePaths
 from exiv.utils.tensor import common_upscale
 from exiv.utils.logging import app_logger
-from utils.defaults import get_dummy_cond, get_dummy_hook
+from utils.defaults import get_dummy_cond, get_dummy_hook, get_dummy_latent
 
 use_vae_tiling = False
 vae_dtype = torch.float16 # torch.bfloat16
@@ -45,12 +45,13 @@ def main(**params):
     # main settingss
     conditions = params.get("conditions")
     cond_dict: Dict[str, Conditioning] = {}
-    for c in json.loads(conditions):
+    for c in conditions:
         if (c_obj:=Conditioning.from_json(c)) is not None:
             cond_dict[c.get("group", "positive")] = c_obj
         else:
             raise RuntimeError("Malformed cond dict, aborting process")
     hooks = params.get("hooks")
+    latent_json = params.get("latent")
     seed = params.get("seed")
     steps = params.get("steps")
     cfg = params.get("cfg")
@@ -63,23 +64,40 @@ def main(**params):
     if context: context.start_anchor("Preprocessing", steps=6) # 30%
     
     # create a model wrapper
-    cur_model = "wan21_480p_i2v_fp16_14B.safetensors"
+    # cur_model = "wan21_480p_i2v_fp16_14B.safetensors"
     # cur_model = "wan21_1_3B.safetensors"
-    # cur_model = "wan22_5B_ti2v_fp16"
+    cur_model = "wan22_5B_ti2v_fp16"
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
     wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
     apply_hook_json(wan_dit_model, hooks)
     model_wrapper = ModelWrapper(model=wan_dit_model)
     
+    # input latent
+    wan_vae = get_vae(
+        vae_type=model_wrapper.model.model_arch_config.default_vae_type,
+        vae_dtype=vae_dtype,
+        use_tiling=use_vae_tiling
+    )
+    latent_format = model_wrapper.model.model_arch_config.latent_format
+    latent: Latent = Latent.from_json(latent_json=latent_json)
+    latent.encode_keyframe_condition( 
+        width, 
+        height,
+        frame_count, 
+        latent_format, 
+        wan_vae,
+    )
+    del wan_vae
+    
     # preprocess conditionals
-    batched_cond, blank_latent = preprocess_conds(
-                                    model_wrapper=model_wrapper,
-                                    cond_dict=cond_dict,
-                                    height=height, 
-                                    width=width, 
-                                    frame_count=frame_count,
-                                    progress_callback=lambda percent, tag: context.progress(percent, tag) if context else null_func
-                                )
+    batched_cond = preprocess_conds(
+                    model_wrapper=model_wrapper,
+                    cond_dict=cond_dict,
+                    height=height, 
+                    width=width, 
+                    frame_count=frame_count,
+                    progress_callback=lambda percent, tag: context.progress(percent, tag) if context else null_func
+                )
     
     MemoryManager.clear_memory()
 
@@ -94,7 +112,7 @@ def main(**params):
         sampler_name=sampler_name,
         scheduler_name=scheduler_name,
         batched_conditioning=batched_cond,
-        latent_image=blank_latent
+        latent_image=latent
     )
     out = main_sampler.run_sampling(callback=lambda i, s: progress_callback(i, s))
     
@@ -115,13 +133,15 @@ def main(**params):
     
     return {"1": output_paths[0]}
 
-DEFAULT_CONDS = get_dummy_cond()
+DEFAULT_CONDS = get_dummy_cond(positive="a dog running the park")
 DEFAULT_HOOKS = get_dummy_hook(enable_step_caching=True)
+DEFAULT_LATENT = get_dummy_latent(img_path_list=["./tests/test_utils/assets/media/dog_realistic.jpg"])
 app = App(
     name="Text to Video",
     inputs={
         'conditions': Input(label="Conditions (JSON)", type="json", default=DEFAULT_CONDS,),
         'hooks': Input(label="Hooks (JSON)", type="json", default=DEFAULT_HOOKS),
+        'latent': Input(label="Latent", type="json", default=DEFAULT_LATENT),
         'seed': Input(label="Seed", type="number", default=256347,),
         'steps': Input(label="Steps", type="number", default=30, increment_controls=True, increment_step=2,),
         'cfg': Input(label="CFG", type="number", default=6, increment_controls=True, increment_step=0.2,),

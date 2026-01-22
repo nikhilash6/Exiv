@@ -19,7 +19,18 @@ class Latent:
     batch_index: List[int] | None = None
     # initially a user input -> [1, 0, 1, ...]
     # but modified to a complete mask during prepare_layout_and_schedule
-    noise_mask: Optional[Tensor] = None
+    noise_mask: Optional[Tensor | list] = None
+    
+    @staticmethod
+    def from_json(latent_json: Dict):
+        try:
+            return Latent(
+                image_path_list=latent_json.get("image_path_list", []),
+                noise_mask=latent_json.get("noise_mask", None)
+            )
+        except Exception as e:
+            app_logger.warning(f"Unable to parse the latent json: {str(e)}. Using a blank latent.")
+            return Latent()
     
     def _load_images(self, height, width):
         from ..utils.tensor import common_upscale

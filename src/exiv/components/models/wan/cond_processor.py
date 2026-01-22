@@ -138,16 +138,5 @@ def preprocess_wan_conditionals(
         execution_order=["positive", "negative"]    # TODO: generalize this order based on index rather than group_name
     )
     for group, cond in cond_dict.items(): batched_cond.set_group_cond(group, cond)
-    
-    latent_format = model_wrapper.model.model_arch_config.latent_format
-    blank_latent = Latent()
-    blank_latent.encode_keyframe_condition( 
-        width, 
-        height,
-        frame_count, 
-        latent_format, 
-        wan_vae,
-    )
-    
-    return batched_cond, blank_latent
+    return batched_cond
 

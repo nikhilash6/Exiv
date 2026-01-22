@@ -1,6 +1,6 @@
 
 import json
-from typing import List, Dict, Union
+from typing import List, Dict, Optional, Union
 
 from exiv.model_patching.cache_hook import CacheType
 from exiv.model_patching.hook_registry import FeatureType, HookType
@@ -35,7 +35,7 @@ def get_dummy_cond(
             ]
         }
     ]
-    return json.dumps(defaults, indent=2)
+    return defaults
 
 def get_dummy_hook(
     enable_sliding_context=False,
@@ -65,4 +65,13 @@ def get_dummy_hook(
         }   # TODO: add proper 'type' this is not 'step caching', 'taylor lite' is a specific case of step caching
         defaults.append(hook)
         
-    return json.dumps(defaults)
+    return defaults
+
+def get_dummy_latent(
+    img_path_list: List[str] = [],
+    noise_mask: Optional[list] = None 
+):
+    return {
+        "image_path_list": img_path_list,
+        "noise_mask": noise_mask
+    }

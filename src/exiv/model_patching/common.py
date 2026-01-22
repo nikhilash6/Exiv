@@ -59,7 +59,7 @@ def restore_cpu_state(module: nn.Module, cache: dict):
 def apply_hook_json(model, hooks_json: Optional[str]):
     if not hooks_json: return
     try:
-        hook_list = json.loads(hooks_json)
+        hook_list = hooks_json
         for hook in hook_list:
             hook_method = get_hook_method(hook["type"])
             if not hook_method:
