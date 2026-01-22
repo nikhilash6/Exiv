@@ -39,7 +39,6 @@ def get_dummy_cond(
 
 def get_dummy_hook(
     enable_sliding_context=False,
-    enable_inpainting=False,
     enable_step_caching=False,
 ) -> str:
     defaults = []
@@ -59,7 +58,7 @@ def get_dummy_hook(
         
     if enable_step_caching:
         hook = {
-            "type": FeatureType.STEP_CACHING.vale,
+            "type": FeatureType.STEP_CACHING.value,
             "kwarg_data": {
                 "cache_type": CacheType.TAYLOR_SEER_LITE.value
             }

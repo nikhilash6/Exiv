@@ -90,8 +90,8 @@ def _process_ref_latents(cond_list, model_wrapper, wan_vae, height, width, frame
                         start_image=img,
                         vae=wan_vae,
                         length=frame_count,
-                        width=width,
                         height=height,
+                        width=width,
                     )
                     aux_c.data = data
 
@@ -113,7 +113,6 @@ def preprocess_wan_conditionals(
 ) -> tuple[BatchedConditioning, Latent]:
     
     progress_callback(0.1, "Initializing")
-    height, width, output_frame_count = 512, 512, 81
     if vae is None:
         wan_vae = get_vae(
             vae_type=model_wrapper.model.model_arch_config.default_vae_type,
@@ -122,7 +121,7 @@ def preprocess_wan_conditionals(
         )
     else:
         wan_vae = vae
-    output_frame_count = fix_frame_count(output_frame_count, wan_vae.temporal_compression_ratio)
+    frame_count = fix_frame_count(frame_count, wan_vae.temporal_compression_ratio)
     
     progress_callback(0.2, "Encoding prompts")
     # generate text embeddings
@@ -142,9 +141,9 @@ def preprocess_wan_conditionals(
     
     latent_format = model_wrapper.model.model_arch_config.latent_format
     blank_latent = Latent()
-    blank_latent.encode_keyframe_condition(
-        height, 
+    blank_latent.encode_keyframe_condition( 
         width, 
+        height,
         frame_count, 
         latent_format, 
         wan_vae,
