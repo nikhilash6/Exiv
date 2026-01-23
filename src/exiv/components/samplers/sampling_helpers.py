@@ -86,7 +86,6 @@ def prepare_model_conds(
     for cond_group_name, cond_list in batched_conditioning.get_groups_in_order():
         # cond_list = wrapped_model.model.filter_conditionings(cond_list)
         # if cond_list is None: continue
-        
         for cond in cond_list:
             # shallow copy to avoid stale data in case of accidental re-use
             active_cond = dataclasses.replace(cond)

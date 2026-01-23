@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as T
 
+from .ve_config import CLIPViTHConfig, CLIPViTLConfig, CLIPVitLlavaConfig
 from .common import VisionEncoderOutput
 from .encoder_base import VisionEncoder
 from ..attention import optimized_attention
@@ -187,24 +188,7 @@ class CLIPViTL(VisionEncoder):
         self.return_all_hidden_states = False
         
     def _get_config(self):
-        return {
-            "attention_dropout": 0.0,
-            "dropout": 0.0,
-            "hidden_act": "quick_gelu",
-            "hidden_size": 1024,
-            "image_size": 224,
-            "initializer_factor": 1.0,
-            "initializer_range": 0.02,
-            "intermediate_size": 4096,
-            "layer_norm_eps": 1e-05,
-            "model_type": "clip_vision_model",
-            "num_attention_heads": 16,
-            "num_channels": 3,
-            "num_hidden_layers": 24,
-            "patch_size": 14,
-            "projection_dim": 768,
-            "torch_dtype": "float32"
-        }
+        return CLIPViTLConfig()
 
     def forward(self, *args, **kwargs):
         # x[0] = last_hidden_state
@@ -239,24 +223,7 @@ class CLIPViTH(VisionEncoder):
         self.return_all_hidden_states = False
         
     def _get_config(self):
-        return {
-            "attention_dropout": 0.0,
-            "dropout": 0.0,
-            "hidden_act": "gelu",
-            "hidden_size": 1280,
-            "image_size": 224,
-            "initializer_factor": 1.0,
-            "initializer_range": 0.02,
-            "intermediate_size": 5120,
-            "layer_norm_eps": 1e-05,
-            "model_type": "clip_vision_model",
-            "num_attention_heads": 16,
-            "num_channels": 3,
-            "num_hidden_layers": 32,
-            "patch_size": 14,
-            "projection_dim": 1024,
-            "torch_dtype": "float32"
-        }
+        return CLIPViTHConfig()
         
     def forward(self, *args, **kwargs):
         x = self.vision_model(*args, **kwargs)
@@ -285,25 +252,7 @@ class CLIPVitLlava(CLIPViTL):
         self.return_all_hidden_states = False
 
     def _get_config(self):
-        return {
-            "attention_dropout": 0.0,
-            "dropout": 0.0,
-            "hidden_act": "quick_gelu",
-            "hidden_size": 1024,
-            "image_size": 336,
-            "initializer_factor": 1.0,
-            "initializer_range": 0.02,
-            "intermediate_size": 4096,
-            "layer_norm_eps": 1e-5,
-            "model_type": "clip_vision_model",
-            "num_attention_heads": 16,
-            "num_channels": 3,
-            "num_hidden_layers": 24,
-            "patch_size": 14,
-            "projection_dim": 768,
-            "projector_type": "llava3",
-            "torch_dtype": "float32"
-        }
+        return CLIPVitLlavaConfig()
         
     def forward(self, *args, **kwargs):
         x = self.vision_model(*args, **kwargs)
