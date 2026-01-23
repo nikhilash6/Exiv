@@ -82,20 +82,19 @@ def prepare_model_conds(
     if len(noise.shape) >= 4:
         base_ctx["width"] = noise.shape[3] * base_ctx["spatial_compression_factor"]
         base_ctx["height"] = noise.shape[2] * base_ctx["spatial_compression_factor"]
-        
+    
+    updated_conds = []
     for cond_group_name, cond_list in batched_conditioning.get_groups_in_order():
         # cond_list = wrapped_model.model.filter_conditionings(cond_list)
         # if cond_list is None: continue
         
-        updated_conds = []
         for cond in cond_list:
             # shallow copy to avoid stale data in case of accidental re-use
             active_cond = dataclasses.replace(cond)
             active_cond.model_input = model.prepare_model_input(active_cond, **base_ctx)
             updated_conds.append(active_cond)
             
-        res.set_group_cond(cond_group_name, updated_conds, replace=True)
-
+    res.set_cond(updated_conds, reset=True)
     return res
 
 # TODO: move this in the tensor file

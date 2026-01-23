@@ -44,12 +44,12 @@ def main(**params):
     
     # main settingss
     conditions = params.get("conditions")
-    cond_dict: Dict[str, Conditioning] = {}
+    cond_list: List[Conditioning] = []
     for c in conditions:
         if (c_obj:=Conditioning.from_json(c)) is not None:
-            cond_dict[c.get("group", "positive")] = c_obj
+            cond_list.append(c_obj)
         else:
-            raise RuntimeError("Malformed cond dict, aborting process")
+            raise RuntimeError("Malformed cond json, aborting process")
     hooks = params.get("hooks")
     latent_json = params.get("latent")
     seed = params.get("seed")
@@ -92,7 +92,7 @@ def main(**params):
     # preprocess conditionals
     batched_cond = preprocess_conds(
                     model_wrapper=model_wrapper,
-                    cond_dict=cond_dict,
+                    cond_list=cond_list,
                     height=height, 
                     width=width, 
                     frame_count=frame_count,

@@ -21,10 +21,10 @@ class Latent:
     # but modified to a complete mask during prepare_layout_and_schedule
     noise_mask: Optional[Tensor | list] = None
     
-    @staticmethod
-    def from_json(latent_json: Dict):
+    @classmethod
+    def from_json(cls, latent_json: Dict):
         try:
-            return Latent(
+            return cls(
                 image_path_list=latent_json.get("image_path_list", []),
                 noise_mask=latent_json.get("noise_mask", None)
             )
@@ -215,6 +215,7 @@ class Conditioning:
     Common conditioning type that supports ALL conditioning inputs
     during the model inference
     """
+    group_name: str = "positive"
     data: Optional[Tensor] = None
     input_metadata: Optional[Union[dict, str]] = None
     type: ConditioningType = ConditioningType.EMBEDDING
@@ -242,6 +243,7 @@ class Conditioning:
     @classmethod
     def from_json(cls, data: dict) -> Optional['Conditioning']:
         try:
+            group = data.get("group", "positive")
             # main conditioning data
             content = data.get("input_metadata")
             if content is None: 
@@ -269,6 +271,7 @@ class Conditioning:
                         ))
             
             out = cls(
+                group=group,
                 data=None, # will be processed later
                 input_metadata=content,
                 timestep_range=tuple(t_range),
@@ -375,8 +378,8 @@ class ExecutionBatch:
     group_names: List[str] = field(default_factory=list)
     conds: List[Conditioning] = field(default_factory=list)
     
-    def add_cond(self, cond, group_name):
-        self.group_names.append(group_name)
+    def add_cond(self, cond: Conditioning):
+        self.group_names.append(cond.group_name)
         self.conds.append(cond)
         
     def _collate_inputs(self, inputs: List[ModelForwardInput]):
@@ -439,32 +442,21 @@ class BatchedConditioning:
     Holds all conditioning groups and defines how they map to model batches,
     explictly defining the inference batches
     """
-    # store lists of Conditioning objects by name
-    # e.g. {"positive": [...], "negative": [...], "neutral": [...]}
-    groups: Dict[str, List['Conditioning']] = field(default_factory=dict)
+    conds: List['Conditioning'] = field(default_factory=list)
 
     # explicitly define the execution order and the batch size
     # e.g. ["positive", "negative"] implies batch_size=2
     execution_order: List[str] = field(default_factory=lambda: ["positive", "negative"])
-
-    def set_group_cond(self, group_name: str, conds: Union['Conditioning', List['Conditioning']], replace: bool = False):
+    
+    def set_cond(self, conds: Union['Conditioning', List['Conditioning']], reset=False):
         """
-        Updates a conditioning group.
-        - conds: Single object or list.
-        - replace: If True, overwrites the group. If False, appends/extends.
+        Adds the conds to the current self.conds, if reset = True then they are simply replaced
         """
-        if group_name not in self.groups:
-            self.groups[group_name] = []
-            if group_name not in self.execution_order:
-                self.execution_order.append(group_name)
-        
         if not isinstance(conds, list):
             conds = [conds]
             
-        if replace:
-            self.groups[group_name] = conds
-        else:
-            self.groups[group_name].extend(conds)
+        if reset: self.conds = []
+        self.conds.extend(conds)
     
     def set_execution_order(self, order: List[str]):
         """
@@ -472,7 +464,7 @@ class BatchedConditioning:
         e.g. set_execution_order(["positive", "negative", "neutral"])
         """
         requested = set(order)
-        available = set(self.groups.keys())
+        available = set([c.group_name for c in self.conds])
 
         missing_in_data = requested - available
         missing_in_order = available - requested

@@ -15,7 +15,7 @@ def get_dummy_cond(
 ) -> str:
     defaults = [
         {
-            "group": "positive",
+            "group_name": "positive",
             "input_metadata": positive,
             "timestep_range": [0.0, -1],
             "frame_range": [0.0, -1],
@@ -25,7 +25,7 @@ def get_dummy_cond(
             ]
         },
         {
-            "group": "negative",
+            "group_name": "negative",
             "timestep_range": [0.0, -1],
             "frame_range": [0.0, -1],
             "input_metadata": negative,

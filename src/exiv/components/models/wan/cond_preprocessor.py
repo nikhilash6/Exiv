@@ -104,7 +104,7 @@ def process_auxiliaries(cond_list, wrapper, wan_vae, height, width, frame_count,
 @register_preprocessor(Model.WAN21_1_3B_T2V.value)
 def preprocess_wan_conditionals(
         model_wrapper: ModelWrapper,
-        cond_dict: Dict[str, Conditioning],      # NOTE: these conditionings most probably don't have 'data' at this point
+        cond_list: List[Conditioning],           # NOTE: these conditionings most probably don't have 'data' at this point
         height: int, 
         width: int, 
         frame_count: int,
@@ -125,7 +125,6 @@ def preprocess_wan_conditionals(
     
     progress_callback(0.2, "Encoding prompts")
     # generate text embeddings
-    cond_list = list(cond_dict.values())
     prompts = [c.input_metadata for c in cond_list]
     te_embeds: List[TextEncoderOutput] = get_text_embeddings(
         prompts, te_model_filename=model_wrapper.model.model_arch_config.default_text_encoder)
@@ -137,6 +136,5 @@ def preprocess_wan_conditionals(
         groups={},
         execution_order=["positive", "negative"]    # TODO: generalize this order based on index rather than group_name
     )
-    for group, cond in cond_dict.items(): batched_cond.set_group_cond(group, cond)
+    for cond in cond_list: batched_cond.set_cond(cond)
     return batched_cond
-

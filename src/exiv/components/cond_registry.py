@@ -27,7 +27,7 @@ def register_preprocessor(model_type):
 
 def preprocess_conds(
     model_wrapper: ModelWrapper, 
-    cond_dict: Dict[str, Conditioning],
+    cond_list: List[Conditioning],
     **kwargs
 ):
     model_type = model_wrapper.model.model_type
@@ -38,7 +38,7 @@ def preprocess_conds(
             f"Did you forget to import the model's processor module?"
         )
     
-    return _PREPROCESSORS[model_type](model_wrapper, cond_dict, **kwargs)
+    return _PREPROCESSORS[model_type](model_wrapper, cond_list, **kwargs)
 
 def get_image_tensor(img: Tensor | str, height: int, width: int):
     if isinstance(img, Tensor): return img
