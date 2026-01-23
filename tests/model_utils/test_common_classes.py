@@ -8,6 +8,7 @@ class TestConditioning(unittest.TestCase):
     def test_standard_json(self):
         """Test from_json with valid standardized keys"""
         standard_json = {
+            "group_name": "positive",
             "input_metadata": "A beautiful sunset",
             "timestep_range": [0.1, 0.9],
             "frame_range": [0, 40],
@@ -39,7 +40,7 @@ class TestConditioning(unittest.TestCase):
 
     def test_partial_standard_keys(self):
         """Test with minimal standard keys"""
-        partial_json = {"input_metadata": "Just content"}
+        partial_json = {"group_name": "positive", "input_metadata": "Just content"}
         cond = Conditioning.from_json(partial_json)
         self.assertIsNotNone(cond)
         self.assertEqual(cond.input_metadata, "Just content")
@@ -49,6 +50,7 @@ class TestConditioning(unittest.TestCase):
     def test_aux_list_structure(self):
         """Test auxiliary input list validation"""
         aux_json = {
+            "group_name": "positive",
             "input_metadata": "Aux test",
             "aux": [
                 { "type": "t1", "input_metadata": "d1" },
@@ -64,6 +66,7 @@ class TestConditioning(unittest.TestCase):
     def test_complex_robust_json(self):
         """Test with a complex JSON structure including extra and multiple aux types"""
         complex_json = {
+            "group_name": "positive",
             "input_metadata": "Complex content",
             "timestep_range": [0.0, 1.0],
             "strength": 1.2,
