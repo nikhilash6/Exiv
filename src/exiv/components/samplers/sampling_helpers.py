@@ -20,8 +20,8 @@ def filter_active_conds(
     filtered = BatchedConditioning()
     filtered.execution_order = batched_conditioning.execution_order
 
-    for group_name, cond_list in batched_conditioning.groups.items():
-        active_list = []
+    active_list = []
+    for group_name, cond_list in batched_conditioning.get_groups_in_order():
         for cond in cond_list:
             filter_out = False
             
@@ -46,8 +46,7 @@ def filter_active_conds(
                     
             if not filter_out: active_list.append(cond)
         
-        filtered.groups[group_name] = active_list
-            
+    filtered.set_cond(active_list, reset=True)
     return filtered
 
 def prepare_model_conds(
@@ -82,20 +81,18 @@ def prepare_model_conds(
     if len(noise.shape) >= 4:
         base_ctx["width"] = noise.shape[3] * base_ctx["spatial_compression_factor"]
         base_ctx["height"] = noise.shape[2] * base_ctx["spatial_compression_factor"]
-        
+    
+    updated_conds = []
     for cond_group_name, cond_list in batched_conditioning.get_groups_in_order():
         # cond_list = wrapped_model.model.filter_conditionings(cond_list)
         # if cond_list is None: continue
-        
-        updated_conds = []
         for cond in cond_list:
             # shallow copy to avoid stale data in case of accidental re-use
             active_cond = dataclasses.replace(cond)
             active_cond.model_input = model.prepare_model_input(active_cond, **base_ctx)
             updated_conds.append(active_cond)
             
-        res.set_group_cond(cond_group_name, updated_conds, replace=True)
-
+    res.set_cond(updated_conds, reset=True)
     return res
 
 # TODO: move this in the tensor file
@@ -158,14 +155,14 @@ def batch_compatible_conds(
             feed_t=timestep, 
             feed_input=cur_cond.model_input.to_dict() if cur_cond.model_input else {}
         )
-        cur_execution_batch.add_cond(cur_cond, g_name)
+        cur_execution_batch.add_cond(cur_cond)
         
         if idx != len(work_queue) - 1:
             for i, (g, c) in enumerate(work_queue[idx+1:]):
                 # signature matches and the combination is memory safe, then batch them
                 if cur_cond.signature == c.signature and \
                     check_oom_safety(len(cur_execution_batch.conds) + 1, x_in, mem_calc_fn):
-                    cur_execution_batch.add_cond(c, g)
+                    cur_execution_batch.add_cond(c)
                     is_consumed[idx + 1 + i] = True
         
         execution_batches.append(cur_execution_batch)

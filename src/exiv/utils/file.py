@@ -50,6 +50,44 @@ def get_numbered_filename(folder: str, filename: str) -> str:
         
     return full_path
 
+def _interactive_download_check(model_path: str, download_url: str) -> bool:
+    from .logging import app_logger
+    from ..config import global_config
+    import requests
+
+    if global_config.auto_download:
+        return True
+
+    # fetch file size
+    size_label = "Unknown size"
+    try:
+        head_response = requests.head(download_url, allow_redirects=True, timeout=5)
+        if 'content-length' in head_response.headers:
+            size_bytes = int(head_response.headers['content-length'])
+            for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+                if size_bytes < 1024.0:
+                    size_label = f"{size_bytes:.2f} {unit}"
+                    break
+                size_bytes /= 1024.0
+    except Exception as e:
+        app_logger.warning(f"Could not retrieve file size: {e}")
+
+    # CLI prompt
+    print(f"\n[Exiv] File missing: {os.path.basename(model_path)}")
+    while True:
+        user_input = input(f"Do you want to auto download this file ({size_label})? [yes/no/always]: ").strip().lower()
+        
+        if user_input in ("yes", "y"):
+            return True
+        
+        elif user_input == "always":
+            global_config.auto_download = True
+            app_logger.info("Auto-download enabled for this session.")
+            return True
+        
+        elif user_input in ("no", "n"):
+            return False
+
 def ensure_model_availability(model_path: str, download_url: str = None, force_download: bool = False) -> str:
     """
     - Downloads model if a URL is provided, else verifies the local path.
@@ -65,6 +103,10 @@ def ensure_model_availability(model_path: str, download_url: str = None, force_d
         assert parsed.scheme in ("http", "https"), "invalid download link"
 
     if download_url and (force_download or not os.path.exists(model_path)):
+        should_download = _interactive_download_check(model_path, download_url)
+        if not should_download:
+            raise FileNotFoundError(f"Download cancelled by user. Model {model_path} is required.")
+        
         app_logger.info(f"Downloading model from {download_url} to {model_path} ...")
         response = requests.get(download_url, stream=True)
         response.raise_for_status()

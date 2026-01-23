@@ -6,8 +6,13 @@ from typing import Callable, Any, Dict, List, Optional
 from ..utils.enum import ExtendedEnum
 from ..utils.logging import app_logger
 
-# this creates a lookup table coupled with a doubly linked list, that has O(1) lookup and update
-
+# these are high level functionality that directly maps to the 'enable_***' method
+# a single functionality can be selecting b/w multiple hooks, e.g. step caching
+class FeatureType(ExtendedEnum):
+    SLIDING_CONTEXT = "sliding_context"
+    STEP_CACHING = "step_caching"
+    EFFICIENT_LOADING = "efficient_loading"
+    
 class HookLocation(ExtendedEnum):
     FORWARD = "forward"                # module forward
     SAMPLER_STEP = "sampler_step"      # around compute_batched_output
@@ -47,7 +52,7 @@ class ModelHook:
         # single wrapper for any location
         return original_fn(*args, **kwargs)
 
-
+# this creates a lookup table coupled with a doubly linked list, that has O(1) lookup and update
 class HookRegistry:
     
     def __init__(self, module_ref: torch.nn.Module) -> None:
@@ -190,3 +195,16 @@ def clear_hook_registry(model: nn.Module):
 
     for module in model.modules():
         clean_and_restore(module)
+
+
+HOOK_METHOD_REGISTRY = {}
+def register_hook_method(feature_types: list[str] | str):
+    def decorator(fn):
+        types = [feature_types] if isinstance(feature_types, str) else feature_types
+        for t in types:
+            HOOK_METHOD_REGISTRY[t] = fn
+        return fn
+    return decorator
+
+def get_hook_method(feature_type):
+    return HOOK_METHOD_REGISTRY.get(feature_type, None)

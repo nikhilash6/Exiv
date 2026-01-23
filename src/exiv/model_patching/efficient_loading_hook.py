@@ -4,7 +4,7 @@ import weakref
 from typing import Callable, List, Any, Tuple
 
 from .common import prepare_and_cache_cpu_state, restore_cpu_state
-from .hook_registry import HookLocation, HookRegistry, HookType, ModelHook
+from .hook_registry import FeatureType, HookLocation, HookRegistry, HookType, ModelHook, register_hook_method
 from ..model_utils.helper_methods import estimate_peak_activation_size
 from ..utils.logging import app_logger
 from ..utils.device import OFFLOAD_DEVICE, RESERVED_MEM, MemoryManager
@@ -207,6 +207,7 @@ def remove_efficient_loading(model: 'ModelMixin'):
     HookRegistry.remove_hook_from_module(model, HookType.EFFICIENT_MODEL_LOADER.value)
     
 
+@register_hook_method(FeatureType.EFFICIENT_LOADING.value)
 def enable_efficient_loading(model: 'ModelMixin', target_shape = None):
     """
     This patches the forward pass of modules to dynamically load / unload them

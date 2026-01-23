@@ -162,3 +162,43 @@ class ServerIntegrationTest(unittest.TestCase):
             os.remove(os.path.join(sub_dir, test_filename))
             os.rmdir(sub_dir)
         except: pass
+    
+    def test_task_context_logic(self):
+        """Test the TaskContext logic in isolation."""
+        from exiv.server.app_core import TaskContext
+        
+        progress_data = []
+        def mock_callback(p, d):
+            progress_data.append((p, d))
+            
+        ctx = TaskContext(mock_callback, step_size=0.1) # 10% per step
+        
+        # 1. Start Anchor A (2 steps = 20%) -> Reports 0.0
+        ctx.start_anchor("A", steps=2)
+        self.assertEqual(progress_data[-1][0], 0.0)
+        self.assertEqual(progress_data[-1][1]['stage'], "A")
+        
+        # 2. Progress 50% in A -> 0.0 + (0.5 * 0.2) = 0.1 global
+        ctx.progress(0.5, "Running A")
+        self.assertAlmostEqual(progress_data[-1][0], 0.1)
+        
+        # 3. Progress 100% in A -> 0.2 global
+        ctx.progress(1.0, "Finished A")
+        self.assertAlmostEqual(progress_data[-1][0], 0.2)
+        
+        # 4. Start Anchor B (3 steps = 30%) -> Reports 0.2 (start of B)
+        ctx.start_anchor("B", steps=3)
+        self.assertAlmostEqual(progress_data[-1][0], 0.2)
+        self.assertEqual(progress_data[-1][1]['stage'], "B")
+        
+        # 5. Progress 50% in B -> 0.2 + (0.5 * 0.3) = 0.35 global
+        ctx.progress(0.5, "Running B")
+        self.assertAlmostEqual(progress_data[-1][0], 0.35)
+        
+        # 6. Start Anchor C (5 steps = 50%) -> Reports 0.5 (start of C)
+        ctx.start_anchor("C", steps=5)
+        self.assertAlmostEqual(progress_data[-1][0], 0.5)
+
+        # 7. Progress 100% in C -> 0.5 + 0.5 = 1.0 global
+        ctx.progress(1.0, "Done")
+        self.assertAlmostEqual(progress_data[-1][0], 1.0)

@@ -77,6 +77,7 @@ class TextEncoderType(ExtendedEnum):
     CLIP_L = "clip_l"
 
     T5_XXL = "t5_xxl"
+    UMT5_XXL = "umt5_xxl"
     T5_XL = "t5_xl"
     T5_XXL_OLD = "t5_xxl_old"
     T5_BASE = "t5_base"

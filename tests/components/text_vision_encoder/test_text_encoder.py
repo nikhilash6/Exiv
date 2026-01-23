@@ -3,8 +3,8 @@ import torch
 import unittest
 from parameterized import parameterized
 
+from exiv.components.cond_registry import get_text_embeddings
 from exiv.components.text_vision_encoder.te_t5 import UMT5XXL
-from exiv.components.text_vision_encoder.text_encoder import WanEncoder
 from exiv.components.text_vision_encoder.text_tokenizer import UMTT5XXLTokenizer
 from exiv.model_patching.debug_hook import add_debug_hooks
 from exiv.utils.dev import print_memory_usage
@@ -76,12 +76,7 @@ class TextEncoderTest(unittest.TestCase):
             prompt = "a photo of a (white:2) (dog:1) and a ((blue)) (bird:3)"
 
             cur_model = "umt5_xxl_fp16.safetensors"
-            model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="text_encoder")
-            t5_xxl = UMT5XXL(model_path=model_path_data.path, dtype=torch.float16)
-            wan_encoder = WanEncoder(t5_xxl=t5_xxl)
-            wan_encoder.load_model(t5_xxl_download_url=model_path_data.url)
-            embed = wan_encoder.encode(prompt)
-            del t5_xxl, wan_encoder
+            embed = get_text_embeddings(prompt, te_model_filename=cur_model)
             
             print("embed: ")
             # TODO: add check for output the correctness

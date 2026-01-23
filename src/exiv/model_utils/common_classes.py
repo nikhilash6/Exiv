@@ -3,13 +3,14 @@ from torch import Tensor
 
 from typing import Any, Callable, List, Tuple, Optional, Union, Dict
 from dataclasses import dataclass, field
-
+from collections import defaultdict
 
 from ..utils.device import VRAM_DEVICE
 from ..utils.file import MediaProcessor
 from ..utils.enum import ExtendedEnum
 from ..components.latent_format import LatentFormat
 from ..components.samplers.cfg_methods import default_cfg
+from ..utils.logging import app_logger
 
 @dataclass
 class Latent:
@@ -18,7 +19,18 @@ class Latent:
     batch_index: List[int] | None = None
     # initially a user input -> [1, 0, 1, ...]
     # but modified to a complete mask during prepare_layout_and_schedule
-    noise_mask: Optional[Tensor] = None
+    noise_mask: Optional[Tensor | list] = None
+    
+    @classmethod
+    def from_json(cls, latent_json: Dict):
+        try:
+            return cls(
+                image_path_list=latent_json.get("image_path_list", []),
+                noise_mask=latent_json.get("noise_mask", None)
+            )
+        except Exception as e:
+            app_logger.warning(f"Unable to parse the latent json: {str(e)}. Using a blank latent.")
+            return Latent()
     
     def _load_images(self, height, width):
         from ..utils.tensor import common_upscale
@@ -193,6 +205,7 @@ class AuxConditioning:
     """
     type: str | None = None
     data: Optional[Tensor] | List[Tensor] = None
+    input_metadata: Optional[Union[dict, str]] = None
     timestep_range: Tuple[float, float] = (0.0, -1)    # (0.0=start, -1.0=end)
     frame_range: Optional[Tuple[int, int]] = None       # (start_idx, end_idx)
 
@@ -202,9 +215,10 @@ class Conditioning:
     Common conditioning type that supports ALL conditioning inputs
     during the model inference
     """
-    data: Tensor
+    group_name: str = "positive"
+    data: Optional[Tensor] = None
+    input_metadata: Optional[Union[dict, str]] = None
     type: ConditioningType = ConditioningType.EMBEDDING
-
     # --- Timings & Ranges ---
     timestep_range: Tuple[float, float] = (0, -1)          # (start, end), -1 means it spans the complete range
     frame_range: Optional[Tuple[int, int]] = (0, -1)       # (start_idx, end_idx)
@@ -213,22 +227,63 @@ class Conditioning:
     # during output masking in the sampler in "combined_mask" property
     # (H, W): Spatial mask applied to all frames
     mask: Tensor | None = None
-
     # --- Strength / Intensity ---
     # Supports:
     # - float: Constant strength (e.g. 1.0)
     # - Tensor: Per-frame/pixel strength (e.g. shape [T] or [B, H, W])
     # - List[float]: Per-step strength schedule (e.g. [0.0, 0.5, 1.0...])
     strength: Union[float, Tensor, List[float]] = 1.0
-
     # auxiliary / modifiers
     aux: Optional[List[AuxConditioning]] = field(default_factory=list)
-    
     # model-specific extra params (not in use rn)
     extra: dict = field(default_factory=dict)
-    
     # final processed inputs, ready for the inference step
     model_input: Optional[ModelForwardInput] = None
+    
+    @classmethod
+    def from_json(cls, data: dict) -> Optional['Conditioning']:
+        try:
+            group = data["group_name"]
+            # main conditioning data
+            content = data.get("input_metadata")
+            if content is None: 
+                return None
+            
+            # ranges & strength
+            t_range = data.get("timestep_range", (0, -1))
+            f_range = data.get("frame_range", (0, -1))
+            if f_range:
+                f_range = [int(f) for f in f_range]
+            
+            strength = data.get("strength", 1.0)
+            extra = data.get("extra", {})
+
+            # aux inputs
+            aux_list = []
+            if "aux" in data and isinstance(data["aux"], list):
+                for item in data["aux"]:
+                    if isinstance(item, dict):
+                        aux_list.append(AuxConditioning(
+                            type=item.get("type"),
+                            input_metadata=item.get("input_metadata"),
+                            timestep_range=tuple(item.get("timestep_range", (0, -1))),
+                            frame_range=tuple(item.get("frame_range", (0, -1))) if item.get("frame_range") else None
+                        ))
+            
+            out = cls(
+                group_name=group,
+                data=None, # will be processed later
+                input_metadata=content,
+                timestep_range=tuple(t_range),
+                frame_range=tuple(f_range),
+                strength=strength,
+                aux=aux_list,
+                extra=extra
+            )
+            return out
+        except Exception as e:
+            app_logger.error(f"Unable to parse the conditioning JSON: {str(e)}")
+            return None
 
     def set_extra(self, **kwargs):
         self.extra.update(kwargs)
@@ -323,8 +378,8 @@ class ExecutionBatch:
     group_names: List[str] = field(default_factory=list)
     conds: List[Conditioning] = field(default_factory=list)
     
-    def add_cond(self, cond, group_name):
-        self.group_names.append(group_name)
+    def add_cond(self, cond: Conditioning):
+        self.group_names.append(cond.group_name)
         self.conds.append(cond)
         
     def _collate_inputs(self, inputs: List[ModelForwardInput]):
@@ -387,32 +442,21 @@ class BatchedConditioning:
     Holds all conditioning groups and defines how they map to model batches,
     explictly defining the inference batches
     """
-    # store lists of Conditioning objects by name
-    # e.g. {"positive": [...], "negative": [...], "neutral": [...]}
-    groups: Dict[str, List['Conditioning']] = field(default_factory=dict)
+    conds: List['Conditioning'] = field(default_factory=list)
 
     # explicitly define the execution order and the batch size
     # e.g. ["positive", "negative"] implies batch_size=2
     execution_order: List[str] = field(default_factory=lambda: ["positive", "negative"])
-
-    def set_group_cond(self, group_name: str, conds: Union['Conditioning', List['Conditioning']], replace: bool = False):
+    
+    def set_cond(self, conds: Union['Conditioning', List['Conditioning']], reset=False):
         """
-        Updates a conditioning group.
-        - conds: Single object or list.
-        - replace: If True, overwrites the group. If False, appends/extends.
+        Adds the conds to the current self.conds, if reset = True then they are simply replaced
         """
-        if group_name not in self.groups:
-            self.groups[group_name] = []
-            if group_name not in self.execution_order:
-                self.execution_order.append(group_name)
-        
         if not isinstance(conds, list):
             conds = [conds]
             
-        if replace:
-            self.groups[group_name] = conds
-        else:
-            self.groups[group_name].extend(conds)
+        if reset: self.conds = []
+        self.conds.extend(conds)
     
     def set_execution_order(self, order: List[str]):
         """
@@ -420,7 +464,7 @@ class BatchedConditioning:
         e.g. set_execution_order(["positive", "negative", "neutral"])
         """
         requested = set(order)
-        available = set(self.groups.keys())
+        available = set([c.group_name for c in self.conds])
 
         missing_in_data = requested - available
         missing_in_order = available - requested
@@ -437,4 +481,7 @@ class BatchedConditioning:
         self.execution_order = order
         
     def get_groups_in_order(self):
-        return [(name, self.groups[name]) for name in self.execution_order]
+        group_map = defaultdict(list)
+        for c in self.conds:
+            group_map[c.group_name].append(c)
+        return [(name, val) for name, val in group_map.items()]

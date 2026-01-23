@@ -8,7 +8,7 @@ from typing import Any, Dict
 from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 
-from .app_core import App
+from .app_core import App, TaskContext
 
 from .task_manager import RunRequest, ScriptResponse, ScriptStatus, TaskDetails, task_manager
 from ..utils.logging import app_logger
@@ -32,6 +32,7 @@ def load_apps_from_directory(directory: str = "apps"):
         app_logger.warning(f"No 'apps' folder found at {apps_path}")
         return
 
+    sys.path.append(apps_path)
     app_logger.debug(f"Scanning for apps in: {apps_path}")
     py_files = glob(os.path.join(apps_path, "*.py"))
 
@@ -90,7 +91,7 @@ def process_task(task_id: str):
             )
             return
         
-        params["report_progress"] = report_progress
+        params["context"] = TaskContext(report_progress)
 
         result = app_def.handler(**params)
         

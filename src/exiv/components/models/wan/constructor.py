@@ -40,21 +40,21 @@ def detect_wan_params(state_dict):
     # T2V usually has in_dim=16
     # I2V usually has in_dim=36 (16 latent + 4 mask + 16 image)
     input_channels = state_dict["patch_embedding.weight"].shape[1]
-    model_config = None
+    model_arch_config = None
     if cls == Wan22Model:
         if config["dim"] == 3072:
             config["model_type"] = Model.WAN22_5B_T2V.value
-            model_config = Wan22ModelArchConfig(model_type=Model.WAN22_5B_T2V.value)
+            model_arch_config = Wan22ModelArchConfig(model_type=Model.WAN22_5B_T2V.value)
         elif config["dim"] == 5120:
             config["model_type"] = Model.WAN22_14B_TI2V.value
-            model_config = Wan22ModelArchConfig(model_type=Model.WAN22_14B_TI2V.value)
+            model_arch_config = Wan22ModelArchConfig(model_type=Model.WAN22_14B_TI2V.value)
     else:
         if config["dim"] == 5120:  
             config["model_type"] = Model.WAN21_14B_TI2V.value
-            model_config = Wan21ModelArchConfig(model_type=Model.WAN21_14B_TI2V.value)
+            model_arch_config = Wan21ModelArchConfig(model_type=Model.WAN21_14B_TI2V.value)
         else:
             config["model_type"] = Model.WAN21_1_3B_T2V.value
-            model_config = Wan21ModelArchConfig(model_type=Model.WAN21_1_3B_T2V.value)
+            model_arch_config = Wan21ModelArchConfig(model_type=Model.WAN21_1_3B_T2V.value)
     
     config["in_dim"] = input_channels
     if "ref_conv.weight" in state_dict:
@@ -62,9 +62,9 @@ def detect_wan_params(state_dict):
     else:
         config["in_dim_ref_conv"] = None
     
-    assert model_config is not None, "Model not supported or is in the wrong format. Aborting."
-    app_logger.info(f"Model detected: {cls.__name__} {dtype} {model_config.__class__.__name__} {config['model_type']}")
-    return cls, config, dtype, model_config
+    assert model_arch_config is not None, "Model not supported or is in the wrong format. Aborting."
+    app_logger.info(f"Model detected: {cls.__name__} {dtype} {model_arch_config.__class__.__name__} {config['model_type']}")
+    return cls, config, dtype, model_arch_config
 
 # NOTE: these methods detect the model arch (dims, layer counts etc.) from the 
 # state dict and initialize the model cls appropriately
@@ -77,11 +77,11 @@ def get_wan_instance(
 ):
     model_path = ensure_model_availability(model_path, download_url)
     state_dict = get_state_dict(model_path)
-    cls, config, dict_dtype, model_config = detect_wan_params(state_dict)
+    cls, config, dict_dtype, model_arch_config = detect_wan_params(state_dict)
     del state_dict
     
     dtype = force_dtype or dict_dtype
     wan_dit_model = cls(**config, force_load_mode=force_load_mode, dtype=dtype)
-    wan_dit_model.model_arch_config = model_config
+    wan_dit_model.model_arch_config = model_arch_config
     wan_dit_model.load_model(model_path=model_path, download_url=download_url)
     return wan_dit_model

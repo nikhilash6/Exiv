@@ -4,6 +4,9 @@ from torch import Tensor
 from dataclasses import dataclass
 from typing import Any, Dict
 
+from exiv.utils.file import ensure_model_availability
+from exiv.utils.file_path import FilePathData, FilePaths
+
 from .common import TextEncoderOutput, VisionEncoderOutput
 from ...utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, ProcDevice
 from ...model_utils.model_mixin import ModelMixin
@@ -12,6 +15,12 @@ from ...utils.logging import app_logger
 # this is the base of all the encoder models like T5 and CLIP
 class TextEncoder(ModelMixin):
     def __init__(self, model_path, config, te_type, **kwargs):
+        if not model_path:
+            if config.default_model_filename:   # TODO: refactor to make more streamlined
+                model_path_data: FilePathData = FilePaths.get_path(filename=config.default_model_filename, file_type="text_encoder")
+                model_path: str = ensure_model_availability(model_path_data.path, model_path_data.url)
+            else:
+                raise Exception("Can't initialize the model, no path provided")
         self.model_path = model_path
         self.config = config
         self.te_type = te_type
@@ -21,7 +30,7 @@ class TextEncoder(ModelMixin):
         self.layer = kwargs.get("layer", "last")        # ['last', 'hidden']
         self.layer_idx = kwargs.get("layer_idx", -2)
         self.zero_out_masked = kwargs.get("zero_out_masked", False)     # zero out padding / eos stuff
-        super().__init__(model_path=model_path)
+        super().__init__(model_path=model_path, **kwargs)
     
     def gen_empty_tokens(self, length, special_tokens: tuple):
         start_token, end_token, pad_token = special_tokens
@@ -265,6 +274,12 @@ class TextEncoder(ModelMixin):
 
 class VisionEncoder(ModelMixin):
     def __init__(self, model_path, dtype=None, device=None):
+        if not model_path:
+            if (filename:=getattr(self, 'default_model_filename', None)) is not None:   # TODO: refactor to make more streamlined
+                model_path_data: FilePathData = FilePaths.get_path(filename=filename, file_type="vision_encoder")
+                model_path: str = ensure_model_availability(model_path_data.path, model_path_data.url)
+            else:
+                raise Exception("Can't initialize the model, no path provided")
         super().__init__(model_path=model_path, dtype=dtype, device=device)
     
     # common preprocessor for current vision encoders
@@ -273,9 +288,9 @@ class VisionEncoder(ModelMixin):
         
         # setting defaults
         # NOTE: defaults are from OpenAI's original CLIP impl.
-        size = self.config.get("image_size", 224)
-        mean = self.config.get("image_mean", [0.48145466, 0.4578275, 0.40821073])
-        std = self.config.get("image_std", [0.26862954, 0.26130258, 0.27577711])
+        size = getattr(self.config, "image_size", 224)
+        mean = getattr(self.config, "image_mean", [0.48145466, 0.4578275, 0.40821073])
+        std = getattr(self.config, "image_std", [0.26862954, 0.26130258, 0.27577711])
         
         # IMPORTANT: need the image here in B,H,W,C
         image = image.permute(0, 2, 3, 1)
@@ -324,59 +339,3 @@ class VisionEncoder(ModelMixin):
             multimodal_projection=out.multimodal_projection,
             extra=out.extra
         )
-
-
-@dataclass
-class T5Config:
-    d_ff = 3072
-    d_kv = 64
-    d_model = 768
-    decoder_start_token_id = 0
-    dropout_rate = 0.1
-    eos_token_id = 1
-    dense_act_fn = "relu"
-    initializer_factor = 1.0
-    is_encoder_decoder = True
-    is_decoder = False
-    is_gated_act = False
-    layer_norm_epsilon = 1e-06
-    model_type = "t5"
-    num_decoder_layers = 12
-    num_heads = 12
-    num_layers = 12
-    output_past = True
-    pad_token_id = 0
-    relative_attention_num_buckets = 32
-    relative_attention_max_distance = 128
-    tie_word_embeddings = False
-    vocab_size = 32128
-    
-@dataclass
-class T5XXLConfig:
-    d_ff = 10240
-    d_kv = 64
-    d_model = 4096
-    decoder_start_token_id = 0
-    dropout_rate = 0.1
-    eos_token_id = 1
-    dense_act_fn = "gelu_pytorch_tanh"
-    initializer_factor = 1.0
-    is_encoder_decoder = True
-    is_decoder = False
-    is_gated_act = True
-    layer_norm_epsilon = 1e-06
-    model_type = "t5_xxl"
-    num_decoder_layers = 24
-    num_heads = 64
-    num_layers = 24
-    output_past = True
-    pad_token_id = 0
-    relative_attention_num_buckets = 32
-    relative_attention_max_distance = 128
-    tie_word_embeddings = False
-    vocab_size = 3212
-
-@dataclass
-class UMT5XXLConfig(T5XXLConfig):
-    model_type = "umt5_xxl"
-    vocab_size = 256384

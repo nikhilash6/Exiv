@@ -1,10 +1,13 @@
 import torch
 from torch import nn
 
-from exiv.utils.device import OFFLOAD_DEVICE
+import json
+from typing import Optional
 
-from .hook_registry import HookRegistry, HookType
+from .hook_registry import HookRegistry, HookType, get_hook_method
 from ..model_utils.helper_methods import _iter_tensor_attributes
+from ..utils.logging import app_logger
+from ..utils.device import OFFLOAD_DEVICE
 
 # TODO: will generalize this as more hooks are added
 def get_effective_shape(model, shape):
@@ -52,3 +55,16 @@ def restore_cpu_state(module: nn.Module, cache: dict):
                 obj.data = curr.to(OFFLOAD_DEVICE)
             else:
                 setattr(obj, attr, curr.to(OFFLOAD_DEVICE))
+                
+def apply_hook_json(model, hooks_json: Optional[str]):
+    if not hooks_json: return
+    try:
+        hook_list = hooks_json
+        for hook in hook_list:
+            hook_method = get_hook_method(hook["type"])
+            if not hook_method:
+                app_logger.warning(f"No hook method found for hook type {hook['type']}")
+                continue
+            hook_method(model, **hook["kwarg_data"])
+    except Exception as e:
+        raise RuntimeError(f"Unable to apply hook, {str(e)}")

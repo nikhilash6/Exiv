@@ -3,6 +3,7 @@ import torch
 import unittest
 from parameterized import parameterized
 
+from exiv.components.cond_registry import get_vision_embeddings
 from exiv.components.text_vision_encoder.common import VisionEncoderOutput
 from exiv.components.text_vision_encoder.vision_encoder import create_vision_encoder
 from exiv.utils.file import MediaProcessor
@@ -24,7 +25,7 @@ class VisionEncoderTest(unittest.TestCase):
         MemoryManager.clear_memory()
     
     LOADING_PARAMS = [
-        ("no_oom",   {"no_oom": True,  "low_vram": False, "normal_load": False}, 1206,  VRAM_DEVICE),   # TODO: look into this, this should be around 600
+        ("no_oom",   {"no_oom": True,  "low_vram": False, "normal_load": False}, 30,  VRAM_DEVICE),   # TODO: look into this, this should be around 600
         ("normal",   {"no_oom": False, "low_vram": False, "normal_load": True},  1206, VRAM_DEVICE),
     ]
     @parameterized.expand(LOADING_PARAMS)
@@ -39,11 +40,9 @@ class VisionEncoderTest(unittest.TestCase):
 
             cur_model = "CLIP-ViT-H-fp16.safetensors"
             model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="vision_encoder")
-            clip_model = create_vision_encoder(model_path=model_path_data.path, download_url=model_path_data.url, dtype=torch.float16)
-            clip_model.load_model()
-            clip_embed: VisionEncoderOutput = clip_model.encode_image(input_img)
+            clip_embed: VisionEncoderOutput = get_vision_embeddings(input_data=input_img, ve_model_filename=model_path_data.path)[0]
             
             self.assertIsNotNone(clip_embed.image_embedding)
             self.assertIsNotNone(clip_embed.intermediate_hidden_states)
-            del clip_model, clip_embed, input_img
+            del clip_embed, input_img
             # TODO: add exact output check later

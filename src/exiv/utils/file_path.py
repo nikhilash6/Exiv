@@ -190,14 +190,33 @@ class FilePaths:
         """
         Resolves a file by name and type.
         Prioritizes:
-        1. Local Exact match
-        2. Local Stem match
-        3. Download Map Exact match
-        4. Download Map Stem match
+        1. Direct File Path (Absolute or Relative) -> returns immediately if found.
+        2. Local Exact match (in registered roots)
+        3. Local Stem match (in registered roots)
+        4. Download Map Exact match
+        5. Download Map Stem match
         
         Returns a dict: {'name': str, 'path': str, 'is_present': bool, 'url': str|None}
         Raises FileNotFoundError if not found in local or downloadable.
         """
+        
+        # user specific path is directly used (e.g. "/tmp/custom.safetensors" or "./model.ckpt")
+        potential_path = os.path.abspath(filename)
+        if os.path.isfile(potential_path):
+            name = os.path.basename(potential_path)
+            # check if we happen to have a URL for this filename in our map, 
+            # just in case they are manually pointing to a known file.
+            url = None
+            if name in DOWNLOAD_MAP and DOWNLOAD_MAP[name].get("type") == file_type:
+                url = DOWNLOAD_MAP[name].get("url")
+
+            return FilePathData(
+                name=name,
+                path=potential_path,
+                is_present=True,
+                url=url
+            )
+        
         if not cls._file_cache:
             cls.init_cache()
 

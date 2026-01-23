@@ -7,7 +7,8 @@ from typing import Optional
 
 from .common import TextEncoderOutput
 from ..activations import ACT2FN
-from .encoder_base import TextEncoder, T5Config, T5XXLConfig, UMT5XXLConfig
+from .encoder_base import TextEncoder
+from .te_config import T5Config, T5XXLConfig, UMT5XXLConfig
 from ..enum import TextEncoderType
 from ..attention import optimized_attention
 from ...utils.logging import app_logger
@@ -452,5 +453,5 @@ class T5XXL(T5):
   
 class UMT5XXL(T5):
     def __init__(self, model_path, config = UMT5XXLConfig()):
-        super().__init__(model_path, config, TextEncoderType.T5_XXL.value)
+        super().__init__(model_path, config, TextEncoderType.UMT5_XXL.value)
         
