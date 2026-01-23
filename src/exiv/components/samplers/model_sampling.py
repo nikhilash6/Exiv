@@ -229,8 +229,8 @@ def compute_batched_output(
     )
 
     # **** main model run ****
-    out_acc = {k: torch.zeros_like(x_in) for k, _ in active_batched_conds.groups.items()}
-    weights_acc = {k: torch.zeros_like(x_in) for k, _ in active_batched_conds.groups.items()}
+    out_acc = {k: torch.zeros_like(x_in) for k, _ in active_batched_conds.get_groups_in_order()}
+    weights_acc = {k: torch.zeros_like(x_in) for k, _ in active_batched_conds.get_groups_in_order()}
     for execution_batch in execution_batch_list:
         execution_batch.expand_batched_values(timestep, denoise_mask)    # this saves us vram 
         app_logger.debug(f"Batch size this step: {len(execution_batch.conds)}")

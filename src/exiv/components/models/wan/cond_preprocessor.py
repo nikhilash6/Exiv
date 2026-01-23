@@ -133,7 +133,6 @@ def preprocess_wan_conditionals(
     process_auxiliaries(cond_list, model_wrapper, wan_vae, height, width, frame_count, progress_callback)
                     
     batched_cond = BatchedConditioning(
-        groups={},
         execution_order=["positive", "negative"]    # TODO: generalize this order based on index rather than group_name
     )
     for cond in cond_list: batched_cond.set_cond(cond)

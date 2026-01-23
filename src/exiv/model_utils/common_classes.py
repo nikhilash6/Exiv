@@ -3,7 +3,7 @@ from torch import Tensor
 
 from typing import Any, Callable, List, Tuple, Optional, Union, Dict
 from dataclasses import dataclass, field
-
+from collections import defaultdict
 
 from ..utils.device import VRAM_DEVICE
 from ..utils.file import MediaProcessor
@@ -243,7 +243,7 @@ class Conditioning:
     @classmethod
     def from_json(cls, data: dict) -> Optional['Conditioning']:
         try:
-            group = data.get("group", "positive")
+            group = data["group_name"]
             # main conditioning data
             content = data.get("input_metadata")
             if content is None: 
@@ -271,7 +271,7 @@ class Conditioning:
                         ))
             
             out = cls(
-                group=group,
+                group_name=group,
                 data=None, # will be processed later
                 input_metadata=content,
                 timestep_range=tuple(t_range),
@@ -481,4 +481,7 @@ class BatchedConditioning:
         self.execution_order = order
         
     def get_groups_in_order(self):
-        return [(name, self.groups[name]) for name in self.execution_order]
+        group_map = defaultdict(list)
+        for c in self.conds:
+            group_map[c.group_name].append(c)
+        return [(name, val) for name, val in group_map.items()]

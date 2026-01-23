@@ -64,9 +64,9 @@ def main(**params):
     if context: context.start_anchor("Preprocessing", steps=6) # 30%
     
     # create a model wrapper
-    # cur_model = "wan21_480p_i2v_fp16_14B.safetensors"
+    cur_model = "wan21_480p_i2v_fp16_14B.safetensors"
     # cur_model = "wan21_1_3B.safetensors"
-    cur_model = "wan22_5B_ti2v_fp16"
+    # cur_model = "wan22_5B_ti2v_fp16"
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
     wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
     apply_hook_json(wan_dit_model, hooks)
@@ -133,9 +133,10 @@ def main(**params):
     
     return {"1": output_paths[0]}
 
-DEFAULT_CONDS = get_dummy_cond(positive="a dog running the park")
+DEFAULT_CONDS = get_dummy_cond() # positive="a dog running the park")
 DEFAULT_HOOKS = get_dummy_hook(enable_step_caching=True)
-DEFAULT_LATENT = get_dummy_latent(img_path_list=["./tests/test_utils/assets/media/dog_realistic.jpg"])
+# DEFAULT_LATENT = get_dummy_latent(img_path_list=["./tests/test_utils/assets/media/dog_realistic.jpg"])
+DEFAULT_LATENT = get_dummy_latent()
 app = App(
     name="Text to Video",
     inputs={
@@ -149,10 +150,10 @@ app = App(
             default=KSamplerType.EULER.value,),
         'scheduler_name': Input(label="Scheduler Name", type="select", options=SchedulerType.value_list(), \
             default=SchedulerType.SIMPLE.value,),
-        'height': Input(label="Height", type="number", default=480),
-        'width': Input(label="Width", type="number", default=832),
-        # 'height': Input(label="Height", type="number", default=512),
-        # 'width': Input(label="Width", type="number", default=512),
+        # 'height': Input(label="Height", type="number", default=480),
+        # 'width': Input(label="Width", type="number", default=832),
+        'height': Input(label="Height", type="number", default=512),
+        'width': Input(label="Width", type="number", default=512),
         'frame_count': Input(label="Frame Count", type="number", default=81),
     },
     outputs=[Output(id=1, type=AppOutputType.VIDEO.value)],
