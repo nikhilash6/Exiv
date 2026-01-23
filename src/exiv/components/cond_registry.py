@@ -8,10 +8,10 @@ from exiv.utils.common import fix_frame_count
 from exiv.utils.file import MediaProcessor
 from exiv.utils.tensor import common_upscale
 
-from ..components.text_vision_encoder.common import TextEncoderOutput, VisionEncoderOutput
-from ..components.text_vision_encoder.encoder_base import VisionEncoder
-from ..components.text_vision_encoder.text_encoder import TextPipeline, create_text_pipeline
-from ..components.text_vision_encoder.vision_encoder import create_vision_encoder
+from .text_vision_encoder.common import TextEncoderOutput, VisionEncoderOutput
+from .text_vision_encoder.encoder_base import VisionEncoder
+from .text_vision_encoder.text_encoder import TextPipeline, create_text_pipeline
+from .text_vision_encoder.vision_encoder import create_vision_encoder
 from ..utils.device import MemoryManager
 from ..model_utils.common_classes import AuxCondType, BatchedConditioning, Conditioning, ConditioningType, Latent, ModelWrapper
 

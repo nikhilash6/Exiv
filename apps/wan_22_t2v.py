@@ -6,7 +6,7 @@ os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 import torch
 from torch import Tensor
 
-from exiv.components.cond_preprocess import get_text_embeddings, get_vision_embeddings
+from exiv.components.cond_registry import get_text_embeddings, get_vision_embeddings
 from exiv.components.text_vision_encoder.vision_encoder import create_vision_encoder
 from exiv.utils.tensor import common_upscale
 from exiv.components.text_vision_encoder.common import TextEncoderOutput, VisionEncoderOutput

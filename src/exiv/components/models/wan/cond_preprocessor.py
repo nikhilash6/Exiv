@@ -7,9 +7,9 @@ from ....model_utils.model_mixin import ModelArchConfig
 from ....utils.device import VRAM_DEVICE
 from ....utils.tensor import common_upscale
 from ...enum import Model, VAEType
-from ....components.cond_preprocess import get_image_tensor, get_text_embeddings, get_vision_embeddings, register_preprocessor
-from ....components.text_vision_encoder.common import TextEncoderOutput, VisionEncoderOutput
-from ....components.vae.base import VAEBase, get_vae
+from ...cond_registry import get_image_tensor, get_text_embeddings, get_vision_embeddings, register_preprocessor
+from ...text_vision_encoder.common import TextEncoderOutput, VisionEncoderOutput
+from ...vae.base import VAEBase, get_vae
 from ....model_utils.common_classes import AuxCondType, BatchedConditioning, Conditioning, Latent, ModelWrapper
 from ....utils.common import fix_frame_count, null_func
 

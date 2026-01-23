@@ -6,7 +6,7 @@ import json
 from typing import List
 
 from exiv.components.enum import KSamplerType, SchedulerType, TextEncoderType, VAEType, VisionEncoderType
-from exiv.components.cond_preprocess import get_text_embeddings, get_vision_embeddings
+from exiv.components.cond_registry import get_text_embeddings, get_vision_embeddings
 from exiv.components.latent_format import LatentFormat
 from exiv.components.models.wan.constructor import get_wan_instance
 from exiv.components.models.wan.main import Wan21ModelArchConfig

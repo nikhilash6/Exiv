@@ -10,7 +10,7 @@ from typing import List
 
 from exiv.utils.device import VRAM_DEVICE
 
-from .cond_processor import is_text_model, is_img_model, Wan21ModelArchConfig, Wan22ModelArchConfig
+from .cond_preprocessor import is_text_model, is_img_model, Wan21ModelArchConfig, Wan22ModelArchConfig
 from ...enum import Model, ModelType
 from ...attention import optimized_attention
 from ...positional_embeddings import EmbedND, apply_rope
