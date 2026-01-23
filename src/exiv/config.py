@@ -25,6 +25,7 @@ class AppConfig:
         
         self.disable_mmap = self._get_bool_val(os.getenv("disable_mmap", "0"))
         self.always_safe_load = self._get_bool_val(os.getenv("safe_load", "1"))
+        self.auto_download = self._get_bool_val(os.getenv("auto_download", "1"))
         
         self.use_multi_stream = self._get_bool_val(os.getenv("use_multi_stream", "1"))
         
@@ -51,7 +52,10 @@ class AppConfig:
             self.logging_level = self._get_logging_level(metadata["log_level"])
         
         if "disable_mmap" in metadata:
-             self.disable_mmap =  self._get_bool_val(str(metadata["disable_mmap"]).lower())
+            self.disable_mmap =  self._get_bool_val(str(metadata["disable_mmap"]).lower())
+             
+        if "auto_download" in metadata:
+            self.auto_download = self._get_bool_val(metadata["auto_download"])
              
     @property
     def loading_mode(self):
