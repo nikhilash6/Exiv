@@ -288,9 +288,9 @@ class VisionEncoder(ModelMixin):
         
         # setting defaults
         # NOTE: defaults are from OpenAI's original CLIP impl.
-        size = self.config.get("image_size", 224)
-        mean = self.config.get("image_mean", [0.48145466, 0.4578275, 0.40821073])
-        std = self.config.get("image_std", [0.26862954, 0.26130258, 0.27577711])
+        size = getattr(self.config, "image_size", 224)
+        mean = getattr(self.config, "image_mean", [0.48145466, 0.4578275, 0.40821073])
+        std = getattr(self.config, "image_std", [0.26862954, 0.26130258, 0.27577711])
         
         # IMPORTANT: need the image here in B,H,W,C
         image = image.permute(0, 2, 3, 1)

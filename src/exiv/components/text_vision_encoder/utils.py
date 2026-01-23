@@ -1,4 +1,3 @@
-from pathlib import Path
 import torch
 from torch import Tensor
 
@@ -6,7 +5,7 @@ import re
 import os
 import safetensors
 
-from ...utils.device import OFFLOAD_DEVICE, VRAM_DEVICE, ProcDevice
+from ...utils.device import OFFLOAD_DEVICE, VRAM_DEVICE
 from ...utils.file import ensure_model_availability
 from ...utils.logging import app_logger
 

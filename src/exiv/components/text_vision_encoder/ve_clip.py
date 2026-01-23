@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as T
 
-from .ve_config import CLIPViTHConfig, CLIPViTLConfig, CLIPVitLlavaConfig
+from .ve_config import CLIPViTHConfig, CLIPViTLConfig, CLIPVitLlavaConfig, VisionConfig
 from .common import VisionEncoderOutput
 from .encoder_base import VisionEncoder
 from ..attention import optimized_attention
@@ -116,20 +116,20 @@ class CLIPVisionEmbeddings(torch.nn.Module):
         return embeds + cast_like_reference(self.position_embedding.weight, embeds)
 
 class CLIPVision(torch.nn.Module):
-    def __init__(self, config_dict):
+    def __init__(self, config_dict: VisionConfig):
         super().__init__()
-        num_layers = config_dict["num_hidden_layers"]
-        embed_dim = config_dict["hidden_size"]
-        heads = config_dict["num_attention_heads"]
-        intermediate_size = config_dict["intermediate_size"]
-        intermediate_activation = config_dict["hidden_act"]
-        model_type = config_dict["model_type"]
+        num_layers = config_dict.num_hidden_layers
+        embed_dim = config_dict.hidden_size
+        heads = config_dict.num_attention_heads
+        intermediate_size = config_dict.intermediate_size
+        intermediate_activation = config_dict.hidden_act
+        model_type = config_dict.model_type
 
         self.embeddings = CLIPVisionEmbeddings(
             embed_dim, 
-            config_dict["num_channels"], 
-            config_dict["patch_size"], 
-            config_dict["image_size"], 
+            config_dict.num_channels,
+            config_dict.patch_size,
+            config_dict.image_size,
             model_type=model_type,
         )
         if model_type == "siglip_vision_model":
@@ -183,7 +183,7 @@ class CLIPViTL(VisionEncoder):
         self.config = self._get_config()
         
         self.vision_model = CLIPVision(self.config)
-        self.visual_projection = nn.Linear(self.config["hidden_size"], self.config["projection_dim"], bias=False)
+        self.visual_projection = nn.Linear(self.config.hidden_size, self.config.projection_dim, bias=False)
         self.multi_modal_projector = None
         self.return_all_hidden_states = False
         
@@ -218,7 +218,7 @@ class CLIPViTH(VisionEncoder):
         self.config = self._get_config()
         
         self.vision_model = CLIPVision(self.config)
-        self.visual_projection = nn.Linear(self.config["hidden_size"], self.config["projection_dim"], bias=False)
+        self.visual_projection = nn.Linear(self.config.hidden_size, self.config.projection_dim, bias=False)
         self.multi_modal_projector = None
         self.return_all_hidden_states = False
         
@@ -248,7 +248,7 @@ class CLIPVitLlava(CLIPViTL):
         
         self.vision_model = CLIPVision(self.config)
         self.visual_projection = lambda a: a
-        self.multi_modal_projector = LlavaProjector(self.config["hidden_size"], 4096)
+        self.multi_modal_projector = LlavaProjector(self.config.hidden_size, 4096)
         self.return_all_hidden_states = False
 
     def _get_config(self):

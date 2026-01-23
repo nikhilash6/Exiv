@@ -32,6 +32,7 @@ def load_apps_from_directory(directory: str = "apps"):
         app_logger.warning(f"No 'apps' folder found at {apps_path}")
         return
 
+    sys.path.append(apps_path)
     app_logger.debug(f"Scanning for apps in: {apps_path}")
     py_files = glob(os.path.join(apps_path, "*.py"))
 

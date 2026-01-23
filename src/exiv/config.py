@@ -19,7 +19,7 @@ class AppConfig:
 
         # by default going with low_vram, if all three are provided 
         # then they will be prioritized in this order -> no_oom -> low_vram -> normal
-        self.no_oom = self._get_bool_val(os.getenv("low_vram", "0"))
+        self.no_oom = self._get_bool_val(os.getenv("no_oom", "0"))
         self.low_vram = self._get_bool_val(os.getenv("low_vram", "1"))
         self.normal_load = self._get_bool_val(os.getenv("normal_load", "0"))
         
