@@ -7,11 +7,13 @@ from ..utils.enum import ExtendedEnum
 from ..utils.logging import app_logger
 
 # these are high level functionality that directly maps to the 'enable_***' method
-# a single functionality can be selecting b/w multiple hooks, e.g. step caching
+# a single functionality can be selecting b/w multiple hooks (e.g. step caching)
+# or no hook at all (e.g. lora)
 class FeatureType(ExtendedEnum):
     SLIDING_CONTEXT = "sliding_context"
     STEP_CACHING = "step_caching"
     EFFICIENT_LOADING = "efficient_loading"
+    LORA = "lora"
     
 class HookLocation(ExtendedEnum):
     FORWARD = "forward"                # module forward
