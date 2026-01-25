@@ -1,3 +1,4 @@
+import weakref
 import torch
 from torch import nn, Tensor
 
@@ -57,9 +58,9 @@ class ModelHook:
 # this creates a lookup table coupled with a doubly linked list, that has O(1) lookup and update
 class HookRegistry:
     
-    def __init__(self, module_ref: torch.nn.Module) -> None:
+    def __init__(self, module: Any) -> None:
         self.hooks_lookup: Dict[str, ModelHook] = {}    # hook_type, hook obj
-        self._module_ref = module_ref
+        self._module_ref = weakref.ref(module)
         
         self.head = ModelHook()     # dummy head and tail
         self.tail = ModelHook()
@@ -67,6 +68,10 @@ class HookRegistry:
         self.tail.prev_hook = self.head
         
         self._cached_wrappers = {}     # cache by location
+        
+    @property
+    def module(self):
+        return self._module_ref()
         
     def remove_hook(self, hook_type: str, recurse: bool = True) -> None:
         hook = self.hooks_lookup.get(hook_type, None)
@@ -81,7 +86,7 @@ class HookRegistry:
         self._cached_forward = None
 
         if recurse:
-            for module_name, module in self._module_ref.named_modules():
+            for module_name, module in self.module.named_modules():
                 if module_name == "":
                     continue
                 if hasattr(module, "hook_registry"):
@@ -135,7 +140,7 @@ class HookRegistry:
         wrapped_fn = original_fn
         def create_new_wrap(hook, og_fn):
             def new_call(*args, **kwargs):
-                return hook.execute(self._module_ref, og_fn, *args, **kwargs)
+                return hook.execute(self.module, og_fn, *args, **kwargs)
             return new_call
         
         for hook in sorted_hooks:

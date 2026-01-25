@@ -62,38 +62,59 @@ class FP8ScaledQuantizer(Quantizer):
                 weight_fp8 = weight_scaled.clamp(-448.0, 448.0).to(torch.float8_e4m3fn)
                 
                 # set weights
-                module.weight.data = weight_fp8.to(target_device)
-                module.scale_weight.data = scale.view(1).to(torch.float32).to(target_device)
+                module.weight = torch.nn.Parameter(
+                    weight_fp8.to(target_device), 
+                    requires_grad=False
+                )
+                module.scale_weight = torch.nn.Parameter(
+                    scale.view(1).to(torch.float32).to(target_device),
+                    requires_grad=False
+                )
             
             # CASE B: loading pre-quant fp8_e4m3fn
             elif param_value.dtype == torch.float8_e4m3fn:
-                module.weight.data = param_value.to(target_device)
+                module.weight = torch.nn.Parameter(
+                    param_value.to(target_device), 
+                    requires_grad=False
+                )
                 scale_key = param_name.replace(".weight", ".scale_weight")
                 if scale_key not in state_dict:
                     app_logger.warning(f"Warning: Loaded FP8 weight for {param_name} but found no corresponding scale_weight! Defaulting to 1.0 (Output will likely be wrong).")
                     module.scale_weight.data.fill_(1.0)
+                else:
+                    scale_val = state_dict[scale_key]
+                    module.scale_weight = torch.nn.Parameter(
+                        scale_val.to(target_device),
+                        requires_grad=False
+                    )
             
             # CASE C: loading pre-quant fp8_e5m2 
             elif param_value.dtype == torch.float8_e5m2:
                 app_logger.debug(f"Converting {param_name} to E5M2 in a hacky way")
-                module.weight.data = param_value.to(target_device)
                 scale_key = param_name.replace(".weight", ".scale_weight")
-                if scale_key not in state_dict:
-                    app_logger.debug(f"Converting {param_name} to E5M2 in a hacky way")
-                    module.scale_weight.data.fill_(1.0)
-                    old_scale = 1.0
-                else:
-                    old_scale = state_dict[scale_key].to(torch.float32)
-                w_e4m3, s_fp32 = convert_e5m2_to_e4m3(module.weight.data, old_scale)
-                module.weight.data = w_e4m3.to(target_device)
-                module.scale_weight.data = s_fp32.view(1).to(target_device)
+                old_scale = state_dict[scale_key].to("cpu", dtype=torch.float32) if scale_key in state_dict else 1.0
+                w_e4m3, s_fp32 = convert_e5m2_to_e4m3(param_value.to("cpu"), old_scale)
+                module.weight = torch.nn.Parameter(
+                    w_e4m3.to(target_device), 
+                    requires_grad=False
+                )
+                module.scale_weight = torch.nn.Parameter(
+                    s_fp32.view(1).to(target_device),
+                    requires_grad=False
+                )
             
         elif tensor_name == "scale_weight":
-             module.scale_weight.data = param_value.to(target_device)
+            module.scale_weight = torch.nn.Parameter(
+                 param_value.to(device=target_device, dtype=module.scale_weight.dtype),
+                 requires_grad=False
+             )
 
         elif tensor_name == "bias":
             if param_value is not None:
-                module.bias.data = param_value.to(target_device)
+                module.bias = torch.nn.Parameter(
+                    param_value.to(device=target_device, dtype=module.bias.dtype),
+                    requires_grad=False
+                )
                 
                 
 def convert_e5m2_to_e4m3(t_e5m2, old_scale_fp32):

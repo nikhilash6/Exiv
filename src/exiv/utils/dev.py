@@ -143,6 +143,84 @@ def print_zombie(model_type_name):
         )
         print("--- LEAK GRAPH SAVED to 'zombie_model_leak.png'. Open this file to see the leak. ---")
 
+def find_who_is_holding_class(target_class_name: str):
+    """
+    Scans memory for ANY instance of a class named `target_class_name` 
+    and reports who is holding it.
+    """
+    import gc
+    import inspect
+    from types import ModuleType, FrameType, CellType, FunctionType
+    
+    print(f"\n🔎 Scanning memory for instances of '{target_class_name}'...")
+    
+    # 1. Find all instances of this class currently alive in memory
+    # We use a generator to avoid creating a new list that holds strong references
+    found_objs = [obj for obj in gc.get_objects() if type(obj).__name__ == target_class_name]
+    
+    if not found_objs:
+        print(f"✅ Clean! No instances of '{target_class_name}' found in memory.\n")
+        return
+
+    print(f"⚠️  Found {len(found_objs)} instance(s) of '{target_class_name}'! Analyzing references...\n")
+
+    # 2. Analyze who is holding each instance
+    for i, obj in enumerate(found_objs):
+        obj_id = id(obj)
+        print(f"--- [Instance #{i+1}] {target_class_name} @ {hex(obj_id)} ---")
+        
+        referrers = gc.get_referrers(obj)
+        found_refs = 0
+        
+        for ref in referrers:
+            # Ignore the 'found_objs' list itself (Observer Effect)
+            if ref is found_objs:
+                continue
+            # Ignore current stack frame
+            if inspect.isframe(ref):
+                continue
+                
+            found_refs += 1
+            
+            # --- CASE A: Dictionary ---
+            if isinstance(ref, dict):
+                if "__name__" in ref and "__doc__" in ref and "__package__" in ref:
+                    print(f"👉 [GLOBAL SCOPE] Module '{ref.get('__name__')}'")
+                elif "self" in ref or "model" in ref:
+                     print(f"👉 [LOCALS] Function locals (Keys: {list(ref.keys())[:5]}...)")
+                else:
+                    # Check if it's an object's __dict__
+                    owners = [x for x in gc.get_referrers(ref) if hasattr(x, "__dict__") and x.__dict__ is ref]
+                    if owners:
+                        print(f"👉 [ATTRIBUTE] Inside object of type '{type(owners[0]).__name__}'")
+                    else:
+                        print(f"👉 [DICT] Raw dictionary (Keys: {list(ref.keys())[:3]}...)")
+
+            # --- CASE B: Closure Cell (The Zombie Maker) ---
+            elif isinstance(ref, CellType):
+                print(f"👉 [CLOSURE CELL] Captured inside a function closure.")
+                cell_refs = gc.get_referrers(ref)
+                funcs = [f for f in cell_refs if inspect.isfunction(f)]
+                if funcs:
+                    print(f"    ↳ CAPTURED BY FUNCTION: '{funcs[0].__name__}'")
+
+            # --- CASE C: Bound Method ---
+            elif inspect.ismethod(ref):
+                 print(f"👉 [BOUND METHOD] '{ref.__name__}' (holds instance strongly)")
+            
+            # --- CASE D: Containers ---
+            elif isinstance(ref, (list, tuple)):
+                print(f"👉 [CONTAINER] Inside a {type(ref).__name__} of length {len(ref)}")
+
+            # --- CASE E: Custom Objects ---
+            elif hasattr(ref, "__class__"):
+                print(f"👉 [OBJECT] Property of '{type(ref).__name__}' object")
+            
+            else:
+                print(f"👉 [UNKNOWN] {type(ref)}")
+
+        print(f"--- Found {found_refs} external references ---\n")
+
 def print_tensor_size(t: Tensor):
     num_elements = t.numel()
     element_size = t.element_size()  # Size in bytes (e.g., float32 is 4)

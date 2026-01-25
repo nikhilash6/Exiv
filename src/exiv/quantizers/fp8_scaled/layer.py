@@ -2,12 +2,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from ...utils.device import OFFLOAD_DEVICE
+
 class FP8ScaledLinear(nn.Module):
     def __init__(self, in_features, out_features, bias=True, device=None, dtype=None):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-        
         self.weight = nn.Parameter(
             torch.empty((out_features, in_features), device=device, dtype=torch.float8_e4m3fn),
             requires_grad=False

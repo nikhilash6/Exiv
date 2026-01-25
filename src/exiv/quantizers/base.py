@@ -240,7 +240,7 @@ class SDNQQuantizerConfig(QuantizationConfig):
         return self.weights_dtype
 
 class Quantizer(ABC):
-    def __init__(self, quantization_config: QuantizationConfig, **kwargs):
+    def __init__(self, quantization_config: QuantizationConfig = None, **kwargs):
         self.quantization_config = quantization_config
         self.kwargs = kwargs
 
