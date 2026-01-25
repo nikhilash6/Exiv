@@ -14,7 +14,7 @@ class FP8ScaledLinear(nn.Module):
             requires_grad=False
         )
         self.scale_weight = nn.Parameter(
-            torch.ones(1, device=device, dtype=torch.float32),
+            torch.ones((), device=device, dtype=torch.float32),
             requires_grad=False
         )
         self.bias = nn.Parameter(

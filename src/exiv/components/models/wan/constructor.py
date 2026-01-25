@@ -73,7 +73,8 @@ def get_wan_instance(
     model_path,
     download_url,
     force_load_mode=LOADING_MODE.LOW_VRAM.value,
-    force_dtype=None
+    force_dtype=None,
+    quant_type=None,
 ):
     model_path = ensure_model_availability(model_path, download_url)
     state_dict = get_state_dict(model_path)
@@ -81,7 +82,7 @@ def get_wan_instance(
     del state_dict
     
     dtype = force_dtype or dict_dtype
-    wan_dit_model = cls(**config, force_load_mode=force_load_mode, dtype=dtype)
+    wan_dit_model = cls(**config, force_load_mode=force_load_mode, dtype=dtype, quant_type=quant_type)
     wan_dit_model.model_arch_config = model_arch_config
     wan_dit_model.load_model(model_path=model_path, download_url=download_url)
     return wan_dit_model

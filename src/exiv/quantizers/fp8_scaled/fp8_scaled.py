@@ -99,7 +99,7 @@ class FP8ScaledQuantizer(Quantizer):
                     requires_grad=False
                 )
                 module.scale_weight = torch.nn.Parameter(
-                    s_fp32.view(1).to(target_device),
+                    s_fp32.to(target_device),
                     requires_grad=False
                 )
             

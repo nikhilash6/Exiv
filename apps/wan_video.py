@@ -13,6 +13,7 @@ from exiv.components.vae.base import get_vae
 from exiv.model_patching.common import apply_hook_json
 from exiv.model_utils.common_classes import Conditioning, Latent
 from exiv.model_utils.common_classes import ModelWrapper
+from exiv.quantizers.base import QuantType
 from exiv.server.app_core import App, AppOutputType, Input, Output
 from exiv.utils.common import null_func
 from exiv.utils.device import MemoryManager
@@ -57,10 +58,12 @@ def main(**params):
     
     # create a model wrapper
     # cur_model = "wan21_480p_i2v_fp16_14B.safetensors"
+    cur_model = "wan21_480p_i2v_fp8_scaled_14B.safetensors"
     # cur_model = "wan21_1_3B.safetensors"
-    cur_model = "wan22_5B_ti2v_fp16"
+    # cur_model = "wan22_5B_ti2v_fp16"
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
-    wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
+    quant_type = QuantType.FP8_SCALED
+    wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16, quant_type=quant_type)
     apply_hook_json(wan_dit_model, hooks)
     model_wrapper = ModelWrapper(model=wan_dit_model)
     
