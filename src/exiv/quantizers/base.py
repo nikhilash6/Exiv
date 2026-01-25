@@ -265,6 +265,7 @@ class QuantType(ExtendedEnum):
     BNB_INT8    = "bnb_int8"
     GGUF        = "gguf"
     SDNQ        = "sdnq"
+    FP8_SCALED  = "fp8_scaled"
 
 
 def load_quant_config(file_path: str, key: str = "quant_config_json"):
@@ -293,6 +294,7 @@ def load_quant_config(file_path: str, key: str = "quant_config_json"):
 def get_quantizer(quant_type: QuantType, quant_config: Dict | None = None) -> Quantizer:
     from .bnb.bnb import BnB4BitQuantizer, BnB8BitQuantizer
     from .sdnq.sdnq import SDNQQuantizerRepack
+    from .fp8_scaled.fp8_scaled import FP8ScaledQuantizer
     
     quantizer = None
     if quant_type == None: return quantizer
@@ -309,10 +311,14 @@ def get_quantizer(quant_type: QuantType, quant_config: Dict | None = None) -> Qu
         quantizer = quant_cls(quantization_config=BNBQuantizerConfig(**quant_config))
         
     elif quant_type == QuantType.SDNQ:
+        # TODO: use load_quant_config for fetching quant_config
         if quant_config is None:
             raise Exception("Model safetensors doesn't contain quant config in the metadata. Aborting operation.")
         return SDNQQuantizerRepack(quantization_config=SDNQQuantizerConfig(**quant_config))
-        
+    
+    elif quant_type == QuantType.FP8_SCALED:
+        return FP8ScaledQuantizer()
+
     else:
         raise NotImplementedError(f"{quant_type.value} not implemented yet")
         
