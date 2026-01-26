@@ -37,10 +37,6 @@ class ModuleMeta(type(nn.Module)):
                 instance = super().__call__(*args, **kwargs)
                 quantizer: Quantizer = get_quantizer(quant_type=quant_type, quant_config=quant_config)
                 instance.quantizer = quantizer
-                if quantizer is not None:
-                    quantizer.validate_environment()
-                    quantizer.process_model_before_weight_loading(model=instance)
-                
                 if isinstance(instance, ModelMixin):    # mainly for safety
                     instance.force_load_mode = getattr(instance, "force_load_mode", None) or force_load_mode
                     if not getattr(instance, 'dtype', None):
@@ -188,6 +184,23 @@ class ModelMixin(nn.Module, LoraMixin, ConditioningMixin, metaclass=ModuleMeta):
             return wrapped_call(*args, **kwargs)
         else:
             return original_call(*args, **kwargs)
+        
+    def _set_quantization(self, model_path):
+        # auto detecting
+        if self.quantizer is None:
+            from ..quantizers.base import detect_quantization_type, get_quantizer, load_quant_config
+            
+            detected_type = detect_quantization_type(model_path)
+            if detected_type:
+                app_logger.info(f"Auto-detected quantization: {detected_type.value}")
+                q_config = load_quant_config(model_path) if hasattr(self, "load_quant_config") else None
+                self.quantizer = get_quantizer(quant_type=detected_type, quant_config=q_config)
+
+        # replacing model layers 
+        if self.quantizer is not None:
+            app_logger.info("Applying quantization patches...")
+            self.quantizer.validate_environment()
+            self.quantizer.process_model_before_weight_loading(model=self)
 
     # code adapted from Huggingface Diffusers
     def load_model(
@@ -201,10 +214,11 @@ class ModelMixin(nn.Module, LoraMixin, ConditioningMixin, metaclass=ModuleMeta):
         assert model_path is not None, "model_path is required"
         # loading everything on the CPU, then modularly offloading to the GPU
         device = ProcDevice.CPU.value
+        
+        self._set_quantization(model_path)
         self.dtype = dtype or self.dtype
         
         model_path = ensure_model_availability(model_path, download_url, force_download)
-        
         state_dict = get_state_dict(model_path)
         model_state_dict = self.state_dict()
         

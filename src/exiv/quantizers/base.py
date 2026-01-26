@@ -267,8 +267,52 @@ class QuantType(ExtendedEnum):
     SDNQ        = "sdnq"
     FP8_SCALED  = "fp8_scaled"
 
+def detect_quantization_type(model_path: str) -> QuantType | None:
+    if not model_path.endswith(".safetensors"):
+        return None
+    try:
+        with safe_open(model_path, framework="pt") as f:
+            keys = f.keys()
+            # BNB signatures
+            for key in keys:
+                if "bitsandbytes__nf4" in key:
+                    return QuantType.BNB_NF4
+                if "bitsandbytes__fp4" in key:
+                    return QuantType.BNB_FP4
+                if "bitsandbytes__int8" in key:
+                    return QuantType.BNB_INT8
+                if key.endswith(".SCB"):
+                    return QuantType.BNB_INT8
+                    
+            # SDNQ signatures (NOTE: brittle code)
+            # SDNQ decomposes layers into SVD components (up/down)
+            for key in keys:
+                if key.endswith(".svd_up") or key.endswith(".svd_down"):
+                    return QuantType.SDNQ
+
+            # FP8 scaled signatures
+            for key in keys:
+                if key.endswith(".scale_weight"):
+                    weight_key = key.replace(".scale_weight", ".weight")
+                    if weight_key in keys:
+                        slice_obj = f.get_slice(weight_key)
+                        try:
+                            # loading only the first element (fast, zero-copy mmap)
+                            sample_tensor = slice_obj[:1] 
+                            dtype_str = str(sample_tensor.dtype)
+                            
+                            if "float8" in dtype_str:
+                                return QuantType.FP8_SCALED
+                        except Exception:
+                            continue
+
+    except Exception as e:
+        app_logger.warning(f"Failed to detect quantization type: {e}")
+    
+    return None
 
 def load_quant_config(file_path: str, key: str = "quant_config_json"):
+    # TODO: NOT in use rn, will complete later
     # loads quant config from safetensors metadata
     
     # NOTE: this type of config loading is specific to this library and model names 

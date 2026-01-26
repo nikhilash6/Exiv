@@ -90,7 +90,7 @@ class FP8ScaledQuantizer(Quantizer):
             
             # CASE C: loading pre-quant fp8_e5m2 
             elif param_value.dtype == torch.float8_e5m2:
-                app_logger.debug(f"Converting {param_name} to E5M2 in a hacky way")
+                app_logger.debug(f"Converting {param_name} to E4M3 in a hacky way")
                 scale_key = param_name.replace(".weight", ".scale_weight")
                 old_scale = state_dict[scale_key].to("cpu", dtype=torch.float32) if scale_key in state_dict else 1.0
                 w_e4m3, s_fp32 = convert_e5m2_to_e4m3(param_value.to("cpu"), old_scale)

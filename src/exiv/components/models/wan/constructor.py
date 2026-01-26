@@ -15,7 +15,7 @@ def detect_wan_params(state_dict):
     config["out_dim"] = state_dict["head.head.weight"].shape[0] // 4 # Patch size 2x2=4
     config["ffn_dim"] = state_dict["blocks.0.ffn.0.weight"].shape[0]
     
-    dtype = state_dict["head.modulation"].dtype
+    dtype = state_dict["blocks.0.ffn.0.weight"].dtype
     
     # 2. Depth (Scanning keys for the highest block index)
     max_block = 0
