@@ -58,12 +58,12 @@ def main(**params):
     
     # create a model wrapper
     # cur_model = "wan21_480p_i2v_fp16_14B.safetensors"
-    cur_model = "wan21_480p_i2v_fp8_scaled_14B.safetensors"
+    # cur_model = "wan21_480p_i2v_fp8_scaled_14B.safetensors"
     # cur_model = "wan21_1_3B.safetensors"
-    # cur_model = "wan22_5B_ti2v_fp16"
+    cur_model = "wan22_5B_ti2v_fp16"
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
-    quant_type = QuantType.FP8_SCALED
-    wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16, quant_type=quant_type)
+    # quant_type = QuantType.FP8_SCALED
+    wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16) #, quant_type=quant_type)
     apply_hook_json(wan_dit_model, hooks)
     model_wrapper = ModelWrapper(model=wan_dit_model)
     

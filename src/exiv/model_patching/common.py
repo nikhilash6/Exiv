@@ -68,3 +68,22 @@ def apply_hook_json(model, hooks_json: Optional[str]):
             hook_method(model, **hook["kwarg_data"])
     except Exception as e:
         raise RuntimeError(f"Unable to apply hook, {str(e)}")
+
+def should_preload(model, module):
+    # we only preload modules that are either leaves or they have params that needs to be moved as well
+    return model.is_leaf_module(module) or model.has_orphan_params(module)
+
+def profile_model_layers(model: nn.Module):
+    """
+    Returns a list of module tuple sorted by their size
+    output: [(module_size, module_name, module)], total_model_size
+    """
+    module_by_size = []     # contains modules sorted by size (asc)
+    total_model_size = 0
+    for m_name, m in model.named_modules():
+        if m is model or not should_preload(model, m): continue
+        total_model_size += (m_size:=model._module_size(m))
+        module_by_size.append((m_size, m_name, m))
+    
+    module_by_size.sort(key=lambda x: x[0])
+    return module_by_size, total_model_size
