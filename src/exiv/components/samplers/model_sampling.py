@@ -6,7 +6,7 @@ from typing import Dict, List
 
 from .utils import normalize_seed
 from .scheduler_types import calculate_sigmas
-from .sampling_helpers import accumulate_output, batch_compatible_conds, filter_active_conds, prepare_model_conds
+from .sampling_helpers import accumulate_output, batch_compatible_conds, determine_max_batch_size, filter_active_conds, prepare_model_conds
 from ..enum import DISCARD_PENULTIMATE_SIGMA_SAMPLERS, KSamplerType, SamplerType, SchedulerType
 from .sampler_impl import Sampler, ksampler_factory
 from ...utils.tensor import fix_empty_latent_channels, prepare_noise
@@ -221,11 +221,12 @@ def compute_batched_output(
 
     active_batched_conds = filter_active_conds(batched_conds, timestep)
     registry = HookRegistry.get_hook_registry(wrapped_model.model)
+    max_bs = determine_max_batch_size(wrapped_model.model, x_in.shape)
     execution_batch_list: List[ExecutionBatch] = batch_compatible_conds(
         active_batched_conds, 
         x_in, 
         timestep,
-        mem_calc_fn=partial(get_mem_usage, wrapped_model.model)
+        max_bs
     )
 
     # **** main model run ****
