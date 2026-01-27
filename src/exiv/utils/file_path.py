@@ -49,6 +49,22 @@ DOWNLOAD_MAP = {
         "type": "checkpoint",
         "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors?download=true"
     },
+    "wan22_i2v_high_noise_14B_fp16.safetensors": {
+        "type": "checkpoint",
+        "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp16.safetensors?download=true"
+    },
+    "wan22_i2v_high_noise_14B_fp8_scaled.safetensors": {
+        "type": "checkpoint",
+        "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors?download=true"
+    },
+    "wan22_i2v_low_noise_14B_fp16.safetensors": {
+        "type": "checkpoint",
+        "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp16.safetensors?download=true"
+    },
+    "wan22_i2v_low_noise_14B_fp8_scaled.safetensors": {
+        "type": "checkpoint",
+        "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors?download=true"
+    },
     "wan_2_1_vae.safetensors": {
         "type": "vae",
         "url": "https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-720P-Diffusers/resolve/main/vae/diffusion_pytorch_model.safetensors?download=true"

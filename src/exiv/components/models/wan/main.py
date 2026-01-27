@@ -649,3 +649,7 @@ class Wan22Model(Wan21Model):
         
     def scale_latent_inpaint(self, sigma, noise, latent_image, **kwargs):
         return latent_image
+    
+    def get_model_sampling_obj(self):
+        shift = 5 if self.model_type == Model.WAN22_14B_TI2V.value else 8
+        return get_model_sampling(ModelType.FLOW, {"sampling_settings": {"shift": shift}})

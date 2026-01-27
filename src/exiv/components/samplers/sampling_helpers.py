@@ -184,6 +184,7 @@ def set_max_bs_dict(model, shape, max_bs):
     cached_bs_dict = getattr(model, 'cached_bs_dict', None)
     if cached_bs_dict is None: cached_bs_dict = {}
     cached_bs_dict[shape] = max_bs
+    setattr(model, 'cached_bs_dict', cached_bs_dict)
 
 def determine_max_batch_size(model: 'ModelMixin', target_shape):
     """

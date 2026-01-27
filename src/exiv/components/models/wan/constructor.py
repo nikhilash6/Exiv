@@ -34,7 +34,10 @@ def detect_wan_params(state_dict):
     if config["out_dim"] == 48:
         cls = Wan22Model
     else:
-        cls = Wan21Model
+        if config["dim"] == 1536 or any('img_emb.proj' in s for s in list(state_dict.keys())):  # wan21 1.3b + wan21 14b
+            cls = Wan21Model
+        else:
+            cls = Wan22Model 
 
     # 4. Type (T2V vs I2V)
     # T2V usually has in_dim=16

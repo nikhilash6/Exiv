@@ -23,24 +23,28 @@ class KSampler:
         self,
         wrapped_model: ModelWrapper,
         seed: int,
-        steps: int,
         cfg: float,
         sampler_name: str,
         scheduler_name: str,
         batched_conditioning: BatchedConditioning,
         latent_image: Latent,
+        end_step: int = None,
+        start_step: int = 0,
+        total_steps: int = None,
         denoise: float = 1.0,
         device = None,
     ):
         assert sampler_name in KSamplerType.value_list() + SamplerType.value_list(), f"sampler {sampler_name} not supported"
         assert scheduler_name in SchedulerType.value_list(), f"scheduler {scheduler_name} not supported"
         assert denoise >= 0.0 and denoise <= 1.0, f"denoise {denoise} out of range, should be between 0 and 1"
+        assert total_steps, f"Invalid total_steps: {total_steps}"
+        if end_step is None: end_step = total_steps
+        assert 0 <= start_step < end_step <= total_steps, f"Invalid step range: {start_step} to {end_step} (Total: {total_steps})"
         
         self.device = device or VRAM_DEVICE
-        
         self.wrapped_model = wrapped_model
         self.seed = normalize_seed(seed)
-        self.steps = steps
+        self.start_step, self.end_step = start_step, end_step
         self.cfg = cfg 
         self.sampler_name = sampler_name
         self.scheduler_name = scheduler_name
@@ -48,11 +52,11 @@ class KSampler:
         self.latent_image = latent_image
         self.denoise = denoise
         
-        self.set_steps(steps, denoise)
+        self.set_steps(total_steps, denoise)
     
     # or calculate_schedule
     def calculate_sigmas(self):
-        steps = self.steps
+        steps = self.total_steps
         if discard_penultimate:=(self.sampler_name in DISCARD_PENULTIMATE_SIGMA_SAMPLERS):
             steps += 1
         
@@ -61,7 +65,7 @@ class KSampler:
         return sigmas
     
     def set_steps(self, steps, denoise=None):
-        self.steps = steps
+        self.total_steps = steps
         if denoise is None or denoise > 0.9999:
             self.sigmas = self.calculate_sigmas().to(self.device)
         else:
@@ -84,8 +88,8 @@ class KSampler:
             batch_inds = self.latent_image.batch_index
             noise = prepare_noise(latent_image, self.seed, batch_inds)
 
-        # TODO: enable calculation of new sigmas as per vars injected at the runtime
-        # such as last_step, start_step
+        if self.start_step != 0: self.sigmas = self.sigmas[self.start_step:]
+        if self.end_step != self.total_steps: self.sigmas = self.sigmas[:self.end_step + 1]
         
         # main sampling loop
         ksampler_cls_impl = ksampler_factory(self.sampler_name)
@@ -260,5 +264,7 @@ def compute_batched_output(
 
 # NOTE: separated for debugging / testing purposes
 def run_model(model, feed_x, feed_t, **feed_input):
+    # from torch_tracer import TorchTracer
+    # with TorchTracer("./exiv_2.pkl"):
     out = model(feed_x, feed_t, **feed_input)
     return out
