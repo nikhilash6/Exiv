@@ -75,6 +75,8 @@ elif is_xla_available:
 elif is_xpu_available:
     VRAM_DEVICE = ProcDevice.XPU.value
     
+is_fp8_available = is_cuda_available and CUDA_CC >= 89 and hasattr(torch, "float8_e4m3fn")
+
 def is_same_device(first_device, second_device):
     if first_device.type != second_device.type:
         return False
