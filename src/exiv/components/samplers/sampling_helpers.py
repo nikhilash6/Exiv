@@ -4,8 +4,10 @@ from torch import Tensor
 import dataclasses
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from ...utils.device import MemoryManager
+from ...utils.device import RESERVED_MEM, MemoryManager
 from ...utils.logging import app_logger
+from ...model_patching.common import profile_model_layers
+from ...model_utils.helper_methods import estimate_peak_activation_size
 from ...model_utils.common_classes import BatchedConditioning, Conditioning, ExecutionBatch, ModelWrapper
 
 
@@ -106,34 +108,18 @@ def get_structure_size_mb(data) -> float:
         return sum(get_structure_size_mb(v) for v in data)
     return 0.0
 
-def check_oom_safety(
-        cond_len: int, 
-        x_in: Tensor, 
-        mem_calc_fn: Callable
-    ) -> bool:
-    """
-    Mainly for checking if the stacked cond is OOM safe or not
-    """
-    effective_batch_size = x_in.shape[0] * cond_len
-    target_shape = (effective_batch_size,) + x_in.shape[1:]
-    available_mem = MemoryManager.available_memory()
-    if (diff:=available_mem - mem_calc_fn(target_shape)) > 0:
-        return True
-    return False
-
 def break_cond_for_no_oom(cond: Conditioning, x_in: Tensor):
     """
     Breaks the Condition into smaller Conditions that run individually and don't cause OOMs
     """
     # TODO: not implemented yet
-    # use the check_oom_safety method defined above here
     return [cond]
 
 def batch_compatible_conds(
     active_batched_conds: BatchedConditioning,
     x_in: Tensor,
     timestep: Tensor,
-    mem_calc_fn: Callable
+    max_batch_size: int = 1,
 ) -> List[ExecutionBatch]:
 
     # flatten the queue
@@ -161,7 +147,7 @@ def batch_compatible_conds(
             for i, (g, c) in enumerate(work_queue[idx+1:]):
                 # signature matches and the combination is memory safe, then batch them
                 if cur_cond.signature == c.signature and \
-                    check_oom_safety(len(cur_execution_batch.conds) + 1, x_in, mem_calc_fn):
+                    len(cur_execution_batch.conds) + 1 <= max_batch_size:
                     cur_execution_batch.add_cond(c)
                     is_consumed[idx + 1 + i] = True
         
@@ -188,3 +174,55 @@ def accumulate_output(
             weight_acc[group_name] += weight
             
     return out_acc, weight_acc
+
+def get_max_bs_dict(model, shape):
+    if (cached_bs_dict:=getattr(model, 'cached_bs_dict', None)) is not None:
+        if shape in cached_bs_dict: return cached_bs_dict[shape]
+    return None
+
+def set_max_bs_dict(model, shape, max_bs):
+    cached_bs_dict = getattr(model, 'cached_bs_dict', None)
+    if cached_bs_dict is None: cached_bs_dict = {}
+    cached_bs_dict[shape] = max_bs
+
+def determine_max_batch_size(model: 'ModelMixin', target_shape):
+    """
+    Calculates the maximum safe batch size based on VRAM availability
+    Philosophy: 'weights stay', try to pack as much weights on the VRAM as possible
+    """
+    single_item_shape = target_shape[1:]
+    max_bs = get_max_bs_dict(model, single_item_shape)
+    if max_bs is not None: return max_bs
+    
+    available_mem = MemoryManager.available_memory(model.gpu_device) - RESERVED_MEM
+    batch_1_shape = (1, *single_item_shape)
+    act_cost_b1 = estimate_peak_activation_size(model.get_memory_footprint_params(), batch_1_shape)
+    
+    module_by_size, total_model_size = profile_model_layers(model)
+    # if batch 1 activations + largest layer (for swapping) don't fit, we may get OOM
+    min_required = act_cost_b1 + (module_by_size[-1][0] if total_model_size > available_mem else 0)
+    if min_required > available_mem:
+        app_logger.warning("Potential OOM: VRAM insufficient for even Batch Size 1")
+        max_bs = 1
+
+    # if the WHOLE model fits, we check how many more batches we can fit (nomral mode)
+    if (total_model_size + act_cost_b1) <= available_mem:
+        remaining_mem = available_mem - total_model_size
+        max_batch = 1
+        while True:     # iteratively find max batch size
+            next_shape = (max_batch + 1, *single_item_shape)
+            next_cost = estimate_peak_activation_size(model.get_memory_footprint_params(), next_shape)
+            
+            if next_cost > remaining_mem:
+                break
+            max_batch += 1
+        max_bs = max_batch
+
+    # nodel too big (low vram mode)
+    else:
+        max_bs = 1
+        
+    set_max_bs_dict(model, single_item_shape, max_bs)
+    return max_bs
+        
+    

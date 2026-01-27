@@ -3,7 +3,7 @@ import torch
 import weakref
 from typing import Callable, List, Any, Tuple
 
-from .common import prepare_and_cache_cpu_state, restore_cpu_state
+from .common import prepare_and_cache_cpu_state, profile_model_layers, restore_cpu_state, should_preload
 from .hook_registry import FeatureType, HookLocation, HookRegistry, HookType, ModelHook, register_hook_method
 from ..model_utils.helper_methods import estimate_peak_activation_size
 from ..utils.logging import app_logger
@@ -20,10 +20,6 @@ def move_module_or_params(model, module, target_device, module_name=None):
         move_module(model=model, module=module, module_name=module_name, target_device=target_device)
     elif model.has_orphan_params(module):
         move_immediate_params(module=module, device=target_device)
-        
-def should_preload(model, module):
-    # we only preload modules that are either leaves or they have params that needs to be moved as well
-    return model.is_leaf_module(module) or model.has_orphan_params(module)
 
 class EfficientModelLoaderHook(ModelHook):
     """
@@ -136,7 +132,10 @@ def split_model_for_loading(model: 'ModelMixin', target_shape = None):
     MemoryManager.clear_memory()
     loading_mode = getattr(model, 'force_load_mode', None) or global_config.loading_mode
     
-    current_mem_used = 0
+    current_mem_used, f = 0, 0
+    # this determines which modules can be fully loaded permanently on the vram
+    # and which has to be dynamically loaded
+    full_load_modules: List[Tuple[weakref.ref, str]] = []
     act_mb = estimate_peak_activation_size(model.get_memory_footprint_params(), target_shape)
     runtime_mem_usage = max(RESERVED_MEM, act_mb)
     if loading_mode == LOADING_MODE.NO_OOM.value:
@@ -148,53 +147,26 @@ def split_model_for_loading(model: 'ModelMixin', target_shape = None):
             current_mem_used = max(current_mem_used, model._module_size(m)) 
         return [], current_mem_used + runtime_mem_usage
     
-    elif loading_mode == LOADING_MODE.NORMAL_LOAD.value:
-        # normal load, everything should be in full_load
-        full_load: List[Tuple[weakref.ref, str]] = []
-        for m_name, m in model.named_modules():
-            if m is model or not should_preload(model, m):
-                continue
-            # NOTE / TODO: here we are ignoring the weights of the internal params
-            # if those have large weights then this would cause problems with mem calc down the line
-            current_mem_used += model._module_size(m) if model.is_leaf_module(m) else 0
-            full_load.append((weakref.ref(m), m_name))
-        return full_load, current_mem_used + runtime_mem_usage
-    
-    elif loading_mode == LOADING_MODE.LOW_VRAM.value:
-        # this determines which modules can be fully loaded permanently on the vram
-        # and which has to be dynamically loaded
-        full_load_modules: List[Tuple[weakref.ref, str]] = []
+    elif loading_mode in [LOADING_MODE.LOW_VRAM.value, LOADING_MODE.NORMAL_LOAD.value]:
         available_mem = MemoryManager.available_memory(model.gpu_device) - runtime_mem_usage
-        
-        module_by_size = []     # contains modules sorted by size (asc)
-        for m_name, m in model.named_modules():
-            if m is model or not should_preload(model, m):
-                continue
-            module_by_size.append((model._module_size(m), m_name, m))
-        
-        module_by_size.sort(key=lambda x: x[0])
-        
-        # calculating max_after, that gives the max element after the current element
-        # in the sorted module_by_size array
-        sizes = [s for s, _, _ in module_by_size]
-        max_after = [None] * len(sizes)
-        current_max = float('-inf')
-        for i in reversed(range(len(sizes))):
-            max_after[i] = current_max if i < len(sizes) - 1 else None
-            current_max = max(current_max, sizes[i])
-        
-        
-        for (m_size, m_name, m), max_next in zip(module_by_size, max_after):
+        module_by_size, _ = profile_model_layers(model)
+        max_module_size = module_by_size[-1][0]
+        for (m_size, m_name, m) in module_by_size:
             if m_size >= available_mem:
                 raise RuntimeError(f"Single layer mem size of {m_size} exceeds the total available memory of {available_mem}")
             
             current_mem_used += m_size
-            if current_mem_used < available_mem and (max_next is None or max_next < (available_mem - current_mem_used)):
+            if current_mem_used < available_mem and (max_module_size is None or max_module_size < (available_mem - current_mem_used)):
                 # if we can add this to the existing available mem limit + after adding this the next
                 # biggest module can be safely loaded / unloaded, then we fully load this
                 full_load_modules.append((weakref.ref(m), m_name))
             else:
-                break
+                if loading_mode == LOADING_MODE.NORMAL_LOAD.value:
+                    full_load_modules.append((weakref.ref(m), m_name))
+                    if f == 0: 
+                        app_logger.warning(f"Model weights don't completely fit in the VRAM, may lead to OOM. Change to LOW VRAM mode to prevent this.")
+                        f += 1  # just to track that we print this only once
+                else: break
             
         return full_load_modules, current_mem_used + runtime_mem_usage
 

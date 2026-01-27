@@ -3,7 +3,8 @@ import os
 import unittest
 from safetensors.torch import save_file
 
-from exiv.model_utils.lora_mixin import CACHED_MODEL_LORA_KEY_MAP
+from exiv.model_patching.lora_hook import enable_lora_hook
+from exiv.model_utils.lora_mixin import CACHED_MODEL_LORA_KEY_MAP, LoraDefinition
 from tests.test_utils.common import SimpleModel
 from exiv.utils.device import MemoryManager
 
@@ -93,9 +94,8 @@ class TestMultiStepLora(unittest.TestCase):
         steps = 5
         model = LoRASimpleModel()
         model.load_model(self.DUMMY_MODEL_PATH)
-        
-        model.add_lora(self.LORA_PATH, base_strength=1.0)
-        model.setup_lora_schedule(total_steps=steps)
+        lora_def = LoraDefinition(path=self.LORA_PATH)
+        enable_lora_hook(model, lora_def, steps)
 
         dummy_input = torch.ones((1, 1024))
         expected_val = 53687.09
@@ -125,9 +125,10 @@ class TestMultiStepLora(unittest.TestCase):
         schedule_a = [0.0, 0.5, 1.0, 0.5, 0.0]
         schedule_b = [1.0, 1.0, 0.0, 0.0, 1.0]
 
-        model.add_lora(self.LORA_A_PATH, base_strength=schedule_a)
-        model.add_lora(self.LORA_B_PATH, base_strength=schedule_b)
-        model.setup_lora_schedule(total_steps=steps)
+        lora_def = LoraDefinition(path=self.LORA_A_PATH, base_strength=schedule_a)
+        enable_lora_hook(model, lora_def, steps)
+        lora_def = LoraDefinition(path=self.LORA_B_PATH, base_strength=schedule_b)
+        enable_lora_hook(model, lora_def, steps)
 
         dummy_input = torch.ones((1, 1024))
         

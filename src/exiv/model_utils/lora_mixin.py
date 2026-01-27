@@ -2,20 +2,70 @@ import torch
 
 import os
 import mmap
-from typing import List, Union
+from typing import Any, List, Optional, Union
 import struct, json
+from dataclasses import dataclass
 
 from ..utils.logging import app_logger
 
 
 CACHED_MODEL_LORA_KEY_MAP = "_cached_m_l_map"
 
+@dataclass
+class LoraDefinition:
+    path: Optional[str] = None
+    fused_weight: Optional[Any] = None
+    base_strength: Union[float, List[float]] = 1.0  # ideally this should be the complete stepwise strength
+                                                    # expand_strength_schedule is a safety measure of sorts
+    
+    @classmethod
+    def from_json(cls, data):
+        try:
+            return cls(**data)
+        except Exception as e:
+            app_logger.error(f"Failed to load lora definition from json: {data}")
+            raise e
+    
+    @property
+    def name(self):
+        return os.path.splitext(os.path.basename(self.path))[0]
+    
+    def _uniform_stretch(self, strength_input: List, total_steps):
+        # List -> expand, [1, 2, 3] -> [1, 1, 1, 2, 2, 2, 3, 3, 3]
+        src_len = len(strength_input)
+        new_schedule = []
+        inc = src_len / total_steps
+        pos = 0.0
+        
+        for _ in range(total_steps):
+            idx = int(pos)
+            if idx >= src_len: idx = src_len - 1
+            
+            new_schedule.append(strength_input[idx])
+            pos += inc
+        return new_schedule
+    
+    def _end_stretch(self, strength_input: List, total_steps):
+        # [1, 2, 3] -> [1, 2, 3, 3, 3, 3, 3]
+        for _ in range(total_steps - len(strength_input)):
+            strength_input.append(strength_input[-1])
+        return strength_input
+    
+    def expand_strength_schedule(self, total_steps: int):
+        strength_input = self.base_strength
+        if isinstance(strength_input, (float, int)):
+            # single float -> constant schedule
+            self.base_strength = [float(strength_input)] * total_steps
+        else:
+            strength_input = strength_input[:total_steps]
+            self.base_strength = self._end_stretch(strength_input, total_steps)
+
 # TODO: incorporate disable_mmap from the global_config
 # TODO: support multi batch / per frame lora (like frame_1 can have lora_1 applied, frame_2 has lora_2 ..)
 #       - this can be done by passing lora indices to get_combined_delta (will require some other modifications as well)
 class LoraMixin:
     def __init__(self):
-        self.lora_definitions = [] 
+        self.lora_definitions: List[LoraDefinition] = [] 
         self.active_lora_schedule = {}
         self.mmap_cache = {} # {path: {'mm': mmap, 'header': dict, 'offset': int}}
     
@@ -47,12 +97,59 @@ class LoraMixin:
         d = getattr(self, CACHED_MODEL_LORA_KEY_MAP)
         return d.get(key, None)
 
-    def add_lora(self, lora_path: str, base_strength: float = 1.0):
-        self.lora_definitions.append({
-            "name": os.path.splitext(os.path.basename(lora_path))[0],
-            "path": lora_path,
-            "base_strength": base_strength,
-        })
+    def add_lora(self, lora_def: LoraDefinition):
+        self.lora_definitions.append(lora_def)
+
+    def setup_lora_schedule(self, total_steps: int, fuse_const_loras: bool = False):
+        """
+        Sets up the schedule, basically what lora needs to be applied at what step and with what strength
+        
+        fuse_const_loras is an experimental feature, it can be useful if we have 100s of loras applied, we
+        can use 2-3 mins to fuse them first but if we are only using 2-3 loras then this doesn't make sense
+        """
+        self.active_lora_schedule = {}
+        
+        temp_schedules = []
+        for lora in self.lora_definitions:
+            lora.expand_strength_schedule(total_steps)
+            temp_schedules.append(lora.base_strength)
+
+        # identifying constant vs dynamic strength loras
+        constant_indices = []
+        dynamic_definitions = []
+        dynamic_schedules = []
+        
+        for i, sched in enumerate(temp_schedules):
+            if len(sched) > 0 and (max(sched) == min(sched)) and fuse_const_loras:
+                if sched[0] != 0: # Ignore 0-strength LoRAs
+                    constant_indices.append(i)
+            else:
+                dynamic_definitions.append(self.lora_definitions[i])
+                dynamic_schedules.append(sched)
+
+        # fusing constant loras
+        if len(constant_indices):
+            app_logger.info(f"Fusing {len(constant_indices)} constant LoRAs...")
+            
+            to_fuse = []
+            for idx in constant_indices:
+                lora = self.lora_definitions[idx]
+                strength = temp_schedules[idx][0]
+                to_fuse.append((lora, strength))
+            
+            fused_lora_def = self._merge_constant_loras(to_fuse)
+            dynamic_definitions.insert(0, fused_lora_def)
+            dynamic_schedules.insert(0, [1.0] * total_steps)
+        
+        self.lora_definitions = dynamic_definitions
+        
+        for step in range(total_steps):
+            self.active_lora_schedule[step] = [
+                (self.lora_definitions[idx], strength[step] if step < len(strength) else strength[-1])
+                for idx, strength in enumerate(dynamic_schedules)
+            ]
+        
+        self.current_time_step = -1
 
     def _ensure_mmap(self, path):
         if path in self.mmap_cache: return self.mmap_cache[path]
@@ -94,27 +191,27 @@ class LoraMixin:
         # copy to the target device/dtype (this is the only mem consuming step)
         return tensor.to(device=device, dtype=dtype)
 
-    def get_delta_from_mmap(self, lora_idx, down_key, up_key, current_scale, device="cuda", dtype=torch.float16):
-        lora_def = self.lora_definitions[lora_idx]
-        path = lora_def["path"]
-        
+    def _read_weight(self, lora_def: LoraDefinition, key: str, device: str, dtype):
+        if lora_def.fused_weight is None: return self._read_from_mmap(lora_def.path, key, device, dtype)
+        else: return lora_def.fused_weight.get(key)
+    
+    def get_delta_from_mmap(self, lora_def: LoraDefinition, down_key, up_key, current_scale, device="cuda", dtype=torch.float16):        
         # TODO: add more custom keys as they are added
         if "diff" in down_key:
-            weight = self._read_from_mmap(path, down_key, device, dtype)
+            weight = self._read_weight(lora_def, down_key, device, dtype)
             if weight is None: return None
             return weight * current_scale
         
-        w_down = self._read_from_mmap(path, down_key, device, dtype)
-        w_up = self._read_from_mmap(path, up_key, device, dtype)
-        
+        w_down = self._read_weight(lora_def, down_key, device, dtype)
+        w_up = self._read_weight(lora_def, up_key, device, dtype)
         if w_down is None or w_up is None: return None
 
         # calculate alpha
         alpha_key = down_key.replace(".down", ".alpha")
-        alpha_tensor = self._read_from_mmap(path, alpha_key, "cpu", torch.float32)
+        alpha_tensor = self._read_weight(lora_def, alpha_key, "cpu", torch.float32)
         if alpha_tensor is None:
             alpha_key = down_key.split(".lora")[0] + ".alpha"
-            alpha_tensor = self._read_from_mmap(path, alpha_key, "cpu", torch.float32)
+            alpha_tensor = self._read_weight(lora_def, alpha_key, "cpu", torch.float32)
         alpha = alpha_tensor.item() if alpha_tensor is not None else w_down.shape[0]
         scale = (alpha / w_down.shape[0]) * current_scale
 
@@ -134,12 +231,12 @@ class LoraMixin:
         if timestep >= len(self.active_lora_schedule): return None
         
         total_delta = None
-        for lora_idx, strength in self.active_lora_schedule[timestep]:
+        for lora_def, strength in self.active_lora_schedule[timestep]:
             lora_down_key = self.get_mapped_lora_key(model_key)
             lora_up_key = lora_down_key.replace("down", "up")
             
             delta = self.get_delta_from_mmap(
-                lora_idx=lora_idx,
+                lora_def=lora_def,
                 down_key=lora_down_key,
                 up_key=lora_up_key,
                 current_scale=strength,
@@ -154,76 +251,6 @@ class LoraMixin:
                     total_delta.add_(delta) # In-place add for speed
                     
         return total_delta
-        
-    def _expand_schedule(self, strength_input: Union[float, List[float]], total_steps: int) -> List[float]:
-        # single float -> constant schedule
-        if isinstance(strength_input, (float, int)):
-            return [float(strength_input)] * total_steps
-        
-        # List -> expand, [1, 2, 3] -> [1, 1, 1, 2, 2, 2, 3, 3, 3]
-        src_len = len(strength_input)
-        new_schedule = []
-        inc = src_len / total_steps
-        pos = 0.0
-        
-        for _ in range(total_steps):
-            idx = int(pos)
-            if idx >= src_len: idx = src_len - 1
-            
-            new_schedule.append(strength_input[idx])
-            pos += inc
-            
-        return new_schedule
-
-    def setup_lora_schedule(self, total_steps: int, fuse_const_loras: bool = False):
-        """
-        Sets up the schedule, basically what lora needs to be applied at what step and with what strength
-        
-        fuse_const_loras is an experimental feature, it can be useful if we have 100s of loras applied, we
-        can use 2-3 mins to fuse them first but if we are only using 2-3 loras then this doesn't make sense
-        """
-        self.active_lora_schedule = {}
-        
-        temp_schedules = []
-        for lora in self.lora_definitions:
-            temp_schedules.append(self._expand_schedule(lora["base_strength"], total_steps))
-
-        # identifying constant vs dynamic strength loras
-        constant_indices = []
-        dynamic_definitions = []
-        dynamic_schedules = []
-        
-        for i, sched in enumerate(temp_schedules):
-            if len(sched) > 0 and (max(sched) == min(sched)) and fuse_const_loras:
-                if sched[0] != 0: # Ignore 0-strength LoRAs
-                    constant_indices.append(i)
-            else:
-                dynamic_definitions.append(self.lora_definitions[i])
-                dynamic_schedules.append(sched)
-
-        # fusing constant loras
-        if len(constant_indices):
-            app_logger.info(f"Fusing {len(constant_indices)} constant LoRAs...")
-            
-            to_fuse = []
-            for idx in constant_indices:
-                lora = self.lora_definitions[idx]
-                strength = temp_schedules[idx][0]
-                to_fuse.append((lora, strength))
-            
-            fused_lora_def = self._merge_constant_loras(to_fuse)
-            dynamic_definitions.insert(0, fused_lora_def)
-            dynamic_schedules.insert(0, [1.0] * total_steps)
-        
-        self.lora_definitions = dynamic_definitions
-        
-        for step in range(total_steps):
-            self.active_lora_schedule[step] = [
-                (idx, strength[step] if step < len(strength) else strength[-1])
-                for idx, strength in enumerate(dynamic_schedules)
-            ]
-        
-        self.current_time_step = -1
 
     def _merge_constant_loras(self, lora_list):
         # merges constant loras directly into the base model
@@ -321,23 +348,23 @@ class LoraMixin:
                 rank_sum += max_rank    
 
             rank_sum = max(128, rank_sum)
-            new_lora = compress_and_save(merged_weights, rank_sum, self.device)
+            new_lora = compress_weight(merged_weights, rank_sum, self.device)
 
-        return {
-            "name": "fused_constant_loras",
-            "weights": new_lora, 
-            "base_strength": 1.0,
-        }
+        return LoraDefinition(
+            name="fused_constant_loras",
+            fused_weight=new_lora,
+            base_strength=1.0,
+        )
 
     def cleanup(self):
         for v in self.mmap_cache.values():
             v['mm'].close()
         self.mmap_cache.clear()
 
-def compress_and_save(merged_weights, target_rank, device):
+def compress_weight(weight, target_rank, device):
     new_lora = {}
     
-    for key, dense_tensor in merged_weights.items():
+    for key, dense_tensor in weight.items():
         if "lora" not in key: continue 
         
         # returns small matrices: Up (Out, Rank) and Down (Rank, In)
