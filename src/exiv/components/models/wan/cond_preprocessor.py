@@ -14,7 +14,7 @@ from ....model_utils.common_classes import AuxCondType, BatchedConditioning, Con
 from ....utils.common import fix_frame_count, null_func
 
 
-is_text_model = lambda model_type: model_type in [Model.WAN21_1_3B_T2V.value, Model.WAN22_5B_T2V.value]
+is_text_model = lambda model_type: model_type in [Model.WAN21_1_3B_T2V.value, Model.WAN22_5B_T2V.value, Model.WAN22_14B_TI2V.value]
 is_img_model = lambda model_type: not is_text_model(model_type)
 
 class Wan21ModelArchConfig(ModelArchConfig):
@@ -28,8 +28,7 @@ class Wan21ModelArchConfig(ModelArchConfig):
         self.default_vision_encoder = "CLIP-ViT-H-fp16.safetensors"
         
     def get_ref_latent(self, start_image, vae, length, width, height):
-        if is_text_model(self.model_type):
-            return None
+        if is_text_model(self.model_type) and self.model_type != Model.WAN22_14B_TI2V.value: return None
         start_image = common_upscale(start_image, width, height, "bilinear", "center")[0]
         video = torch.ones((1, 3, length, height, width), device=start_image.device, dtype=start_image.dtype) * 0.5
         video[:, :, 0, :, :] = start_image
@@ -58,10 +57,14 @@ class Wan22ModelArchConfig(Wan21ModelArchConfig):
     def __init__(self, model_type=Model.WAN22_5B_T2V.value):
         super().__init__(model_type)
         self.model_type = model_type
-        self.latent_format = Wan22VAELatentFormat()
         
-        # default models
-        self.default_vae_type = VAEType.WAN22.value
+        if model_type == Model.WAN22_14B_TI2V.value:
+            self.latent_format = Wan21VAELatentFormat() 
+            self.default_vae_type = VAEType.WAN21.value
+        else:
+            # 5B uses the new 48-channel latents
+            self.latent_format = Wan22VAELatentFormat()
+            self.default_vae_type = VAEType.WAN22.value
 
 def _process_visual_embeddings(cond_list, model_wrapper, height, width, progress_callback):
     pending_embeds = []
@@ -99,6 +102,7 @@ def process_auxiliaries(cond_list, wrapper, wan_vae, height, width, frame_count,
     _process_visual_embeddings(cond_list, wrapper, height, width, progress_callback)
     _process_ref_latents(cond_list, wrapper, wan_vae, height, width, frame_count, progress_callback)
 
+@register_preprocessor(Model.WAN22_14B_TI2V.value)
 @register_preprocessor(Model.WAN22_5B_T2V.value)
 @register_preprocessor(Model.WAN21_14B_TI2V.value)
 @register_preprocessor(Model.WAN21_1_3B_T2V.value)

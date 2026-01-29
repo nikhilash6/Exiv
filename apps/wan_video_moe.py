@@ -58,9 +58,11 @@ def main(**params):
     
     # create a model wrapper
     # cur_model = "wan21_480p_i2v_fp16_14B.safetensors"
-    cur_model = "wan21_480p_i2v_fp8_scaled_14B.safetensors"
+    # cur_model = "wan21_480p_i2v_fp8_scaled_14B.safetensors"
     # cur_model = "wan21_1_3B.safetensors"
     # cur_model = "wan22_5B_ti2v_fp16"
+    cur_model = "wan22_i2v_high_noise_14B_fp8_scaled"
+    # cur_model = "wan22_i2v_high_noise_14B_fp16"
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
     wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
     apply_hook_json(wan_dit_model, hooks)
@@ -90,6 +92,7 @@ def main(**params):
                     height=height, 
                     width=width, 
                     frame_count=frame_count,
+                    cfg=cfg,
                     progress_callback=lambda percent, tag: context.progress(percent, tag) if context else null_func
                 )
     
@@ -97,10 +100,11 @@ def main(**params):
 
     if context: context.start_anchor("Sampling", steps=12) # 60%
     
-    # the main sampling loop
+    # high noise
     main_sampler = KSampler(
         wrapped_model=model_wrapper,
         seed=seed,
+        end_step=steps // 2,
         total_steps=steps,
         cfg=cfg,
         sampler_name=sampler_name,
@@ -112,9 +116,38 @@ def main(**params):
     
     wan_dit_model.to("cpu")
     wan_type = model_wrapper.model.model_arch_config.default_vae_type
-    del wan_dit_model, model_wrapper
+    del wan_dit_model, model_wrapper, main_sampler
     MemoryManager.clear_memory()
     
+    # low noise
+    next_latent = Latent(samples=out, noise_mask=latent.noise_mask)
+    cur_model = "wan22_i2v_low_noise_14B_fp8_scaled"
+    # cur_model = "wan22_i2v_low_noise_14B_fp16"
+    model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
+    wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
+    apply_hook_json(wan_dit_model, hooks)
+    model_wrapper = ModelWrapper(model=wan_dit_model)
+    
+    main_sampler = KSampler(
+        wrapped_model=model_wrapper,
+        seed=seed,
+        start_step=steps // 2,
+        end_step=steps,
+        total_steps=steps,
+        cfg=cfg,
+        sampler_name=sampler_name,
+        scheduler_name=scheduler_name,
+        batched_conditioning=batched_cond,
+        latent_image=next_latent
+    )
+    out = main_sampler.run_sampling(disable_noise=True, callback=lambda i, s: progress_callback(i, s))
+    
+    wan_dit_model.to("cpu")
+    wan_type = model_wrapper.model.model_arch_config.default_vae_type
+    del wan_dit_model, model_wrapper, main_sampler
+    MemoryManager.clear_memory()
+    
+    # final decoding
     if context: context.start_anchor("Decoding", steps=1) # 5%
     out = out.to(dtype=vae_dtype)
     wan_vae = get_vae(
@@ -127,8 +160,8 @@ def main(**params):
     
     return {"1": output_paths[0]}
 
-DEFAULT_CONDS = get_dummy_cond() #(positive="a dog running the park")
-DEFAULT_HOOKS = get_dummy_hook(enable_step_caching=True)
+DEFAULT_CONDS = get_dummy_cond() # positive="a dog running the park")
+DEFAULT_HOOKS = get_dummy_hook(enable_step_caching=False)
 # DEFAULT_LATENT = get_dummy_latent(img_path_list=["./tests/test_utils/assets/media/dog_realistic.jpg"])
 DEFAULT_LATENT = get_dummy_latent()
 app = App(
@@ -137,18 +170,18 @@ app = App(
         'conditions': Input(label="Conditions (JSON)", type="json", default=DEFAULT_CONDS,),
         'hooks': Input(label="Hooks (JSON)", type="json", default=DEFAULT_HOOKS),
         'latent': Input(label="Latent", type="json", default=DEFAULT_LATENT),
-        'seed': Input(label="Seed", type="number", default=256347,),
+        'seed': Input(label="Seed", type="number", default=-1,),
         'steps': Input(label="Steps", type="number", default=30, increment_controls=True, increment_step=2,),
-        'cfg': Input(label="CFG", type="number", default=6, increment_controls=True, increment_step=0.2,),
+        'cfg': Input(label="CFG", type="number", default=1, increment_controls=True, increment_step=0.2,),
         'sampler_name': Input(label="Sampler Name", type="select", options=KSamplerType.value_list(), \
             default=KSamplerType.EULER.value,),
         'scheduler_name': Input(label="Scheduler Name", type="select", options=SchedulerType.value_list(), \
             default=SchedulerType.SIMPLE.value,),
         # 'height': Input(label="Height", type="number", default=480),
         # 'width': Input(label="Width", type="number", default=832),
-        'height': Input(label="Height", type="number", default=512),
-        'width': Input(label="Width", type="number", default=512),
-        'frame_count': Input(label="Frame Count", type="number", default=81),
+        'height': Input(label="Height", type="number", default=640),
+        'width': Input(label="Width", type="number", default=640),
+        'frame_count': Input(label="Frame Count", type="number", default=33),
     },
     outputs=[Output(id=1, type=AppOutputType.VIDEO.value)],
     handler=main

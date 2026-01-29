@@ -208,7 +208,7 @@ def enable_efficient_loading(model: 'ModelMixin', target_shape = None):
         total_modules += 1
 
     app_logger.debug(f"Total modules found: {total_modules}")
-    app_logger.debug(f"Total full load modules found: {len(full_load)}")
+    app_logger.debug(f"Total full load modules found: {len(full_load)}, Total offloaded modules: {total_modules - len(full_load)}")
 
     model_hook = EfficientModelLoaderHook(full_load=full_load)
     HookRegistry.apply_hook_to_module(model, model_hook)

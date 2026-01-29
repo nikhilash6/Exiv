@@ -32,6 +32,9 @@ def preprocess_conds(
 ):
     model_type = model_wrapper.model.model_type
     
+    if kwargs.pop("cfg", 7) == 1:
+        cond_list = list(filter(lambda c: c.group_name != "negative", cond_list))   # TODO: hardcoded string, should be fixed
+    
     if model_type not in _PREPROCESSORS:
         raise NotImplementedError(
             f"No preprocessor found for {model_type}. "
