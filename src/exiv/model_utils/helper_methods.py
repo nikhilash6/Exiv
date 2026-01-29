@@ -119,8 +119,6 @@ def set_module_tensor_to_device(
 
     param = module._parameters[tensor_name] if tensor_name in module._parameters else None
     param_cls = type(param)
-
-    
     if value is not None:
         if dtype is None:
             # For compatibility with PyTorch load_state_dict which converts state dict dtype to existing dtype in model

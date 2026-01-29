@@ -121,8 +121,8 @@ def main(**params):
     
     # low noise
     next_latent = Latent(samples=out, noise_mask=latent.noise_mask)
-    # cur_model = "wan22_i2v_low_noise_14B_fp8_scaled"
-    cur_model = "wan22_i2v_low_noise_14B_fp16"
+    cur_model = "wan22_i2v_low_noise_14B_fp8_scaled"
+    # cur_model = "wan22_i2v_low_noise_14B_fp16"
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
     wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
     apply_hook_json(wan_dit_model, hooks)

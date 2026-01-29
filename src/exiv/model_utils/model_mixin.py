@@ -277,6 +277,16 @@ class ModelMixin(nn.Module, LoraMixin, ConditioningMixin, metaclass=ModuleMeta):
                 )
             else:
                 set_module_tensor_to_device(self, param_name, device, value=param, dtype=self.dtype)
+                
+        for name, param in self.named_parameters():
+            if param.device.type == "meta":
+                app_logger.warning(f"Initializing missing meta parameter: {name}")
+                # NOTE: heuristic: Scales = 1.0, biases/weights = 0.0
+                if "scale" in name:
+                    val = torch.ones_like(param, device=device)
+                else:
+                    val = torch.zeros_like(param, device=device)
+                set_module_tensor_to_device(self, name, device, value=val, dtype=self.dtype)
         
         if hasattr(self, "create_model_lora_key_map"):
             self.create_model_lora_key_map(state_dict)
