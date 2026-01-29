@@ -92,6 +92,7 @@ def main(**params):
                     height=height, 
                     width=width, 
                     frame_count=frame_count,
+                    cfg=cfg,
                     progress_callback=lambda percent, tag: context.progress(percent, tag) if context else null_func
                 )
     
