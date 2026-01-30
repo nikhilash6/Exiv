@@ -1,4 +1,5 @@
 import torch
+from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -25,6 +26,8 @@ class FP8ScaledLinear(nn.Module):
             torch.empty(out_features, device=device, dtype=dtype or torch.float16),
             requires_grad=False
         ) if bias else None
+        
+        self.lora_weight_delta = None
 
     def forward(self, input):
         # native fp8 tensor cores
@@ -52,12 +55,13 @@ class FP8ScaledLinear(nn.Module):
             # older arch
             weight_casted = self.weight.to(input.dtype)        # bit-cast expansion, relatively cheap
             scale = self.scale_weight.to(input.dtype)
+            bias = self.bias.to(input.dtype)
             # Optimization: apply scale to the smaller tensor
             if weight_casted.numel() < input.numel():
-                return F.linear(input, weight_casted * scale, self.bias)
+                out = F.linear(input, weight_casted * scale, bias)
             else:
-                return F.linear(input * scale, weight_casted, self.bias)
-        
+                out = F.linear(input * scale, weight_casted, bias)
+
         return out
 
     @classmethod

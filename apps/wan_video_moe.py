@@ -11,13 +11,15 @@ from exiv.components.models.wan.constructor import get_wan_instance
 from exiv.components.samplers.model_sampling import KSampler
 from exiv.components.vae.base import get_vae
 from exiv.model_patching.common import apply_hook_json
+from exiv.model_patching.lora_hook import enable_lora_hook
 from exiv.model_utils.common_classes import Conditioning, Latent
 from exiv.model_utils.common_classes import ModelWrapper
+from exiv.model_utils.lora_mixin import LoraDefinition
 from exiv.quantizers.base import QuantType
 from exiv.server.app_core import App, AppOutputType, Input, Output
 from exiv.utils.common import null_func
 from exiv.utils.device import MemoryManager
-from exiv.utils.file import MediaProcessor
+from exiv.utils.file import MediaProcessor, ensure_model_availability
 from exiv.utils.file_path import FilePathData, FilePaths
 from exiv.utils.logging import app_logger
 from utils.defaults import get_dummy_cond, get_dummy_hook, get_dummy_latent
@@ -61,11 +63,15 @@ def main(**params):
     # cur_model = "wan21_480p_i2v_fp8_scaled_14B.safetensors"
     # cur_model = "wan21_1_3B.safetensors"
     # cur_model = "wan22_5B_ti2v_fp16"
-    cur_model = "wan22_i2v_high_noise_14B_fp8_scaled"
-    # cur_model = "wan22_i2v_high_noise_14B_fp16"
+    # cur_model = "wan22_i2v_high_noise_14B_fp8_scaled"
+    cur_model = "wan22_i2v_high_noise_14B_fp16"
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
     wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
     apply_hook_json(wan_dit_model, hooks)
+    model_path_data: FilePathData = FilePaths.get_path(filename="wan22_t2v_lightx2v_4steps_lora_v11_high_noise.safetensors", file_type="lora")
+    lora_path = ensure_model_availability(model_path=model_path_data.path, download_url=model_path_data.url)
+    lora_def = LoraDefinition(path=lora_path)
+    enable_lora_hook(wan_dit_model, lora_def)
     model_wrapper = ModelWrapper(model=wan_dit_model)
     
     # input latent
@@ -99,12 +105,12 @@ def main(**params):
     MemoryManager.clear_memory()
 
     if context: context.start_anchor("Sampling", steps=12) # 60%
-    
+    mid_point = steps // 2
     # high noise
     main_sampler = KSampler(
         wrapped_model=model_wrapper,
         seed=seed,
-        end_step=steps // 2,
+        end_step=mid_point,
         total_steps=steps,
         cfg=cfg,
         sampler_name=sampler_name,
@@ -121,17 +127,21 @@ def main(**params):
     
     # low noise
     next_latent = Latent(samples=out, noise_mask=latent.noise_mask)
-    cur_model = "wan22_i2v_low_noise_14B_fp8_scaled"
-    # cur_model = "wan22_i2v_low_noise_14B_fp16"
+    # cur_model = "wan22_i2v_low_noise_14B_fp8_scaled"
+    cur_model = "wan22_i2v_low_noise_14B_fp16"
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
     wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
     apply_hook_json(wan_dit_model, hooks)
+    model_path_data: FilePathData = FilePaths.get_path(filename="wan22_t2v_lightx2v_4steps_lora_v11_low_noise.safetensors", file_type="lora")
+    lora_path = ensure_model_availability(model_path=model_path_data.path, download_url=model_path_data.url)
+    lora_def = LoraDefinition(path=lora_path)
+    enable_lora_hook(wan_dit_model, lora_def)
     model_wrapper = ModelWrapper(model=wan_dit_model)
     
     main_sampler = KSampler(
         wrapped_model=model_wrapper,
         seed=seed,
-        start_step=steps // 2,
+        start_step=mid_point,
         end_step=steps,
         total_steps=steps,
         cfg=cfg,
@@ -171,7 +181,7 @@ app = App(
         'hooks': Input(label="Hooks (JSON)", type="json", default=DEFAULT_HOOKS),
         'latent': Input(label="Latent", type="json", default=DEFAULT_LATENT),
         'seed': Input(label="Seed", type="number", default=-1,),
-        'steps': Input(label="Steps", type="number", default=30, increment_controls=True, increment_step=2,),
+        'steps': Input(label="Steps", type="number", default=4, increment_controls=True, increment_step=2,),
         'cfg': Input(label="CFG", type="number", default=1, increment_controls=True, increment_step=0.2,),
         'sampler_name': Input(label="Sampler Name", type="select", options=KSamplerType.value_list(), \
             default=KSamplerType.EULER.value,),

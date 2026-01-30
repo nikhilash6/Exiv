@@ -1,3 +1,4 @@
+import os
 import torch
 from torch import Tensor
 
@@ -141,6 +142,10 @@ def sample(
         seed
     )
     
+    # prepare loras (will streamline this later)
+    if hasattr(wrapped_model.model, "prepare_loras_for_inference"):
+        wrapped_model.model.prepare_loras_for_inference(total_steps=len(sigmas))
+    
     # injecting sampler hook
     registry = HookRegistry.get_hook_registry(wrapped_model.model)
     wrapped_call = registry.get_wrapped_fn(
@@ -162,7 +167,7 @@ def sample(
     samples = ksampler_cls_impl.sample(denoiser_function, wrapped_model, sigmas, callback, noise, latent_image, denoise_mask)
     return wrapped_model.model.process_latent_out(samples.to(torch.float32))
 
-
+t = 0
 def model_sampling_step(
     wrapped_model: ModelWrapper, 
     x: Tensor, 
@@ -181,9 +186,11 @@ def model_sampling_step(
     
     # convert sigma (noise level) to the discrete timestep expected by the model
     timestep = wrapped_model.model_sampling.timestep(sigma)
+    global t
+    wrapped_model.model.current_time_step = t
     # x is the current noisy latent
     x_in = wrapped_model.model_sampling.calculate_input(sigma, x)
-
+    
     # **** main model run ****
     out_groups = compute_batched_output(wrapped_model, batched_conds, x_in, timestep, denoise_mask=denoise_mask)
     
@@ -207,7 +214,7 @@ def model_sampling_step(
     cfg_result = wrapped_model.cfg_func(**kwargs)
     # convert the model output (EPS, V, etc.) back to the denoised latent (x0)
     denoised = wrapped_model.model_sampling.calculate_denoised(sigma, cfg_result, x)
-
+    t += 1
     return denoised
 
 
@@ -264,7 +271,19 @@ def compute_batched_output(
 
 # NOTE: separated for debugging / testing purposes
 def run_model(model, feed_x, feed_t, **feed_input):
-    # from torch_tracer import TorchTracer
-    # with TorchTracer("./exiv_2.pkl"):
+    # from torch.profiler import profile, record_function, ProfilerActivity
+    # log_dir = os.path.abspath("./profile_data/wan_profile")
+    # os.makedirs(log_dir, exist_ok=True)
+
+    # print(f"DEBUG: Profiler will save to: {log_dir}")
+    # with torch.profiler.profile(
+    # activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+    # # schedule=torch.profiler.schedule(wait=1, warmup=1, active=3, repeat=1),
+    # on_trace_ready=torch.profiler.tensorboard_trace_handler(log_dir),
+    # record_shapes=True,
+    # profile_memory=True,
+    # with_stack=True,
+    # acc_events=True
+    # ) as prof:
     out = model(feed_x, feed_t, **feed_input)
     return out

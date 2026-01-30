@@ -610,11 +610,27 @@ class Wan21Model(ModelMixin):
     # ------------------------------------------------------------------------------------------
     # MODEL OVERRIDES
     # ------------------------------------------------------------------------------------------
+    def _clean_key(self, key):
+        return key.replace(".bias", "").replace(".weight", "").replace("diffusion_model.", "")
     
-    def get_mapped_lora_key(self, model_key=None, lora_key=None):
-        if hasattr(self, "_cached_key_map"):
-            return self._cached_key_map
-
+    def create_model_lora_key_map(self, state_dict):
+        sd_keys = state_dict.keys()
+        key_map = {}
+        
+        for k in sd_keys:
+            if k.startswith("blocks."):
+                # blocks.0.cross_attn.k.bias -> blocks.0.cross_attn.k
+                model_key = self._clean_key(k)
+                if model_key not in key_map:
+                    lora_key = model_key + ".lora_down.weight"
+                    key_map[model_key] = lora_key
+                    key_map[lora_key] = model_key
+        super().create_model_lora_key_map(state_dict, key_map=key_map)
+        
+    def get_mapped_lora_key(self, key = None):
+        key = self._clean_key(key)
+        return super().get_mapped_lora_key(key)
+    
     def get_memory_footprint_params(self):
         """
         Returns architectural constants for memory estimation.

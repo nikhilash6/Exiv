@@ -45,6 +45,7 @@ keygen.sh
 boy_anime.jpg
 
 # Test files
+profile_data/*
 .pytest_cache
 .coverage
 *.lprof

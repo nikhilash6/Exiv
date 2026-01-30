@@ -5,6 +5,7 @@ from safetensors.torch import save_file
 
 from exiv.model_patching.lora_hook import enable_lora_hook
 from exiv.model_utils.lora_mixin import CACHED_MODEL_LORA_KEY_MAP, LoraDefinition
+from exiv.quantizers.fp8_scaled.layer import FP8ScaledLinear
 from tests.test_utils.common import SimpleModel
 from exiv.utils.device import MemoryManager
 
@@ -159,3 +160,59 @@ class TestMultiStepLora(unittest.TestCase):
             ), f"Step {i} failed")
 
             self.assertEqual(model.input_layer.weight.sum().item(), 0.0)
+            
+class TestFP8ScaledLora(unittest.TestCase):
+    def test_fp8_lora_patching(self):
+        """Tests if patch_weight correctly adds the delta to the output while respecting FP8 weights"""
+        in_dim, out_dim = 32, 16
+        layer = FP8ScaledLinear(in_dim, out_dim, bias=True)
+        float_weight = torch.randn(out_dim, in_dim, dtype=torch.float32)
+        layer.weight.data = float_weight.to(torch.float8_e4m3fn)
+        
+        layer.scale_weight.data.fill_(1.0)
+        layer.scale_input.data.fill_(1.0)
+        layer.bias.data.fill_(0.0)
+        input_tensor = torch.randn(1, in_dim, dtype=torch.float32)
+        
+        with torch.no_grad():
+            base_output = layer(input_tensor)
+            
+        delta = torch.randn(out_dim, in_dim, dtype=torch.float32) * 0.5
+        layer.patch_weight(delta)
+        
+        with torch.no_grad():
+            patched_output = layer(input_tensor)
+            
+        # final verificiation
+        lora_contribution = torch.nn.functional.linear(input_tensor, delta)
+        expected = base_output + lora_contribution
+        self.assertTrue(torch.allclose(patched_output, expected, atol=1e-5), 
+                        "LoRA delta was not correctly added to the output")
+        
+    def test_fp8_lora_unpatching_logic(self):
+        """
+        Tests that unpatching with -delta restores output AND resets lora_weight_delta to None.
+        """
+        in_dim, out_dim = 32, 16
+        layer = FP8ScaledLinear(in_dim, out_dim, bias=True)
+        
+        # setup FP8 weights
+        float_weight = torch.randn(out_dim, in_dim, dtype=torch.float32)
+        layer.weight.data = float_weight.to(torch.float8_e4m3fn)
+        layer.scale_weight.data.fill_(1.0)
+        layer.scale_input.data.fill_(1.0)
+        layer.bias.data.fill_(0.0)
+        
+        input_tensor = torch.randn(1, in_dim, dtype=torch.float32)
+        base_output = layer(input_tensor)
+        delta = torch.randn(out_dim, in_dim, dtype=torch.float32) * 0.5
+        # patch
+        layer.patch_weight(delta)
+        self.assertIsNotNone(layer.lora_weight_delta, "Delta should be set after patching")
+        # unpatch
+        layer.patch_weight(-delta)
+        # verify
+        self.assertIsNone(layer.lora_weight_delta, "lora_weight_delta should be None when accumulated delta sums to zero")
+        with torch.no_grad():
+            final_output = layer(input_tensor)
+        self.assertTrue(torch.allclose(final_output, base_output, atol=1e-5))
