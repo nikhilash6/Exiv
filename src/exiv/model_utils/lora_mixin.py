@@ -1,5 +1,6 @@
 import torch
 
+import re
 import os
 import mmap
 from typing import Any, List, Optional, Union
@@ -14,7 +15,6 @@ from ..utils.device import OFFLOAD_DEVICE, VRAM_DEVICE
 from ..utils.logging import app_logger
 
 
-CACHED_MODEL_LORA_KEY_MAP = "cached_m_l_map"            # maps model_key <--> lora_down_key
 LORA_WEIGHTS_CACHE_DICT = "lora_weights_cache_dict"     # maps module_name -> list of lora weights applied
 
 class LoraModelType(ExtendedEnum):
@@ -44,14 +44,15 @@ class LoraDefinition:
         #       as more lora types are added
         strength = self.base_strength
         if isinstance(strength, list) and (strength:=self.base_strength[timestep]) == 0: return 0
-        
+        device = input.device
+        w_up_dev = w_up.to(device=device, non_blocking=True)
+        w_down_dev = w_down.to(device=device, non_blocking=True)
         # (Batch, Tokens, Dim) @ (Dim, Rank) -> (Batch, Tokens, Rank)
-        down_weight = w_down.flatten(start_dim=1).T.to(input.dtype)  # Shape: [In, Rank]
+        down_weight = w_down_dev.flatten(start_dim=1).T  # Shape: [In, Rank]
         mid_step = input @ down_weight 
         # (Batch, Tokens, Rank) @ (Rank, Out) -> (Batch, Tokens, Out)
-        up_weight = w_up.flatten(start_dim=1).T.to(input.dtype)      # Shape: [Rank, Out]
+        up_weight = w_up_dev.flatten(start_dim=1).T      # Shape: [Rank, Out]
         final_out = mid_step @ up_weight
-        
         return final_out * scale * strength
     
     def _uniform_stretch(self, strength_input: List, total_steps):
@@ -92,26 +93,20 @@ class LoraMixin:
         self.active_lora_schedule = {}
         self.mmap_cache = {} # {path: {'mm': mmap, 'header': dict, 'offset': int}}
     
-    # this cache key map basically maps lora_key <--> model_key
-    def set_cache_key_map(self, key_map):
-        setattr(self, CACHED_MODEL_LORA_KEY_MAP, key_map)
-    
-    def get_cache_key_map(self):
-        return getattr(self, CACHED_MODEL_LORA_KEY_MAP, None)
-    
     def _clean_key(self, key):
-        key = key.replace(".bias", "").replace(".weight", "")\
-            .replace("lora_down.", "").replace("lora_up.", "")
+        suffixes = [".bias", ".alpha", ".lora_down", ".lora_up", ".down", ".up"]
+        pattern = "|".join(map(re.escape, suffixes))
+        key = re.sub(pattern, "", key)
         for v in LoraModelType.value_list(): key = key.replace(v+".", "")
         return key
     
-    def standardize_dict_keys(self, state_dict):
+    def standardize_dict_keys(self, lora_state_dict_keys):
         """
         Replaces the lora keys with standard keys we use throughout the code
         """
         standard_key_map = {}    # maps old_key --> standard_key
         te_keys = ["cond_stage_model."] 
-        for k in state_dict.keys():
+        for k in lora_state_dict_keys:
             if any(k.startswith(v) for v in LoraModelType.value_list()):
                 # leave standard keys as they are
                 standard_key_map[k] = k     # e.g. diffusion_model.blocks.0.cross_attn.k.alpha
@@ -119,45 +114,40 @@ class LoraMixin:
             elif (v := next((v for v in te_keys if k.startswith(v)), None)):
                 stem = k.removeprefix(v).removesuffix(".weight")
                 standard_key_map[k] = f"lora_te_{stem}"
-
-            else: pass  # TODO: update as new keys are encountered
+            else:  # TODO: update as new keys are encountered
+                if k.startswith('blocks.'):   # normal blocks
+                    standard_key_map[k] = LoraModelType.DIFFUSION_MODEL.value + "." + k
+                
         return standard_key_map
     
-    def create_model_lora_key_map(self, lora_state_dict, model_type=LoraModelType.DIFFUSION_MODEL.value):
-        standard_key_map = self.standardize_dict_keys(lora_state_dict)
-        sd_keys = lora_state_dict.keys()
+    def create_model_lora_key_map(self, lora_state_dict_keys, model_type=LoraModelType.DIFFUSION_MODEL.value):
+        standard_key_map = self.standardize_dict_keys(lora_state_dict_keys)
         key_map = {}
-        
-        for k in sd_keys:
-            if (standard_key:=standard_key_map.get(k, None)) and k.startswith(model_type):
+        for lora_down_key in lora_state_dict_keys:
+            if lora_down_key.endswith("down.weight") and \
+                (standard_key:=standard_key_map.get(lora_down_key, None)) and standard_key.startswith(model_type):
                 # diffusion_model.blocks.0.cross_attn.k.lora_down.weight -> blocks.0.cross_attn.k
                 model_key = self._clean_key(standard_key)
                 if model_key not in key_map:
-                    lora_key = model_key + ".lora_down.weight"
-                    key_map[model_key] = lora_key
-                    key_map[lora_key] = model_key
-        self.set_cache_key_map(key_map)
-
-    def get_mapped_lora_key(self, key = None):
-        """
-        If model_key is provided then the corresponding (down) lora_key is returned and vice-versa
-        """
-        key = self._clean_key(key)
-        d = self.get_cache_key_map()
-        return d.get(key, None) if d else None
+                    key_map[model_key] = lora_down_key
+                    key_map[lora_down_key] = model_key
+        return key_map      # maps model_key <--> lora_down_key
 
     def add_lora(self, lora_def: LoraDefinition):
         self.lora_definitions.append(lora_def)
     
-    def prepare_loras_for_inference(self, total_steps, device=VRAM_DEVICE):
+    def prepare_loras_for_inference(self, total_steps, device=OFFLOAD_DEVICE):
         setattr(self, LORA_WEIGHTS_CACHE_DICT, {})      # reset cache dict
         cache = getattr(self, LORA_WEIGHTS_CACHE_DICT)
         if self.lora_definitions: app_logger.info("Loading LoRAs...")
         for lora in self.lora_definitions:
             lora.expand_strength_schedule(total_steps + 1)
+            file_meta = self._ensure_mmap(lora.path)
+            lora_state_dict_keys = file_meta['header']
+            key_map = self.create_model_lora_key_map(lora_state_dict_keys) 
             for name, layer in tqdm(self.named_modules(), desc=f"Loading {lora.name}", leave=False):
                 model_key = f"{name}.weight"
-                lora_down_key = self.get_mapped_lora_key(model_key)
+                lora_down_key = key_map.get(model_key, None)
                 if not lora_down_key: continue
                 up_key = lora_down_key.replace("down", "up")
                 out = self.get_delta_from_mmap(lora, lora_down_key, up_key, device=device)
@@ -219,7 +209,7 @@ class LoraMixin:
         dtype=torch.float16     # NOTE: hardcoded for now, need to change
         out = None              # (w_up, w_down, scale)
         # TODO: add more custom keys as they are added
-        if "diff" in down_key:
+        if ".diff" in down_key:
             weight = self._read_weight(lora_def, down_key, device, dtype)
             if weight is None: out = None
             out = (weight, 1.0, 1.0)
