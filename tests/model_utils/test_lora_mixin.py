@@ -27,8 +27,9 @@ class LoRASimpleModel(SimpleModel):
         for k in sd:
             if k.endswith(".weight"):
                 key_lora = f"lora.{k.replace('.', '_')}.down"
-                key_map[key_lora] = k
-                key_map[k] = key_lora
+                k_clean = k.replace(".weight", "")
+                key_map[key_lora] = k_clean
+                key_map[k_clean] = key_lora
             else:
                 key_map["{}".format(k)] = k
         
@@ -181,8 +182,9 @@ class FP8SimpleModel(ModelMixin):
         for k in sd:
             if k.endswith(".weight"):
                 key_lora = f"lora.{k.replace('.', '_')}.down"
-                key_map[key_lora] = k
-                key_map[k] = key_lora
+                k_clean = k.replace(".weight", "")
+                key_map[key_lora] = k_clean
+                key_map[k_clean] = key_lora
             else:
                 key_map["{}".format(k)] = k
         setattr(self, CACHED_MODEL_LORA_KEY_MAP, key_map)
