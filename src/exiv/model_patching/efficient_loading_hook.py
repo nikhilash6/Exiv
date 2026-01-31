@@ -75,11 +75,12 @@ class EfficientModuleLoaderHook(ModelHook):
         
     def get_lora_output(self, input, model):
         cache_dict = getattr(model, LORA_WEIGHTS_CACHE_DICT, None)
-        if cache_dict is None or getattr(model, "current_time_step", None) is None: return 0.0
+        if cache_dict is None: return 0.0
+        if (timestep:=getattr(model, "current_time_step", None)) is None: timestep = 0
         applied_loras = cache_dict.get(self.module_name, [])
         out = 0
         for (w_up, w_down, scale, lora) in applied_loras:
-            out += lora.get_output(input, w_up, w_down, scale, model.current_time_step)
+            out += lora.get_output(input, w_up, w_down, scale, timestep)
         return out
 
     def execute(self, module: torch.nn.Module, original_fn: Callable, *args, **kwargs):

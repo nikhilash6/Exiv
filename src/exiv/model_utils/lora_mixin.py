@@ -20,7 +20,6 @@ class LoraDefinition:
     path: Optional[str] = None
     base_strength: Union[float, List[float]] = 1.0  # ideally this should be the complete stepwise strength
                                                     # expand_strength_schedule is a safety measure of sorts
-    
     @classmethod
     def from_json(cls, data):
         try:
@@ -37,7 +36,8 @@ class LoraDefinition:
         # NOTE: this may not work properly if conv layers in lora have different kernel size
         # TODO: rn this is used as a global method for all kinds of lora types, this will change
         #       as more lora types are added
-        if (strength:=self.base_strength[timestep]) == 0: return 0
+        strength = self.base_strength
+        if isinstance(strength, list) and (strength:=self.base_strength[timestep]) == 0: return 0
         
         # (Batch, Tokens, Dim) @ (Dim, Rank) -> (Batch, Tokens, Rank)
         down_weight = w_down.flatten(start_dim=1).T.to(input.dtype)  # Shape: [In, Rank]

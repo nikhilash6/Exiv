@@ -156,6 +156,11 @@ def sample(
     )
     
     def denoiser_function(x, sigma, **kwargs):
+        # setting the current timestep
+        curr_sigma = sigma[0] if sigma.ndim > 0 else sigma
+        dists = (sigmas.to(curr_sigma.device) - curr_sigma).abs()
+        step_index = dists.argmin().item()
+        wrapped_model.model.current_time_step = step_index
         return wrapped_call(
             wrapped_model,
             x,
@@ -168,7 +173,6 @@ def sample(
     samples = ksampler_cls_impl.sample(denoiser_function, wrapped_model, sigmas, callback, noise, latent_image, denoise_mask)
     return wrapped_model.model.process_latent_out(samples.to(torch.float32))
 
-t = 0
 def model_sampling_step(
     wrapped_model: ModelWrapper, 
     x: Tensor, 
@@ -187,8 +191,6 @@ def model_sampling_step(
     
     # convert sigma (noise level) to the discrete timestep expected by the model
     timestep = wrapped_model.model_sampling.timestep(sigma)
-    global t
-    wrapped_model.model.current_time_step = t
     # x is the current noisy latent
     x_in = wrapped_model.model_sampling.calculate_input(sigma, x)
     
@@ -215,7 +217,6 @@ def model_sampling_step(
     cfg_result = wrapped_model.cfg_func(**kwargs)
     # convert the model output (EPS, V, etc.) back to the denoised latent (x0)
     denoised = wrapped_model.model_sampling.calculate_denoised(sigma, cfg_result, x)
-    t += 1
     return denoised
 
 

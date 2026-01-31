@@ -239,12 +239,7 @@ class TestFP8ScaledLora(unittest.TestCase):
         # 2. Enable LoRA
         lora_def = LoraDefinition(path=self.LORA_PATH)
         enable_lora_hook(model, lora_def, steps)
-        enable_efficient_loading(model)
         model.prepare_loras_for_inference(steps, device="cpu")
-        
-        # 3. LoRA run
-        # We need to set timestep for the hook to work
-        model.current_time_step = 0
         patched_output = model(dummy_input)
             
         # 4. Verify Delta
@@ -278,10 +273,7 @@ class TestFP8ScaledLora(unittest.TestCase):
         # Apply LoRA and run
         lora_def = LoraDefinition(path=self.LORA_PATH)
         enable_lora_hook(model, lora_def, steps)
-        enable_efficient_loading(model)
         model.prepare_loras_for_inference(steps, device="cpu")
-        
-        model.current_time_step = 0
         model(torch.ones((1, 32)))
         
         # Verify original weights are unchanged
