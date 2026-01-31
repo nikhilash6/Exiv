@@ -1,3 +1,4 @@
+import os
 import torch
 from torch import Tensor
 
@@ -17,6 +18,7 @@ from ...utils.common import null_func
 from ...utils.logging import app_logger
 from ...model_patching.hook_registry import HookLocation, HookRegistry, HookType
 from ...model_utils.helper_methods import get_mem_usage
+from ...utils.dev import ProfileContext
 
 class KSampler:
     def __init__(
@@ -141,6 +143,10 @@ def sample(
         seed
     )
     
+    # prepare loras (will streamline this later)
+    if hasattr(wrapped_model.model, "prepare_loras_for_inference"):
+        wrapped_model.model.prepare_loras_for_inference(total_steps=len(sigmas))
+    
     # injecting sampler hook
     registry = HookRegistry.get_hook_registry(wrapped_model.model)
     wrapped_call = registry.get_wrapped_fn(
@@ -150,6 +156,11 @@ def sample(
     )
     
     def denoiser_function(x, sigma, **kwargs):
+        # setting the current timestep
+        curr_sigma = sigma[0] if sigma.ndim > 0 else sigma
+        dists = (sigmas.to(curr_sigma.device) - curr_sigma).abs()
+        step_index = dists.argmin().item()
+        wrapped_model.model.current_time_step = step_index
         return wrapped_call(
             wrapped_model,
             x,
@@ -161,7 +172,6 @@ def sample(
     
     samples = ksampler_cls_impl.sample(denoiser_function, wrapped_model, sigmas, callback, noise, latent_image, denoise_mask)
     return wrapped_model.model.process_latent_out(samples.to(torch.float32))
-
 
 def model_sampling_step(
     wrapped_model: ModelWrapper, 
@@ -183,7 +193,7 @@ def model_sampling_step(
     timestep = wrapped_model.model_sampling.timestep(sigma)
     # x is the current noisy latent
     x_in = wrapped_model.model_sampling.calculate_input(sigma, x)
-
+    
     # **** main model run ****
     out_groups = compute_batched_output(wrapped_model, batched_conds, x_in, timestep, denoise_mask=denoise_mask)
     
@@ -207,7 +217,6 @@ def model_sampling_step(
     cfg_result = wrapped_model.cfg_func(**kwargs)
     # convert the model output (EPS, V, etc.) back to the denoised latent (x0)
     denoised = wrapped_model.model_sampling.calculate_denoised(sigma, cfg_result, x)
-
     return denoised
 
 
@@ -264,7 +273,6 @@ def compute_batched_output(
 
 # NOTE: separated for debugging / testing purposes
 def run_model(model, feed_x, feed_t, **feed_input):
-    # from torch_tracer import TorchTracer
-    # with TorchTracer("./exiv_2.pkl"):
+    # with ProfileContext("wan_profile"):
     out = model(feed_x, feed_t, **feed_input)
     return out

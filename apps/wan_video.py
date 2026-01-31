@@ -148,7 +148,7 @@ app = App(
         # 'width': Input(label="Width", type="number", default=832),
         'height': Input(label="Height", type="number", default=512),
         'width': Input(label="Width", type="number", default=512),
-        'frame_count': Input(label="Frame Count", type="number", default=81),
+        'frame_count': Input(label="Frame Count", type="number", default=33),
     },
     outputs=[Output(id=1, type=AppOutputType.VIDEO.value)],
     handler=main

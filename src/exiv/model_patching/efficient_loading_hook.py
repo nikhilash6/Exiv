@@ -6,6 +6,7 @@ from typing import Callable, List, Any, Tuple
 from .common import prepare_and_cache_cpu_state, profile_model_layers, restore_cpu_state, should_preload
 from .hook_registry import FeatureType, HookLocation, HookRegistry, HookType, ModelHook, register_hook_method
 from ..model_utils.helper_methods import estimate_peak_activation_size
+from ..model_utils.lora_mixin import LORA_WEIGHTS_CACHE_DICT
 from ..utils.logging import app_logger
 from ..utils.device import OFFLOAD_DEVICE, RESERVED_MEM, MemoryManager
 from ..config import BYTES_IN_MB, LOADING_MODE, global_config
@@ -20,6 +21,7 @@ def move_module_or_params(model, module, target_device, module_name=None):
         move_module(model=model, module=module, module_name=module_name, target_device=target_device)
     elif model.has_orphan_params(module):
         move_immediate_params(module=module, device=target_device)
+
 
 class EfficientModelLoaderHook(ModelHook):
     """
@@ -70,6 +72,16 @@ class EfficientModuleLoaderHook(ModelHook):
         self.model_ref = weakref.ref(model_ref) 
         self.module_name = module_name
         self.full_load_module = full_load_module
+        
+    def get_lora_output(self, input, model):
+        cache_dict = getattr(model, LORA_WEIGHTS_CACHE_DICT, None)
+        if cache_dict is None: return 0.0
+        if (timestep:=getattr(model, "current_time_step", None)) is None: timestep = 0
+        applied_loras = cache_dict.get(self.module_name, [])
+        out = 0
+        for (w_up, w_down, scale, lora) in applied_loras:
+            out += lora.get_output(input, w_up, w_down, scale, timestep)
+        return out
 
     def execute(self, module: torch.nn.Module, original_fn: Callable, *args, **kwargs):
         model = self.model_ref()
@@ -87,33 +99,11 @@ class EfficientModuleLoaderHook(ModelHook):
                 target_device=model.gpu_device,
                 module_name=self.module_name
             )
-        
-        # lora patching
-        delta = None
-        if getattr(module, "weight", None) is not None:
-            current_step = getattr(model, "current_time_step", -1)
-            model_key = f"{self.module_name}.weight"
-            delta = model.get_combined_delta(
-                model_key=model_key,
-                timestep=current_step,
-                target_device=module.weight.device,
-                target_dtype=module.weight.dtype
-            )
-        
-        if delta is not None:
-            app_logger.debug("---- patching lora weights delta")
-            module.weight.data.add_(delta)
-            self._applied_delta = delta
-        
+            
         try:
             output = original_fn(*args, **kwargs)
+            output += self.get_lora_output(args[0], model)
         finally:
-            # ----- post forward unpatch lora
-            if getattr(self, "_applied_delta", None) is not None:
-                app_logger.debug("---- UNpatching lora weights delta")
-                module.weight.data.sub_(self._applied_delta)
-                self._applied_delta = None
-            
             if cpu_cache is not None:
                 restore_cpu_state(module, cpu_cache)
 

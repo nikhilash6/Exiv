@@ -11,4 +11,3 @@ def enable_lora_hook(model: 'ModelMixin', lora_def: LoraDefinition, total_steps:
     application.
     """
     model.add_lora(lora_def)
-    model.setup_lora_schedule(total_steps)

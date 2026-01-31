@@ -4,6 +4,7 @@ from ....config import LOADING_MODE
 from ....model_utils.helper_methods import get_state_dict
 from ....utils.file import ensure_model_availability
 from ....utils.logging import app_logger
+from ....quantizers.base import QuantType
 
 def detect_wan_params(state_dict):
     """Detecting WAN config dynamically"""
@@ -77,7 +78,7 @@ def get_wan_instance(
     download_url,
     force_load_mode=LOADING_MODE.LOW_VRAM.value,
     force_dtype=None,
-    quant_type=None,
+    quant_type=QuantType.FP8_SCALED,
 ):
     model_path = ensure_model_availability(model_path, download_url)
     state_dict = get_state_dict(model_path)

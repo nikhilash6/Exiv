@@ -610,11 +610,6 @@ class Wan21Model(ModelMixin):
     # ------------------------------------------------------------------------------------------
     # MODEL OVERRIDES
     # ------------------------------------------------------------------------------------------
-    
-    def get_mapped_lora_key(self, model_key=None, lora_key=None):
-        if hasattr(self, "_cached_key_map"):
-            return self._cached_key_map
-
     def get_memory_footprint_params(self):
         """
         Returns architectural constants for memory estimation.

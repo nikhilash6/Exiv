@@ -42,9 +42,11 @@ note.md
 temp.py
 apps/dummy_test.py
 keygen.sh
+copyparty-sfx.py
 boy_anime.jpg
 
 # Test files
+profile_data/*
 .pytest_cache
 .coverage
 *.lprof
