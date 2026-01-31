@@ -26,8 +26,6 @@ class FP8ScaledLinear(nn.Module):
             torch.empty(out_features, device=device, dtype=dtype or torch.float16),
             requires_grad=False
         ) if bias else None
-        
-        self.lora_weight_delta = None
 
     def forward(self, input):
         # native fp8 tensor cores

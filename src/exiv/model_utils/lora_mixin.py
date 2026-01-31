@@ -18,7 +18,6 @@ LORA_WEIGHTS_CACHE_DICT = "lora_weights_cache_dict"
 @dataclass
 class LoraDefinition:
     path: Optional[str] = None
-    fused_weight: Optional[Any] = None              # experimental feature for fusing multiple loras
     base_strength: Union[float, List[float]] = 1.0  # ideally this should be the complete stepwise strength
                                                     # expand_strength_schedule is a safety measure of sorts
     
@@ -184,8 +183,7 @@ class LoraMixin:
         return tensor.to(device=device, dtype=dtype)
 
     def _read_weight(self, lora_def: LoraDefinition, key: str, device: str, dtype):
-        if lora_def.fused_weight is None: return self._read_from_mmap(lora_def.path, key, device, dtype)
-        else: return lora_def.fused_weight.get(key)
+        return self._read_from_mmap(lora_def.path, key, device, dtype)
     
     def get_delta_from_mmap(self, lora_def: LoraDefinition, down_key, up_key, device=OFFLOAD_DEVICE) -> Optional[tuple]:        
         dtype=torch.float16     # NOTE: hardcoded for now, need to change
