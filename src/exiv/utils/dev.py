@@ -401,7 +401,7 @@ class ProfileContext:
             record_shapes=True,
             profile_memory=True,
             with_stack=True,
-            # acc_events=True # NOTE: acc_events removed in newer torch versions or specific to some, keeping it commented or compatible
+            acc_events=True
         )
         self.profiler.__enter__()
         return self.profiler

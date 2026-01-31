@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 from typing import Dict, Any, List, Optional
+
+from exiv.utils.device import VRAM_DEVICE
 from ...utils.common import get_module_from_name
 from ...utils.logging import app_logger
 from ..base import Quantizer
@@ -52,13 +54,14 @@ class FP8ScaledQuantizer(Quantizer):
         if tensor_name == "weight":
             # CASE A: fp16/bf16 on the fly conversion (makes little sense tbh)
             if param_value.dtype in [torch.float16, torch.float32, torch.bfloat16]:
+                p_gpu = param_value.to(VRAM_DEVICE, non_blocking=True)
                 # scale
-                max_val = param_value.abs().max()
+                max_val = p_gpu.abs().max()
                 scale = max_val / 448.0
                 scale = torch.max(scale, torch.tensor(1e-6, device=scale.device))
                 
                 # quantize
-                weight_scaled = param_value / scale
+                weight_scaled = p_gpu / scale
                 weight_fp8 = weight_scaled.clamp(-448.0, 448.0).to(torch.float8_e4m3fn)
                 
                 # set weights
@@ -70,6 +73,7 @@ class FP8ScaledQuantizer(Quantizer):
                     scale.view(1).to(torch.float32).to(target_device),
                     requires_grad=False
                 )
+                del p_gpu
             
             # CASE B: loading pre-quant fp8_e4m3fn
             elif param_value.dtype == torch.float8_e4m3fn:
