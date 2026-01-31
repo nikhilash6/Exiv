@@ -179,20 +179,6 @@ class BnB4BitQuantizer(Quantizer):
         
         model.is_loaded_in_4bit = True
 
-    def _dequantize(self, model):
-        from .utils import dequantize_and_replace
-
-        old_device = model.device
-        model.to(VRAM_DEVICE)
-
-        model = dequantize_and_replace(
-            model, self.modules_to_not_convert, quantization_config=self.quantization_config
-        )
-        
-        model.to(old_device)
-        return model
-
-
 class BnB8BitQuantizer(Quantizer):
     """
     8-bit quantization from bitsandbytes quantization method:
@@ -337,11 +323,3 @@ class BnB8BitQuantizer(Quantizer):
         )
         
         model.is_loaded_in_8bit = True
-
-    def _dequantize(self, model):
-        from .utils import dequantize_and_replace
-
-        model = dequantize_and_replace(
-            model, self.modules_to_not_convert, quantization_config=self.quantization_config
-        )
-        return model
