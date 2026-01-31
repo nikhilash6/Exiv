@@ -40,10 +40,10 @@ class LoraDefinition:
         if (strength:=self.base_strength[timestep]) == 0: return 0
         
         # (Batch, Tokens, Dim) @ (Dim, Rank) -> (Batch, Tokens, Rank)
-        down_weight = w_down.flatten(start_dim=1).T  # Shape: [In, Rank]
+        down_weight = w_down.flatten(start_dim=1).T.to(input.dtype)  # Shape: [In, Rank]
         mid_step = input @ down_weight 
         # (Batch, Tokens, Rank) @ (Rank, Out) -> (Batch, Tokens, Out)
-        up_weight = w_up.flatten(start_dim=1).T      # Shape: [Rank, Out]
+        up_weight = w_up.flatten(start_dim=1).T.to(input.dtype)      # Shape: [Rank, Out]
         final_out = mid_step @ up_weight
         
         return final_out * scale * strength
@@ -203,9 +203,14 @@ class LoraMixin:
                 out = (w_up, w_down, scale)
         return out
 
-    def _get_alpha(self, down_key, lora_def, ):
-        # calculate alpha
-        alpha_key = down_key.replace(".lora_down.weight", ".alpha")
+    def _get_alpha(self, down_key, lora_def):
+        # calculate alpha key based on down key format (will fix later)
+        alpha_key = None
+        if ".lora_down.weight" in down_key:
+            alpha_key = down_key.replace(".lora_down.weight", ".alpha")
+        elif down_key.endswith(".down"):
+            alpha_key = down_key.replace(".down", ".alpha")
+        if alpha_key is None: return None
         alpha_tensor = self._read_weight(lora_def, alpha_key, "cpu", torch.float32)
         if alpha_tensor is None:
             alpha_key = down_key.split(".lora")[0] + ".alpha"

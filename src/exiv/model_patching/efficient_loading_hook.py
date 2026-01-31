@@ -3,11 +3,10 @@ import torch
 import weakref
 from typing import Callable, List, Any, Tuple
 
-from exiv.model_utils.lora_mixin import LORA_WEIGHTS_CACHE_DICT
-
 from .common import prepare_and_cache_cpu_state, profile_model_layers, restore_cpu_state, should_preload
 from .hook_registry import FeatureType, HookLocation, HookRegistry, HookType, ModelHook, register_hook_method
 from ..model_utils.helper_methods import estimate_peak_activation_size
+from ..model_utils.lora_mixin import LORA_WEIGHTS_CACHE_DICT
 from ..utils.logging import app_logger
 from ..utils.device import OFFLOAD_DEVICE, RESERVED_MEM, MemoryManager
 from ..config import BYTES_IN_MB, LOADING_MODE, global_config
@@ -22,11 +21,7 @@ def move_module_or_params(model, module, target_device, module_name=None):
         move_module(model=model, module=module, module_name=module_name, target_device=target_device)
     elif model.has_orphan_params(module):
         move_immediate_params(module=module, device=target_device)
-        
-def is_lora_supported(module):
-    classic_torch_layer = module.__class__.__module__.startswith('torch.nn')
-    has_lora_support = hasattr(module, "patch_weight")
-    return classic_torch_layer or has_lora_support
+
 
 class EfficientModelLoaderHook(ModelHook):
     """
