@@ -3,6 +3,7 @@
 
 import json
 import subprocess
+import os
 import torch
 from torch import Tensor
 
@@ -380,3 +381,31 @@ def get_video_metadata(filepath):
     result = subprocess.run(cmd, capture_output=True, text=True)
     data = json.loads(result.stdout)
     return data['format'].get('tags', {})
+
+class ProfileContext:
+    def __init__(self, name="wan_profile", base_log_dir="./profile_data"):
+        self.name = name
+        self.base_log_dir = base_log_dir
+        self.log_dir = os.path.join(base_log_dir, name)
+        os.makedirs(self.log_dir, exist_ok=True)
+        self.profiler = None
+
+    def __enter__(self):
+        from torch.profiler import profile, ProfilerActivity, tensorboard_trace_handler
+        
+        print(f"DEBUG: Profiler will save to: {os.path.abspath(self.log_dir)}")
+        self.profiler = profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            # schedule=torch.profiler.schedule(wait=1, warmup=1, active=3, repeat=1),
+            on_trace_ready=tensorboard_trace_handler(self.log_dir),
+            record_shapes=True,
+            profile_memory=True,
+            with_stack=True,
+            # acc_events=True # NOTE: acc_events removed in newer torch versions or specific to some, keeping it commented or compatible
+        )
+        self.profiler.__enter__()
+        return self.profiler
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.profiler:
+            self.profiler.__exit__(exc_type, exc_val, exc_tb)

@@ -18,6 +18,7 @@ from ...utils.common import null_func
 from ...utils.logging import app_logger
 from ...model_patching.hook_registry import HookLocation, HookRegistry, HookType
 from ...model_utils.helper_methods import get_mem_usage
+from ...utils.dev import ProfileContext
 
 class KSampler:
     def __init__(
@@ -271,19 +272,6 @@ def compute_batched_output(
 
 # NOTE: separated for debugging / testing purposes
 def run_model(model, feed_x, feed_t, **feed_input):
-    # from torch.profiler import profile, record_function, ProfilerActivity
-    # log_dir = os.path.abspath("./profile_data/wan_profile")
-    # os.makedirs(log_dir, exist_ok=True)
-
-    # print(f"DEBUG: Profiler will save to: {log_dir}")
-    # with torch.profiler.profile(
-    # activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-    # # schedule=torch.profiler.schedule(wait=1, warmup=1, active=3, repeat=1),
-    # on_trace_ready=torch.profiler.tensorboard_trace_handler(log_dir),
-    # record_shapes=True,
-    # profile_memory=True,
-    # with_stack=True,
-    # acc_events=True
-    # ) as prof:
+    # with ProfileContext("wan_profile"):
     out = model(feed_x, feed_t, **feed_input)
     return out
