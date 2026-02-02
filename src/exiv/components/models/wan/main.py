@@ -8,8 +8,6 @@ from einops import rearrange
 import math
 from typing import List
 
-from exiv.utils.device import VRAM_DEVICE
-
 from .cond_preprocessor import is_text_model, is_img_model, Wan21ModelArchConfig, Wan22ModelArchConfig
 from ...enum import Model, ModelType
 from ...attention import optimized_attention
@@ -18,7 +16,8 @@ from ...latent_format import LatentFormat, Wan21VAELatentFormat, Wan22VAELatentF
 from ....components.samplers.sampler_types import get_model_sampling
 from ....model_utils.model_mixin import ModelArchConfig, ModelMixin
 from ....utils.tensor import common_upscale, pad_to_patch_size
-
+from ....utils.device import VRAM_DEVICE
+from ....utils.logging import app_logger
 
 def sinusoidal_embedding_1d(dim, position):
     # preprocess
@@ -420,9 +419,9 @@ class Wan21Model(ModelMixin):
         self.time_projection = nn.Sequential(nn.SiLU(), nn.Linear(dim, dim * 6))
 
         # blocks
-        cross_attn_type = 't2v_cross_attn' if is_text_model(self.model_type) else 'i2v_cross_attn'
+        self.cross_attn_type = 't2v_cross_attn' if is_text_model(self.model_type) else 'i2v_cross_attn'
         self.blocks = nn.ModuleList([
-            wan_attn_block_class(cross_attn_type, dim, ffn_dim, num_heads,
+            wan_attn_block_class(self.cross_attn_type, dim, ffn_dim, num_heads,
                                  window_size, qk_norm, cross_attn_norm, eps)
             for _ in range(num_layers)
         ])
@@ -475,7 +474,7 @@ class Wan21Model(ModelMixin):
                 List of denoised video tensors with original input shapes [C_out, F, H / 8, W / 8]
         """
         # embeddings
-        with torch.autocast(device_type="cuda", dtype=torch.float32):
+        with torch.autocast(device_type=VRAM_DEVICE, dtype=torch.float32):
             x = self.patch_embedding(x.float()).to(x.dtype)
 
         grid_sizes = x.shape[2:]
@@ -499,10 +498,11 @@ class Wan21Model(ModelMixin):
 
         # clip conditioning
         context_img_len = None
-        if is_img_model(self.model_type) and clip_fea is not None:
+        if clip_fea is not None:
             if self.img_emb is not None:
                 context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
                 context = torch.concat([context_clip, context], dim=1)
+            else: app_logger.warning(f"{self.__class__.__name__} doesn't support img embeds")
             context_img_len = clip_fea.shape[-2]
 
         # running through all the attn blocks
@@ -521,17 +521,16 @@ class Wan21Model(ModelMixin):
         return x
 
     def rope_encode(self, t, h, w, t_start=0, time_indices_map=None, steps_t=None, steps_h=None, steps_w=None, device=None, dtype=None):
+        # (dimension + half_patch_size) // patch_size (effectively rounding)
         patch_size = self.patch_size
         t_len = ((t + (patch_size[0] // 2)) // patch_size[0])
         h_len = ((h + (patch_size[1] // 2)) // patch_size[1])
         w_len = ((w + (patch_size[2] // 2)) // patch_size[2])
 
-        if steps_t is None:
-            steps_t = t_len
-        if steps_h is None:
-            steps_h = h_len
-        if steps_w is None:
-            steps_w = w_len
+        # steps can be used to stretch the PEs
+        if steps_t is None: steps_t = t_len
+        if steps_h is None: steps_h = h_len
+        if steps_w is None: steps_w = w_len
 
         # FIX: doing higher precision calc for now
         # (this has marginal benefits on multi object scenes)
@@ -575,7 +574,7 @@ class Wan21Model(ModelMixin):
         x = pad_to_patch_size(x, self.patch_size)
         t_len = t
         if self.ref_conv is not None and reference_latent is not None:
-            t_len += 1      # the single latent that has been passed
+            t_len += 1      # the single latent that has been passed (wan specific logic)
 
         t_start = kwargs.get("t_start", 0)
         time_indices_map = kwargs.get("time_indices_map", None)
@@ -640,7 +639,7 @@ class Wan21Model(ModelMixin):
 class Wan22Model(Wan21Model):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.model_arch_config: ModelArchConfig = Wan22ModelArchConfig()
+        self.model_arch_config: ModelArchConfig = Wan22ModelArchConfig(model_type=self.model_type)
         
     def scale_latent_inpaint(self, sigma, noise, latent_image, **kwargs):
         return latent_image
@@ -648,3 +647,166 @@ class Wan22Model(Wan21Model):
     def get_model_sampling_obj(self):
         shift = 5 if self.model_type == Model.WAN22_14B_TI2V.value else 8
         return get_model_sampling(ModelType.FLOW, {"sampling_settings": {"shift": shift}})
+
+class VaceWanAttentionBlock(WanAttentionBlock):
+    def __init__(
+            self,
+            cross_attn_type,
+            dim,
+            ffn_dim,
+            num_heads,
+            window_size=(-1, -1),
+            qk_norm=True,
+            cross_attn_norm=False,
+            eps=1e-6,
+            block_id=0
+    ):
+        super().__init__(cross_attn_type, dim, ffn_dim, num_heads, window_size, qk_norm, cross_attn_norm, eps)
+        self.block_id = block_id
+        if block_id == 0:
+            self.before_proj = nn.Linear(self.dim, self.dim)
+        self.after_proj = nn.Linear(self.dim, self.dim)
+
+    def forward(self, c, x, **kwargs):
+        if self.block_id == 0:
+            c = self.before_proj(c) + x
+            all_c = []
+        else:
+            all_c = list(torch.unbind(c))
+            c = all_c.pop(-1)
+        c = super().forward(c, **kwargs)
+        c_skip = self.after_proj(c)
+        all_c += [c_skip, c]
+        c = torch.stack(all_c)
+        return c
+    
+    
+class WanVaceModel(Wan22Model):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.model_arch_config: ModelArchConfig = Wan21ModelArchConfig(model_type=self.model_type)
+
+        vace_layers, vace_in_dim = kwargs.get("vace_layers", None), kwargs.get("vace_dim", None)
+        # sparse vace layers, applying to alternate layers
+        self.vace_layers = [i for i in range(0, self.num_layers, 2)] if vace_layers is None else vace_layers
+        self.vace_in_dim = self.in_dim if vace_in_dim is None else vace_in_dim
+
+        assert 0 in self.vace_layers
+        self.vace_layers_mapping = {i: n for n, i in enumerate(self.vace_layers)}
+
+        # blocks
+        self.blocks = nn.ModuleList([
+            WanAttentionBlock(self.cross_attn_type, self.dim, self.ffn_dim, self.num_heads, self.window_size, self.qk_norm,
+                                  self.cross_attn_norm, self.eps,)
+            for i in range(self.num_layers)
+        ])
+
+        # vace blocks
+        self.vace_blocks = nn.ModuleList([
+            VaceWanAttentionBlock(self.cross_attn_type, self.dim, self.ffn_dim, self.num_heads, self.window_size, self.qk_norm,
+                                     self.cross_attn_norm, self.eps, block_id=i)
+            for i in self.vace_layers
+        ])
+
+        # vace patch embeddings
+        self.vace_patch_embedding = nn.Conv3d(
+            self.vace_in_dim, self.dim, kernel_size=self.patch_size, stride=self.patch_size
+        )
+        
+    def forward_vace(
+        self,
+        x,
+        vace_context,
+        kwargs
+    ):
+        # embeddings
+        orig_shape = list(vace_context.shape)
+        vace_context = vace_context.movedim(0, 1).reshape([-1] + orig_shape[2:])
+        c = self.vace_patch_embedding(vace_context.float()).to(vace_context.dtype)
+        c = c.flatten(2).transpose(1, 2)
+        c = list(c.split(orig_shape[0], dim=0))
+
+        # arguments
+        new_kwargs = dict(x=x)
+        new_kwargs.update(kwargs)
+
+        for block in self.vace_blocks:
+            c = block(c, **new_kwargs)
+        hints = torch.unbind(c)[:-1]
+        return hints
+    
+    def forward_orig(
+        self,
+        x,
+        t,
+        vace_context,
+        context,
+        vace_strength=1.0,
+        clip_fea=None,
+        freqs=None,
+    ):
+        r"""
+        Forward pass through the diffusion model
+
+        Args:
+            x (List[Tensor]):
+                List of input video tensors, each with shape [C_in, F, H, W]
+            t (Tensor):
+                Diffusion timesteps tensor of shape [B]
+            context (List[Tensor]):
+                List of text embeddings each with shape [L, C]
+            seq_len (`int`):
+                Maximum sequence length for positional encoding
+            clip_fea (Tensor, *optional*):
+                CLIP image features for image-to-video mode
+            y (List[Tensor], *optional*):
+                Conditional video inputs for image-to-video mode, same shape as x
+
+        Returns:
+            List[Tensor]:
+                List of denoised video tensors with original input shapes [C_out, F, H / 8, W / 8]
+        """
+
+        # embeddings
+        with torch.autocast(device_type=VRAM_DEVICE, dtype=torch.float32):
+            x = self.patch_embedding(x.float()).to(x.dtype)
+
+        grid_sizes = x.shape[2:]
+        x = x.flatten(2).transpose(1, 2)
+
+        # time embeddings
+        e = self.time_embedding(sinusoidal_embedding_1d(self.freq_dim, t).float())
+        e0 = self.time_projection(e).unflatten(1, (6, self.dim))
+
+        # context
+        context = self.text_embedding(context)
+
+        # clip conditioning
+        context_img_len = None
+        if clip_fea is not None:
+            if self.img_emb is not None:
+                context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
+                context = torch.concat([context_clip, context], dim=1)
+            else: app_logger.warning(f"{self.__class__.__name__} doesn't support img embeds")
+            context_img_len = clip_fea.shape[-2]
+
+        # arguments
+        kwargs = dict(
+            e=e0,
+            grid_sizes=grid_sizes,
+            freqs=freqs,
+            context=context,
+            context_lens=context_img_len)
+
+        hints = self.forward_vace(x, vace_context, kwargs)
+        for block_idx, block in enumerate(self.blocks):
+            x = block(x, **kwargs)
+            if block_idx in self.vace_layers:
+                x = x + hints[block_idx] * vace_strength
+
+        # head
+        x = self.head(x, e)
+
+        # unpatchify
+        x = self.unpatchify(x, grid_sizes)
+        return [u.float() for u in x]
