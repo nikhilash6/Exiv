@@ -110,7 +110,9 @@ class Model(ExtendedEnum):
     WAN21_1_3B_T2V = "wan21_1_3b_t2v"           # no native i2v support
     WAN21_14B_TI2V = "wan21_14b_ti2v"           # basically wan21
     
-    WAN21_VACE_14B_R2V = "wan21_14b_vace_r2v"   # supports multiple ref types
+    # supports multiple ref types
+    WAN21_VACE_1_3B_R2V = "wan21_1_3b_vace_r2v"
+    WAN21_VACE_14B_R2V = "wan21_14b_vace_r2v"
 
     # ------------- QWEN Models -------------
     QWEN_IMAGE = "qwen_image"

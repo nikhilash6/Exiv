@@ -679,16 +679,15 @@ class VaceWanAttentionBlock(WanAttentionBlock):
         all_c += [c_skip, c]
         c = torch.stack(all_c)
         return c
-    
-    
-class WanVaceModel(Wan22Model):
+
+class Wan21VaceModel(Wan22Model):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.model_arch_config: ModelArchConfig = Wan21ModelArchConfig(model_type=self.model_type)
 
-        vace_layers, vace_in_dim = kwargs.get("vace_layers", None), kwargs.get("vace_dim", None)
+        vace_layers, vace_in_dim = kwargs.get("vace_layers"), kwargs.get("vace_dim")
         # sparse vace layers, applying to alternate layers
-        self.vace_layers = [i for i in range(0, self.num_layers, 2)] if vace_layers is None else vace_layers
+        self.vace_layers = [i * 2 for i in range(0, vace_layers)]
         self.vace_in_dim = self.in_dim if vace_in_dim is None else vace_in_dim
 
         assert 0 in self.vace_layers
@@ -740,9 +739,10 @@ class WanVaceModel(Wan22Model):
         x,
         t,
         vace_context,
-        context,
+        cross_attn,
         vace_strength=1.0,
         clip_fea=None,
+        reference_latent=None,      # TODO: remove this later
         freqs=None,
     ):
         r"""
@@ -753,7 +753,7 @@ class WanVaceModel(Wan22Model):
                 List of input video tensors, each with shape [C_in, F, H, W]
             t (Tensor):
                 Diffusion timesteps tensor of shape [B]
-            context (List[Tensor]):
+            cross_attn (List[Tensor]):
                 List of text embeddings each with shape [L, C]
             seq_len (`int`):
                 Maximum sequence length for positional encoding
@@ -778,8 +778,8 @@ class WanVaceModel(Wan22Model):
         e = self.time_embedding(sinusoidal_embedding_1d(self.freq_dim, t).float())
         e0 = self.time_projection(e).unflatten(1, (6, self.dim))
 
-        # context
-        context = self.text_embedding(context)
+        # cross_attn
+        cross_attn = self.text_embedding(cross_attn)
 
         # clip conditioning
         context_img_len = None
@@ -795,7 +795,7 @@ class WanVaceModel(Wan22Model):
             e=e0,
             grid_sizes=grid_sizes,
             freqs=freqs,
-            context=context,
+            context=cross_attn,
             context_lens=context_img_len)
 
         hints = self.forward_vace(x, vace_context, kwargs)

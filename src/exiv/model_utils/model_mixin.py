@@ -208,7 +208,8 @@ class ModelMixin(nn.Module, LoraMixin, ConditioningMixin, metaclass=ModuleMeta):
         model_path = None,              # model file path (override for flexibility)
         force_download=False,           # re_download models
         download_url=None,              # file url (optional)
-        dtype=None                      # TODO: hardware specific dtype
+        dtype=None,                     # TODO: hardware specific dtype
+        model_type=None
     ):
         model_path = model_path or self.model_path
         assert model_path is not None, "model_path is required"
@@ -219,7 +220,7 @@ class ModelMixin(nn.Module, LoraMixin, ConditioningMixin, metaclass=ModuleMeta):
         self.dtype = dtype or self.dtype
         
         model_path = ensure_model_availability(model_path, download_url, force_download)
-        state_dict = get_state_dict(model_path)
+        state_dict = get_state_dict(model_path, model_type=model_type)
         model_state_dict = self.state_dict()
         
         for param_name, param in state_dict.items():
