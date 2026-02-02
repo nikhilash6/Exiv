@@ -596,6 +596,7 @@ class Wan21VAE(VAEBase):
         return self.denormalize_decoder_outputs(out)
 
     def _encode(self, x: Tensor):
+        x = x.to(self.dtype)
         B, C, T, H, W = x.shape
         # (T, H, W, C) -> (W, H, T)
         tile_width, tile_height, tile_temporal, overlap_width, overlap_height = self.get_tiling_config(input_shape=(W, H, T))

@@ -721,29 +721,33 @@ class Wan21VaceModel(Wan22Model):
         # embeddings
         orig_shape = list(vace_context.shape)
         vace_context = vace_context.movedim(0, 1).reshape([-1] + orig_shape[2:])
-        c = self.vace_patch_embedding(vace_context.float()).to(vace_context.dtype)
+        c = self.vace_patch_embedding(vace_context).to(vace_context.dtype)
         c = c.flatten(2).transpose(1, 2)
         c = list(c.split(orig_shape[0], dim=0))
 
-        # arguments
         new_kwargs = dict(x=x)
         new_kwargs.update(kwargs)
-
-        for block in self.vace_blocks:
-            c = block(c, **new_kwargs)
-        hints = torch.unbind(c)[:-1]
-        return hints
+        accumulated_hints = [0] * len(self.vace_blocks)
+        for i, c in enumerate(c):
+            # accumulates [skip0, skip1, ..., state] in 'c'
+            for block in self.vace_blocks:
+                c = block(c, **new_kwargs)
+            
+            # unbind returns tuple: (skip_0, skip_1, ..., final_state)
+            current_hints = torch.unbind(c)[:-1]
+            for layer_idx, hint in enumerate(current_hints):
+                accumulated_hints[layer_idx] = accumulated_hints[layer_idx] + hint
+        return accumulated_hints
     
     def forward_orig(
         self,
         x,
         t,
-        vace_context,
         cross_attn,
-        vace_strength=1.0,
+        vace_context=None,  # (vace_ctx, strength)
         clip_fea=None,
-        reference_latent=None,      # TODO: remove this later
         freqs=None,
+        **kwargs
     ):
         r"""
         Forward pass through the diffusion model
@@ -767,6 +771,9 @@ class Wan21VaceModel(Wan22Model):
                 List of denoised video tensors with original input shapes [C_out, F, H / 8, W / 8]
         """
 
+        assert vace_context is not None, "vace_context is required for this pass"
+        vace_strength = 1.0
+        clip_fea = None
         # embeddings
         with torch.autocast(device_type=VRAM_DEVICE, dtype=torch.float32):
             x = self.patch_embedding(x.float()).to(x.dtype)
@@ -775,7 +782,7 @@ class Wan21VaceModel(Wan22Model):
         x = x.flatten(2).transpose(1, 2)
 
         # time embeddings
-        e = self.time_embedding(sinusoidal_embedding_1d(self.freq_dim, t).float())
+        e = self.time_embedding(sinusoidal_embedding_1d(self.freq_dim, t).to(dtype=x[0].dtype))
         e0 = self.time_projection(e).unflatten(1, (6, self.dim))
 
         # cross_attn
@@ -793,20 +800,19 @@ class Wan21VaceModel(Wan22Model):
         # arguments
         kwargs = dict(
             e=e0,
-            grid_sizes=grid_sizes,
             freqs=freqs,
             context=cross_attn,
-            context_lens=context_img_len)
+            context_img_len=context_img_len)
 
         hints = self.forward_vace(x, vace_context, kwargs)
         for block_idx, block in enumerate(self.blocks):
             x = block(x, **kwargs)
             if block_idx in self.vace_layers:
-                x = x + hints[block_idx] * vace_strength
+                x = x + hints[block_idx // 2] * vace_strength       # TODO: fix this mapping
 
         # head
         x = self.head(x, e)
 
         # unpatchify
         x = self.unpatchify(x, grid_sizes)
-        return [u.float() for u in x]
+        return x

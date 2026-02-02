@@ -234,7 +234,7 @@ def compute_batched_output(
 
     active_batched_conds = filter_active_conds(batched_conds, timestep)
     registry = HookRegistry.get_hook_registry(wrapped_model.model)
-    max_bs = determine_max_batch_size(wrapped_model.model, x_in.shape)
+    max_bs = 1 #determine_max_batch_size(wrapped_model.model, x_in.shape)
     execution_batch_list: List[ExecutionBatch] = batch_compatible_conds(
         active_batched_conds, 
         x_in, 
@@ -274,5 +274,6 @@ def compute_batched_output(
 # NOTE: separated for debugging / testing purposes
 def run_model(model, feed_x, feed_t, **feed_input):
     # with ProfileContext("wan_profile"):
-    out = model(feed_x, feed_t, **feed_input)
+    half_state_dict = {k: v.to(torch.float16) for k, v in feed_input.items()}
+    out = model(feed_x, feed_t, **half_state_dict)
     return out

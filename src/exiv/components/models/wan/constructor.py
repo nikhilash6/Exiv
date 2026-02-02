@@ -94,7 +94,7 @@ def get_wan_instance(
     download_url,
     force_load_mode=LOADING_MODE.LOW_VRAM.value,
     force_dtype=None,
-    quant_type=QuantType.FP8_SCALED,
+    quant_type=None, #QuantType.FP8_SCALED,
 ):
     model_path = ensure_model_availability(model_path, download_url)
     state_dict = get_state_dict(model_path, model_type="checkpoint")    # TODO: convert these model_type strings into enums

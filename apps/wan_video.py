@@ -21,6 +21,7 @@ from exiv.utils.file import MediaProcessor
 from exiv.utils.file_path import FilePathData, FilePaths
 from exiv.utils.logging import app_logger
 from utils.defaults import get_dummy_cond, get_dummy_hook, get_dummy_latent
+from exiv.utils.dev import ProfileContext
 
 use_vae_tiling = False
 vae_dtype = torch.float16 # torch.bfloat16
@@ -109,7 +110,8 @@ def main(**params):
         batched_conditioning=batched_cond,
         latent_image=latent
     )
-    out = main_sampler.run_sampling(callback=lambda i, s: progress_callback(i, s))
+    with ProfileContext("wan_profile"):
+        out = main_sampler.run_sampling(callback=lambda i, s: progress_callback(i, s))
     
     wan_dit_model.to("cpu")
     wan_type = model_wrapper.model.model_arch_config.default_vae_type
@@ -139,7 +141,7 @@ app = App(
         'hooks': Input(label="Hooks (JSON)", type="json", default=DEFAULT_HOOKS),
         'latent': Input(label="Latent", type="json", default=DEFAULT_LATENT),
         'seed': Input(label="Seed", type="number", default=256347,),
-        'steps': Input(label="Steps", type="number", default=30, increment_controls=True, increment_step=2,),
+        'steps': Input(label="Steps", type="number", default=2, increment_controls=True, increment_step=2,),
         'cfg': Input(label="CFG", type="number", default=6, increment_controls=True, increment_step=0.2,),
         'sampler_name': Input(label="Sampler Name", type="select", options=KSamplerType.value_list(), \
             default=KSamplerType.EULER.value,),
@@ -147,9 +149,11 @@ app = App(
             default=SchedulerType.SIMPLE.value,),
         # 'height': Input(label="Height", type="number", default=480),
         # 'width': Input(label="Width", type="number", default=832),
-        'height': Input(label="Height", type="number", default=512),
-        'width': Input(label="Width", type="number", default=512),
-        'frame_count': Input(label="Frame Count", type="number", default=33),
+        'height': Input(label="Height", type="number", default=720),
+        'width': Input(label="Width", type="number", default=1280),
+        # 'height': Input(label="Height", type="number", default=512),
+        # 'width': Input(label="Width", type="number", default=512),
+        'frame_count': Input(label="Frame Count", type="number", default=81),
     },
     outputs=[Output(id=1, type=AppOutputType.VIDEO.value)],
     handler=main

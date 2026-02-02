@@ -1,5 +1,8 @@
 import torch
+import torch.nn.functional as F
+import torchvision.transforms.functional as TF
 
+from PIL import Image
 from typing import Callable, Dict, List, Optional
 
 from ...latent_format import Wan21VAELatentFormat, Wan22VAELatentFormat
@@ -10,7 +13,7 @@ from ...enum import Model, VAEType
 from ...cond_registry import get_image_tensor, get_text_embeddings, get_vision_embeddings, register_preprocessor
 from ...text_vision_encoder.common import TextEncoderOutput, VisionEncoderOutput
 from ...vae.base import VAEBase, get_vae
-from ....model_utils.common_classes import AuxCondType, BatchedConditioning, Conditioning, Latent, ModelWrapper
+from ....model_utils.common_classes import AuxCondType, AuxConditioning, BatchedConditioning, Conditioning, Latent, ModelWrapper
 from ....utils.common import fix_frame_count, null_func
 
 
@@ -66,6 +69,65 @@ class Wan22ModelArchConfig(Wan21ModelArchConfig):
             self.latent_format = Wan22VAELatentFormat()
             self.default_vae_type = VAEType.WAN22.value
 
+def _process_vace_context(cond_list, wrapper, vae, height, width, frame_count, progress_callback):
+        latent_length = ((frame_count - 1) // 4) + 1
+        reference_image, control_masks, control_video = None, None, None
+        if control_video is not None:
+            control_video = common_upscale(control_video[:frame_count].movedim(-1, 1), width, height, "bilinear", "center").movedim(1, -1)
+            if control_video.shape[0] < frame_count:
+                control_video = torch.nn.functional.pad(control_video, (0, 0, 0, 0, 0, 0, 0, frame_count - control_video.shape[0]), value=0.5)
+        else:
+            control_video = torch.ones((frame_count, height, width, 3)) * 0.5
+
+        if reference_image is not None:
+            reference_image = common_upscale(reference_image[:1].movedim(-1, 1), width, height, "bilinear", "center").movedim(1, -1)
+            reference_image = vae.encode(reference_image[:, :, :, :3])
+            reference_image = torch.cat([reference_image, wrapper.model.model_arch_config.latent_format.process_out(torch.zeros_like(reference_image))], dim=1)
+
+        if control_masks is None:
+            mask = torch.ones((frame_count, height, width, 1))
+        else:
+            mask = control_masks
+            if mask.ndim == 3:
+                mask = mask.unsqueeze(1)
+            mask = common_upscale(mask[:frame_count], width, height, "bilinear", "center").movedim(1, -1)
+            if mask.shape[0] < frame_count:
+                mask = torch.nn.functional.pad(mask, (0, 0, 0, 0, 0, 0, 0, frame_count - mask.shape[0]), value=1.0)
+
+        control_video = control_video - 0.5
+        inactive = (control_video * (1 - mask)) + 0.5
+        reactive = (control_video * mask) + 0.5
+
+        inactive = inactive.permute(3, 0, 1, 2)
+        reactive = reactive.permute(3, 0, 1, 2)
+        inactive = vae.encode(inactive[:3, :, :, :].unsqueeze(0))
+        reactive = vae.encode(reactive[:3, :, :, :].unsqueeze(0))
+        control_video_latent = torch.cat((inactive, reactive), dim=1)
+        if reference_image is not None:
+            control_video_latent = torch.cat((reference_image, control_video_latent), dim=2)
+
+        vae_stride = 8
+        height_mask = height // vae_stride
+        width_mask = width // vae_stride
+        mask = mask.view(frame_count, height_mask, vae_stride, width_mask, vae_stride)
+        mask = mask.permute(2, 4, 0, 1, 3)
+        mask = mask.reshape(vae_stride * vae_stride, frame_count, height_mask, width_mask)
+        mask = torch.nn.functional.interpolate(mask.unsqueeze(0), size=(latent_length, height_mask, width_mask), mode='nearest-exact').squeeze(0)
+
+        trim_latent = 0
+        if reference_image is not None:
+            mask_pad = torch.zeros_like(mask[:, :reference_image.shape[2], :, :])
+            mask = torch.cat((mask_pad, mask), dim=1)
+            latent_length += reference_image.shape[2]
+            trim_latent = reference_image.shape[2]
+
+        mask = mask.unsqueeze(0).to(VRAM_DEVICE)
+        final = torch.cat([control_video_latent, mask], dim=1)
+        final = final.unsqueeze(0)      # to support multi vace ctx inputs
+        
+        aux_cond = AuxConditioning(type=AuxCondType.VACE_CTX, data=final)
+        for c in cond_list: c.aux.append(aux_cond)
+
 def _process_visual_embeddings(cond_list, model_wrapper, height, width, progress_callback):
     pending_embeds = []
     for c in cond_list:
@@ -101,6 +163,7 @@ def _process_ref_latents(cond_list, model_wrapper, wan_vae, height, width, frame
 def process_auxiliaries(cond_list, wrapper, wan_vae, height, width, frame_count, progress_callback):
     _process_visual_embeddings(cond_list, wrapper, height, width, progress_callback)
     _process_ref_latents(cond_list, wrapper, wan_vae, height, width, frame_count, progress_callback)
+    _process_vace_context(cond_list, wrapper, wan_vae, height, width, frame_count, progress_callback)
 
 @register_preprocessor(Model.WAN21_VACE_1_3B_R2V.value)
 @register_preprocessor(Model.WAN22_14B_TI2V.value)
@@ -136,7 +199,6 @@ def preprocess_wan_conditionals(
     for i, te_embed in enumerate(te_embeds): cond_list[i].data = te_embed.last_hidden_state
     
     process_auxiliaries(cond_list, model_wrapper, wan_vae, height, width, frame_count, progress_callback)
-                    
     batched_cond = BatchedConditioning(
         execution_order=["positive", "negative"]    # TODO: generalize this order based on index rather than group_name
     )

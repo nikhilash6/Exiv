@@ -20,8 +20,8 @@ def get_dummy_cond(
             "timestep_range": [0.0, -1],
             "frame_range": [0.0, -1],
             "aux": [
-                { "type": AuxCondType.REF_LATENT, "input_metadata": temp_img},
-                { "type": AuxCondType.VISUAL_EMBEDDING, "input_metadata": temp_img},
+                # { "type": AuxCondType.REF_LATENT, "input_metadata": temp_img},
+                # { "type": AuxCondType.VISUAL_EMBEDDING, "input_metadata": temp_img},
             ]
         },
         {
@@ -30,8 +30,8 @@ def get_dummy_cond(
             "frame_range": [0.0, -1],
             "input_metadata": negative,
             "aux": [
-                { "type": AuxCondType.REF_LATENT, "input_metadata": temp_img},
-                { "type": AuxCondType.VISUAL_EMBEDDING, "input_metadata": temp_img},
+                # { "type": AuxCondType.REF_LATENT, "input_metadata": temp_img},
+                # { "type": AuxCondType.VISUAL_EMBEDDING, "input_metadata": temp_img},
             ]
         }
     ]

@@ -187,6 +187,7 @@ class ModelForwardInput:
     controlnet: Optional[Any] = None            # controlnet signal
     time_hint: Optional[Any] = None             # time_dim_concat
     reference_latent: Optional[Any] = None      # vae encoded latent as a hint
+    vace_context: Optional[Any] = None          # vace ctx
 
     def to_dict(self):
         return {k: v for k, v in self.__dict__.items() if v is not None}
@@ -197,6 +198,7 @@ class AuxCondType:
     REF_LATENT = "ref_latent"               # style transfer, audio timbre etc..
     VISUAL_EMBEDDING = "visual_embedding"   # ipa / vision embeds
     CONTROLNET = "controlnet"               # controlnet signal
+    VACE_CTX = "vace_ctx"                   # wan vace context
 
 @dataclass
 class AuxConditioning:
