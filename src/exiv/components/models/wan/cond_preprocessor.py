@@ -8,7 +8,7 @@ from typing import Callable, Dict, List, Optional
 from ...latent_format import Wan21VAELatentFormat, Wan22VAELatentFormat
 from ....model_utils.model_mixin import ModelArchConfig
 from ....utils.device import VRAM_DEVICE
-from ....utils.tensor import common_upscale
+from ....utils.tensor import common_upscale, get_tensor_weak_hash
 from ...enum import Model, VAEType
 from ...cond_registry import get_image_tensor, get_text_embeddings, get_vision_embeddings, register_preprocessor
 from ...text_vision_encoder.common import TextEncoderOutput, VisionEncoderOutput
@@ -69,64 +69,76 @@ class Wan22ModelArchConfig(Wan21ModelArchConfig):
             self.latent_format = Wan22VAELatentFormat()
             self.default_vae_type = VAEType.WAN22.value
 
-def _process_vace_context(cond_list, wrapper, vae, height, width, frame_count, progress_callback):
-        latent_length = ((frame_count - 1) // 4) + 1
-        reference_image, control_masks, control_video = None, None, None
-        if control_video is not None:
-            control_video = common_upscale(control_video[:frame_count].movedim(-1, 1), width, height, "bilinear", "center").movedim(1, -1)
-            if control_video.shape[0] < frame_count:
-                control_video = torch.nn.functional.pad(control_video, (0, 0, 0, 0, 0, 0, 0, frame_count - control_video.shape[0]), value=0.5)
-        else:
-            control_video = torch.ones((frame_count, height, width, 3)) * 0.5
+def _process_vace_context(cond_list: List[Conditioning], wrapper: ModelWrapper, vae: VAEBase, height: int, width: int, frame_count: int, progress_callback):
+    _vace_cache = {}
+    for c in cond_list:
+        for aux_c in c.aux:
+            if aux_c.type == AuxCondType.VACE_CTX:
+                latent_length = ((frame_count - 1) // vae.temporal_compression_ratio) + 1
+                reference_image, control_masks, control_video = None, None, None
+                
+                key_video = get_tensor_weak_hash(control_video)
+                key_mask = get_tensor_weak_hash(control_masks)
+                key_ref = get_tensor_weak_hash(reference_image)
+                cache_key = (key_video, key_mask, key_ref, height, width, frame_count)
+                
+                if cache_key in _vace_cache:
+                    final = _vace_cache[cache_key]
+                else:
+                    if control_video is not None:
+                        control_video = common_upscale(control_video[:frame_count].movedim(-1, 1), width, height, "bilinear", "center").movedim(1, -1)
+                        if control_video.shape[0] < frame_count:
+                            control_video = torch.nn.functional.pad(control_video, (0, 0, 0, 0, 0, 0, 0, frame_count - control_video.shape[0]), value=0.5)
+                    else:
+                        control_video = torch.ones((frame_count, height, width, 3)) * 0.5
 
-        if reference_image is not None:
-            reference_image = common_upscale(reference_image[:1].movedim(-1, 1), width, height, "bilinear", "center").movedim(1, -1)
-            reference_image = vae.encode(reference_image[:, :, :, :3])
-            reference_image = torch.cat([reference_image, wrapper.model.model_arch_config.latent_format.process_out(torch.zeros_like(reference_image))], dim=1)
+                    if reference_image is not None:
+                        reference_image = common_upscale(reference_image[:1].movedim(-1, 1), width, height, "bilinear", "center").movedim(1, -1)
+                        reference_image = vae.encode(reference_image[:, :, :, :3])
+                        reference_image = torch.cat([reference_image, wrapper.model.model_arch_config.latent_format.process_out(torch.zeros_like(reference_image))], dim=1)
 
-        if control_masks is None:
-            mask = torch.ones((frame_count, height, width, 1))
-        else:
-            mask = control_masks
-            if mask.ndim == 3:
-                mask = mask.unsqueeze(1)
-            mask = common_upscale(mask[:frame_count], width, height, "bilinear", "center").movedim(1, -1)
-            if mask.shape[0] < frame_count:
-                mask = torch.nn.functional.pad(mask, (0, 0, 0, 0, 0, 0, 0, frame_count - mask.shape[0]), value=1.0)
+                    if control_masks is None:
+                        mask = torch.ones((frame_count, height, width, 1))
+                    else:
+                        mask = control_masks
+                        if mask.ndim == 3:
+                            mask = mask.unsqueeze(1)
+                        mask = common_upscale(mask[:frame_count], width, height, "bilinear", "center").movedim(1, -1)
+                        if mask.shape[0] < frame_count:
+                            mask = torch.nn.functional.pad(mask, (0, 0, 0, 0, 0, 0, 0, frame_count - mask.shape[0]), value=1.0)
 
-        control_video = control_video - 0.5
-        inactive = (control_video * (1 - mask)) + 0.5
-        reactive = (control_video * mask) + 0.5
+                    control_video = control_video - 0.5
+                    inactive = (control_video * (1 - mask)) + 0.5
+                    reactive = (control_video * mask) + 0.5
 
-        inactive = inactive.permute(3, 0, 1, 2)
-        reactive = reactive.permute(3, 0, 1, 2)
-        inactive = vae.encode(inactive[:3, :, :, :].unsqueeze(0))
-        reactive = vae.encode(reactive[:3, :, :, :].unsqueeze(0))
-        control_video_latent = torch.cat((inactive, reactive), dim=1)
-        if reference_image is not None:
-            control_video_latent = torch.cat((reference_image, control_video_latent), dim=2)
+                    inactive = inactive.permute(3, 0, 1, 2)
+                    reactive = reactive.permute(3, 0, 1, 2)
+                    inactive = vae.encode(inactive[:3, :, :, :].unsqueeze(0))
+                    reactive = vae.encode(reactive[:3, :, :, :].unsqueeze(0))
+                    control_video_latent = torch.cat((inactive, reactive), dim=1)
+                    if reference_image is not None:
+                        control_video_latent = torch.cat((reference_image, control_video_latent), dim=2)
 
-        vae_stride = 8
-        height_mask = height // vae_stride
-        width_mask = width // vae_stride
-        mask = mask.view(frame_count, height_mask, vae_stride, width_mask, vae_stride)
-        mask = mask.permute(2, 4, 0, 1, 3)
-        mask = mask.reshape(vae_stride * vae_stride, frame_count, height_mask, width_mask)
-        mask = torch.nn.functional.interpolate(mask.unsqueeze(0), size=(latent_length, height_mask, width_mask), mode='nearest-exact').squeeze(0)
+                    vae_stride = 8
+                    height_mask = height // vae_stride
+                    width_mask = width // vae_stride
+                    mask = mask.view(frame_count, height_mask, vae_stride, width_mask, vae_stride)
+                    mask = mask.permute(2, 4, 0, 1, 3)
+                    mask = mask.reshape(vae_stride * vae_stride, frame_count, height_mask, width_mask)
+                    mask = torch.nn.functional.interpolate(mask.unsqueeze(0), size=(latent_length, height_mask, width_mask), mode='nearest-exact').squeeze(0)
 
-        trim_latent = 0
-        if reference_image is not None:
-            mask_pad = torch.zeros_like(mask[:, :reference_image.shape[2], :, :])
-            mask = torch.cat((mask_pad, mask), dim=1)
-            latent_length += reference_image.shape[2]
-            trim_latent = reference_image.shape[2]
+                    if reference_image is not None:
+                        mask_pad = torch.zeros_like(mask[:, :reference_image.shape[2], :, :])
+                        mask = torch.cat((mask_pad, mask), dim=1)
+                        latent_length += reference_image.shape[2]
 
-        mask = mask.unsqueeze(0).to(VRAM_DEVICE)
-        final = torch.cat([control_video_latent, mask], dim=1)
-        final = final.unsqueeze(0)      # to support multi vace ctx inputs
-        
-        aux_cond = AuxConditioning(type=AuxCondType.VACE_CTX, data=final)
-        for c in cond_list: c.aux.append(aux_cond)
+                    mask = mask.unsqueeze(0).to(VRAM_DEVICE)
+                    for i in range(0, control_video_latent.shape[1], 16):
+                        control_video_latent[:, i:i + 16] = wrapper.model.process_latent_in(control_video_latent[:, i:i + 16])
+                    final = torch.cat([control_video_latent, mask], dim=1)
+                    final = final.unsqueeze(0)      # to support multi vace ctx inputs
+                
+                aux_c.data = final
 
 def _process_visual_embeddings(cond_list, model_wrapper, height, width, progress_callback):
     pending_embeds = []

@@ -14,6 +14,7 @@ from .text_vision_encoder.text_encoder import TextPipeline, create_text_pipeline
 from .text_vision_encoder.vision_encoder import create_vision_encoder
 from ..utils.device import MemoryManager
 from ..model_utils.common_classes import AuxCondType, BatchedConditioning, Conditioning, ConditioningType, Latent, ModelWrapper
+from ..utils.logging import app_logger
 
 _PREPROCESSORS = {}     # global registry
 def register_preprocessor(model_type):
@@ -33,6 +34,7 @@ def preprocess_conds(
     model_type = model_wrapper.model.model_type
     
     if kwargs.pop("cfg", 7) == 1:
+        app_logger.info("CFG = 1, discarding the negative conditioning")
         cond_list = list(filter(lambda c: c.group_name != "negative", cond_list))   # TODO: hardcoded string, should be fixed
     
     if model_type not in _PREPROCESSORS:
