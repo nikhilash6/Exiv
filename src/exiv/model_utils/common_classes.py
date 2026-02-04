@@ -124,6 +124,7 @@ class Latent:
         return sorted(list(indices)), (t_lat, h_lat, w_lat)
     
     def encode_keyframe_condition(self, width, height, num_frames, latent_format: LatentFormat, vae: 'VAEBase'):
+        # this is mainly for inpainting at this point
         if len(self.image_path_list): self._load_images(height, width)
         num_inputs = len(self.samples) if self.samples else 0
         indices, dims = self.prepare_layout_and_schedule(width, height, num_frames, num_inputs, vae, mode="interpolate")
@@ -210,6 +211,9 @@ class AuxConditioning:
     input_metadata: Optional[Union[dict, str]] = None
     timestep_range: Tuple[float, float] = (0.0, -1)    # (0.0=start, -1.0=end)
     frame_range: Optional[Tuple[int, int]] = None       # (start_idx, end_idx)
+
+class ExtraCond:
+    EXTRA_LATENT_FRAMES = "extra_latent_frames"
 
 @dataclass
 class Conditioning:

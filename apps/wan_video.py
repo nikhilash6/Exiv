@@ -11,7 +11,7 @@ from exiv.components.models.wan.constructor import get_wan_instance
 from exiv.components.samplers.model_sampling import KSampler
 from exiv.components.vae.base import get_vae
 from exiv.model_patching.common import apply_hook_json
-from exiv.model_utils.common_classes import Conditioning, Latent
+from exiv.model_utils.common_classes import BatchedConditioning, Conditioning, ExtraCond, Latent
 from exiv.model_utils.common_classes import ModelWrapper
 from exiv.quantizers.base import QuantType
 from exiv.server.app_core import App, AppOutputType, Input, Output
@@ -68,38 +68,37 @@ def main(**params):
     apply_hook_json(wan_dit_model, hooks)
     model_wrapper = ModelWrapper(model=wan_dit_model)
     
+    # preprocess conditionals
+    batched_cond: BatchedConditioning = preprocess_conds(
+                                            model_wrapper=model_wrapper,
+                                            cond_list=cond_list,
+                                            height=height, 
+                                            width=width, 
+                                            frame_count=frame_count,
+                                            cfg=cfg,
+                                            progress_callback=lambda percent, tag: context.progress(percent, tag) if context else null_func
+                                        )
+    
     # input latent
     wan_vae = get_vae(
         vae_type=model_wrapper.model.model_arch_config.default_vae_type,
         vae_dtype=vae_dtype,
         use_tiling=use_vae_tiling
     )
+    extra_frames = batched_cond.conds[0].extra.get(ExtraCond.EXTRA_LATENT_FRAMES, 0)    # needed for vace
     latent_format = model_wrapper.model.model_arch_config.latent_format
     latent: Latent = Latent.from_json(latent_json=latent_json)
     latent.encode_keyframe_condition( 
         width, 
         height,
-        frame_count, 
+        frame_count + extra_frames, 
         latent_format, 
         wan_vae,
     )
     del wan_vae
-    
-    # preprocess conditionals
-    batched_cond = preprocess_conds(
-                    model_wrapper=model_wrapper,
-                    cond_list=cond_list,
-                    height=height, 
-                    width=width, 
-                    frame_count=frame_count,
-                    cfg=cfg,
-                    progress_callback=lambda percent, tag: context.progress(percent, tag) if context else null_func
-                )
-    
     MemoryManager.clear_memory()
 
     if context: context.start_anchor("Sampling", steps=12) # 60%
-    
     # the main sampling loop
     main_sampler = KSampler(
         wrapped_model=model_wrapper,
@@ -112,7 +111,7 @@ def main(**params):
         latent_image=latent
     )
     out = main_sampler.run_sampling(callback=lambda i, s: progress_callback(i, s))
-    
+    if extra_frames > 0: out = out[:, :, extra_frames:]     # (B, C, T, H, W)
     wan_dit_model.to("cpu")
     wan_type = model_wrapper.model.model_arch_config.default_vae_type
     del wan_dit_model, model_wrapper

@@ -153,6 +153,53 @@ class MediaProcessor:
         return res
     
     @staticmethod
+    def load_video(video_path: str, output_frames: bool = True, limit_frame_count: int | None = None):
+        """
+        Loads a video and returns (frames, metadata)
+        output_frames: return frame list if True, the video tensor otherwise
+        limit_frame_count: Optional integer to stop loading after N frames
+        
+        Returns: 
+            video_tensor: (C, T, H, W) float32 tensor in [0, 1] range, or None
+            metadata: Dict containing fps, resolution, duration, etc
+        """
+        if not os.path.exists(video_path):
+            raise FileNotFoundError(f"Video file not found: {video_path}")
+
+        container = av.open(video_path)
+        stream = container.streams.video[0]
+        
+        metadata = {
+            "fps": float(stream.average_rate),
+            "resolution": (stream.width, stream.height),
+            "duration": float(stream.duration * stream.time_base) if stream.duration else 0.0,
+            "total_frames_in_file": stream.frames
+        }
+
+        video_tensor = None
+        frames = []
+        for i, frame in enumerate(container.decode(video=0)):
+            if limit_frame_count is not None and i >= limit_frame_count:
+                break
+            np_frame = frame.to_ndarray(format='rgb24')
+            np_frame = np_frame.astype(np.float32) / 255.0              # H x W x C (0-255) to H x W x C (0.0-1.0)
+            pt_frame = torch.from_numpy(np_frame.transpose(2, 0, 1))    # H x W x C -> C x H x W
+            frames.append(pt_frame)
+
+        if frames:
+            metadata["loaded_frames"] = len(frames)
+            if not output_frames:
+                video_tensor = torch.from_numpy(np.stack(frames))       # stack -> (T, C, H, W)
+                video_tensor = video_tensor.permute(1, 0, 2, 3)         # permute -> (C, T, H, W)
+            else:
+                video_tensor = frames
+        else:
+            metadata["loaded_frames"] = 0
+
+        container.close()
+        return video_tensor, metadata
+    
+    @staticmethod
     def save_latents_to_media(out, metadata: Dict | None = None, subfolder: str | None = None):
         # TODO: make this a generic method, allowing saving images/audio/3d as well
         # rn it is only for video

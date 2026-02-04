@@ -5,6 +5,8 @@ import torchvision.transforms.functional as TF
 from PIL import Image
 from typing import Callable, Dict, List, Optional
 
+from exiv.utils.file import MediaProcessor
+
 from ...latent_format import Wan21VAELatentFormat, Wan22VAELatentFormat
 from ....model_utils.model_mixin import ModelArchConfig
 from ....utils.device import VRAM_DEVICE
@@ -13,7 +15,7 @@ from ...enum import Model, VAEType
 from ...cond_registry import get_image_tensor, get_text_embeddings, get_vision_embeddings, register_preprocessor
 from ...text_vision_encoder.common import TextEncoderOutput, VisionEncoderOutput
 from ...vae.base import VAEBase, get_vae
-from ....model_utils.common_classes import AuxCondType, AuxConditioning, BatchedConditioning, Conditioning, Latent, ModelWrapper
+from ....model_utils.common_classes import AuxCondType, AuxConditioning, BatchedConditioning, Conditioning, ExtraCond, Latent, ModelWrapper
 from ....utils.common import fix_frame_count, null_func
 
 
@@ -72,10 +74,15 @@ class Wan22ModelArchConfig(Wan21ModelArchConfig):
 def _process_vace_context(cond_list: List[Conditioning], wrapper: ModelWrapper, vae: VAEBase, height: int, width: int, frame_count: int, progress_callback):
     _vace_cache = {}
     for c in cond_list:
+        extra_frames = 0
         for aux_c in c.aux:
             if aux_c.type == AuxCondType.VACE_CTX:
                 latent_length = ((frame_count - 1) // vae.temporal_compression_ratio) + 1
                 reference_image, control_masks, control_video = None, None, None
+                control_video_path = aux_c.input_metadata.get("control_video_path", None)
+                reference_image_path = aux_c.input_metadata.get("reference_image_path", None)
+                if control_video_path: control_video = MediaProcessor.load_video(control_video_path, output_frames=True)
+                if reference_image_path: reference_image = get_image_tensor(reference_image_path)
                 
                 key_video = get_tensor_weak_hash(control_video)
                 key_mask = get_tensor_weak_hash(control_masks)
@@ -95,14 +102,16 @@ def _process_vace_context(cond_list: List[Conditioning], wrapper: ModelWrapper, 
                     if reference_image is not None:
                         reference_image = common_upscale(reference_image[:1].movedim(-1, 1), width, height, "bilinear", "center").movedim(1, -1)
                         reference_image = vae.encode(reference_image[:, :, :, :3])
-                        reference_image = torch.cat([reference_image, wrapper.model.model_arch_config.latent_format.process_out(torch.zeros_like(reference_image))], dim=1)
+                        reference_image = torch.cat([
+                                reference_image, 
+                                wrapper.model.model_arch_config.latent_format.process_out(torch.zeros_like(reference_image))    # dummy / no-mask background
+                            ], dim=1)
 
                     if control_masks is None:
                         mask = torch.ones((frame_count, height, width, 1))
                     else:
                         mask = control_masks
-                        if mask.ndim == 3:
-                            mask = mask.unsqueeze(1)
+                        if mask.ndim == 3: mask = mask.unsqueeze(1)     # add channel dim
                         mask = common_upscale(mask[:frame_count], width, height, "bilinear", "center").movedim(1, -1)
                         if mask.shape[0] < frame_count:
                             mask = torch.nn.functional.pad(mask, (0, 0, 0, 0, 0, 0, 0, frame_count - mask.shape[0]), value=1.0)
@@ -111,15 +120,16 @@ def _process_vace_context(cond_list: List[Conditioning], wrapper: ModelWrapper, 
                     inactive = (control_video * (1 - mask)) + 0.5
                     reactive = (control_video * mask) + 0.5
 
-                    inactive = inactive.permute(3, 0, 1, 2)
+                    inactive = inactive.permute(3, 0, 1, 2)     # (B, C, T, H, W) vae format
                     reactive = reactive.permute(3, 0, 1, 2)
                     inactive = vae.encode(inactive[:3, :, :, :].unsqueeze(0))
                     reactive = vae.encode(reactive[:3, :, :, :].unsqueeze(0))
-                    control_video_latent = torch.cat((inactive, reactive), dim=1)
+                    control_video_latent = torch.cat((inactive, reactive), dim=1)   # adding along the channel dim
                     if reference_image is not None:
                         control_video_latent = torch.cat((reference_image, control_video_latent), dim=2)
-
-                    vae_stride = 8
+                    
+                    # pixel shuffle the mask (no vae encode)
+                    vae_stride = vae.spatial_compression_ratio
                     height_mask = height // vae_stride
                     width_mask = width // vae_stride
                     mask = mask.view(frame_count, height_mask, vae_stride, width_mask, vae_stride)
@@ -130,7 +140,7 @@ def _process_vace_context(cond_list: List[Conditioning], wrapper: ModelWrapper, 
                     if reference_image is not None:
                         mask_pad = torch.zeros_like(mask[:, :reference_image.shape[2], :, :])
                         mask = torch.cat((mask_pad, mask), dim=1)
-                        latent_length += reference_image.shape[2]
+                        extra_frames = max(extra_frames, reference_image.shape[2])  # NOTE: the above mask only handles the video input
 
                     mask = mask.unsqueeze(0).to(VRAM_DEVICE)
                     for i in range(0, control_video_latent.shape[1], 16):
@@ -139,6 +149,9 @@ def _process_vace_context(cond_list: List[Conditioning], wrapper: ModelWrapper, 
                     final = final.unsqueeze(0)      # to support multi vace ctx inputs
                 
                 aux_c.data = final
+        
+        c.extra[ExtraCond.EXTRA_LATENT_FRAMES] = extra_frames       
+    
 
 def _process_visual_embeddings(cond_list, model_wrapper, height, width, progress_callback):
     pending_embeds = []
@@ -190,7 +203,7 @@ def preprocess_wan_conditionals(
         frame_count: int,
         vae: Optional[VAEBase] = None,           # uses the default vae if not provided
         progress_callback: Callable = null_func
-) -> tuple[BatchedConditioning, Latent]:
+) -> BatchedConditioning:
     
     progress_callback(0.1, "Initializing")
     if vae is None:

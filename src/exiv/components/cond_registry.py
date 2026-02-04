@@ -30,7 +30,7 @@ def preprocess_conds(
     model_wrapper: ModelWrapper, 
     cond_list: List[Conditioning],
     **kwargs
-):
+) -> BatchedConditioning:
     model_type = model_wrapper.model.model_type
     
     if kwargs.pop("cfg", 7) == 1:
