@@ -62,7 +62,8 @@ def main(**params):
     # cur_model = "wan21_480p_i2v_fp8_scaled_14B.safetensors"
     # cur_model = "wan21_1_3B.safetensors"
     # cur_model = "wan22_5B_ti2v_fp16"
-    cur_model = "wan21_vace_1_3B_fp16.safetensors"
+    # cur_model = "wan21_vace_1_3B_fp16.safetensors"
+    cur_model = "wan21_vace_14B_fp16.safetensors"
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
     wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
     apply_hook_json(wan_dit_model, hooks)

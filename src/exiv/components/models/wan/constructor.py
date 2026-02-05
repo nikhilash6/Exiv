@@ -73,8 +73,9 @@ def detect_wan_params(state_dict):
         if config["dim"] == 1536:
             config["model_type"] = Model.WAN21_VACE_1_3B_R2V.value
             model_arch_config = Wan21ModelArchConfig(model_type=Model.WAN21_VACE_1_3B_R2V.value)
-        else:
-            raise Exception("Model not yet supported")
+        elif config["dim"] == 5120:
+            config["model_type"] = Model.WAN21_VACE_14B_R2V.value
+            model_arch_config = Wan21ModelArchConfig(model_type=Model.WAN21_VACE_14B_R2V.value)
     
     config["in_dim"] = input_channels
     if "ref_conv.weight" in state_dict:

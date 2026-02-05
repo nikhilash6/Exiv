@@ -192,6 +192,7 @@ def process_auxiliaries(cond_list, wrapper, wan_vae, height, width, frame_count,
     _process_ref_latents(cond_list, wrapper, wan_vae, height, width, frame_count, progress_callback)
     _process_vace_context(cond_list, wrapper, wan_vae, height, width, frame_count, progress_callback)
 
+@register_preprocessor(Model.WAN21_VACE_14B_R2V.value)
 @register_preprocessor(Model.WAN21_VACE_1_3B_R2V.value)
 @register_preprocessor(Model.WAN22_14B_TI2V.value)
 @register_preprocessor(Model.WAN22_5B_T2V.value)
