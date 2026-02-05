@@ -46,6 +46,7 @@ def get_dummy_cond(
 def get_dummy_hook(
     enable_sliding_context=False,
     enable_step_caching=False,
+    enable_causvid_lora=False
 ) -> str:
     defaults = []
     
@@ -69,6 +70,17 @@ def get_dummy_hook(
                 "cache_type": CacheType.TAYLOR_SEER_LITE.value
             }
         }   # TODO: add proper 'type' this is not 'step caching', 'taylor lite' is a specific case of step caching
+        defaults.append(hook)
+        
+    if enable_causvid_lora:
+        # "wan21_causvid_bidirect2_T2V_1_3B_lora_rank32.safetensors"
+        hook = {
+            "type": FeatureType.LORA.value,
+            "kwarg_data": {
+                "filename": "wan21_causvid_bidirect2_T2V_1_3B_lora_rank32.safetensors",
+                "base_strength": 1.0
+            }
+        }
         defaults.append(hook)
         
     return defaults

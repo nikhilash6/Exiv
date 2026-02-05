@@ -670,11 +670,17 @@ class VaceWanAttentionBlock(WanAttentionBlock):
         self.after_proj = nn.Linear(self.dim, self.dim)
 
     def forward(self, c, x, **kwargs):
+        prev_skips = []
+        if self.block_id > 0:
+            c_list = torch.unbind(c)
+            c = c_list[-1]                  # current state
+            prev_skips = list(c_list[:-1])  # skips till now
+            
         if self.block_id == 0:
             c = self.before_proj(c) + x
         c = super().forward(c, **kwargs)
         c_skip = self.after_proj(c)
-        return torch.stack([c, c_skip])
+        return torch.stack(prev_skips + [c_skip, c])
 
 class Wan21VaceModel(Wan22Model):
     def __init__(self, *args, **kwargs):
@@ -721,13 +727,18 @@ class Wan21VaceModel(Wan22Model):
 
         new_kwargs = dict(x=x)
         new_kwargs.update(kwargs)
-        
-        accumulated_hints = [0] * len(self.vace_blocks)
-        for i, c_item in enumerate(c):
-            for block_idx, block in enumerate(self.vace_blocks):
-                output = block(c_item, **new_kwargs)
-                c_item, c_skip = output[0], output[1]
-                accumulated_hints[block_idx] = accumulated_hints[block_idx] + c_skip
+        accumulated_hints = None
+        for i, c_state in enumerate(c):
+            # stack(skip0, c_state) -> stack(skip0, skip1, c_state) -> ...
+            for block in self.vace_blocks:
+                c_state = block(c_state, **new_kwargs)
+            unstacked = torch.unbind(c_state)   # (skip0, skip1, ..., skipN, c_state)
+            skips = unstacked[:-1]              # (skip0, skip1, ..., skipN)
+            if accumulated_hints is None: accumulated_hints = list(skips)
+            else:
+                for idx, s in enumerate(skips):
+                    accumulated_hints[idx] += s
+
         return accumulated_hints
     
     def forward_orig(

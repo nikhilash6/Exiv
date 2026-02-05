@@ -11,13 +11,15 @@ from exiv.components.models.wan.constructor import get_wan_instance
 from exiv.components.samplers.model_sampling import KSampler
 from exiv.components.vae.base import get_vae
 from exiv.model_patching.common import apply_hook_json
+from exiv.model_patching.lora_hook import enable_lora_hook
 from exiv.model_utils.common_classes import BatchedConditioning, Conditioning, ExtraCond, Latent
 from exiv.model_utils.common_classes import ModelWrapper
+from exiv.model_utils.lora_mixin import LoraDefinition
 from exiv.quantizers.base import QuantType
 from exiv.server.app_core import App, AppOutputType, Input, Output
 from exiv.utils.common import null_func
 from exiv.utils.device import MemoryManager
-from exiv.utils.file import MediaProcessor
+from exiv.utils.file import MediaProcessor, ensure_model_availability
 from exiv.utils.file_path import FilePathData, FilePaths
 from exiv.utils.logging import app_logger
 from utils.defaults import get_dummy_cond, get_dummy_hook, get_dummy_latent
@@ -62,8 +64,8 @@ def main(**params):
     # cur_model = "wan21_480p_i2v_fp8_scaled_14B.safetensors"
     # cur_model = "wan21_1_3B.safetensors"
     # cur_model = "wan22_5B_ti2v_fp16"
-    # cur_model = "wan21_vace_1_3B_fp16.safetensors"
-    cur_model = "wan21_vace_14B_fp16.safetensors"
+    cur_model = "wan21_vace_1_3B_fp16.safetensors"
+    # cur_model = "wan21_vace_14B_fp16.safetensors"
     model_path_data: FilePathData = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
     wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
     apply_hook_json(wan_dit_model, hooks)
@@ -131,7 +133,7 @@ def main(**params):
     return {"1": output_paths[0]}
 
 DEFAULT_CONDS = get_dummy_cond() #(positive="a dog running the park")
-DEFAULT_HOOKS = get_dummy_hook(enable_step_caching=False)
+DEFAULT_HOOKS = get_dummy_hook(enable_step_caching=False, enable_causvid_lora=True)
 # DEFAULT_LATENT = get_dummy_latent(img_path_list=["./tests/test_utils/assets/media/dog_realistic.jpg"])
 DEFAULT_LATENT = get_dummy_latent()
 app = App(
@@ -141,16 +143,18 @@ app = App(
         'hooks': Input(label="Hooks (JSON)", type="json", default=DEFAULT_HOOKS),
         'latent': Input(label="Latent", type="json", default=DEFAULT_LATENT),
         'seed': Input(label="Seed", type="number", default=256347,),
-        'steps': Input(label="Steps", type="number", default=20, increment_controls=True, increment_step=2,),
-        'cfg': Input(label="CFG", type="number", default=6, increment_controls=True, increment_step=0.2,),
+        'steps': Input(label="Steps", type="number", default=4, increment_controls=True, increment_step=2,),
+        'cfg': Input(label="CFG", type="number", default=1, increment_controls=True, increment_step=0.2,),
         'sampler_name': Input(label="Sampler Name", type="select", options=KSamplerType.value_list(), \
             default=KSamplerType.EULER.value,),
         'scheduler_name': Input(label="Scheduler Name", type="select", options=SchedulerType.value_list(), \
             default=SchedulerType.SIMPLE.value,),
         # 'height': Input(label="Height", type="number", default=480),
         # 'width': Input(label="Width", type="number", default=832),
-        'height': Input(label="Height", type="number", default=480),
-        'width': Input(label="Width", type="number", default=640),
+        # 'height': Input(label="Height", type="number", default=480),
+        # 'width': Input(label="Width", type="number", default=640),
+        'height': Input(label="Height", type="number", default=720),
+        'width': Input(label="Width", type="number", default=720),
         # 'height': Input(label="Height", type="number", default=720),
         # 'width': Input(label="Width", type="number", default=1280),
         # 'height': Input(label="Height", type="number", default=512),
