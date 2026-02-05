@@ -250,9 +250,10 @@ def tensor_to_parameter(x: Tensor):
     
 def get_tensor_weak_hash(tensor):
     if tensor is None: return None
+    if isinstance(tensor, list): tensor = torch.cat(tensor, dim=0)  # list of tensors
     meta = (tensor.shape, tensor.dtype, tensor.device)
     # strided sampling (1D array)
-    flat = tensor.view(-1)
+    flat = tensor.reshape(-1)
     size = flat.numel()
     step = size // 10       # reading just 10 points
     if step == 0: step = 1

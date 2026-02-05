@@ -81,6 +81,10 @@ DOWNLOAD_MAP = {
         "type": "lora",
         "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors"
     },
+    "wan21_causvid_bidirect2_T2V_1_3B_lora_rank32.safetensors": {
+        "type": "lora",
+        "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Wan21_CausVid_bidirect2_T2V_1_3B_lora_rank32.safetensors"
+    },
     "wan_2_1_vae.safetensors": {
         "type": "vae",
         "url": "https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-720P-Diffusers/resolve/main/vae/diffusion_pytorch_model.safetensors?download=true"

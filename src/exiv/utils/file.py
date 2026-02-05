@@ -189,8 +189,8 @@ class MediaProcessor:
         if frames:
             metadata["loaded_frames"] = len(frames)
             if not output_frames:
-                video_tensor = torch.from_numpy(np.stack(frames))       # stack -> (T, C, H, W)
-                video_tensor = video_tensor.permute(1, 0, 2, 3)         # permute -> (C, T, H, W)
+                video_tensor = torch.stack(frames)                  # stack -> (T, C, H, W)
+                video_tensor = video_tensor.permute(1, 0, 2, 3)     # permute -> (C, T, H, W)
             else:
                 video_tensor = frames
         else:

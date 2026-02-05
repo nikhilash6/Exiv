@@ -80,9 +80,9 @@ def _process_vace_context(cond_list: List[Conditioning], wrapper: ModelWrapper, 
                 latent_length = ((frame_count - 1) // vae.temporal_compression_ratio) + 1
                 reference_image, control_masks, control_video = None, None, None
                 control_video_path = aux_c.input_metadata.get("control_video_path", None)
-                reference_image_path = aux_c.input_metadata.get("reference_image_path", None)
-                if control_video_path: control_video = MediaProcessor.load_video(control_video_path, output_frames=True)
-                if reference_image_path: reference_image = get_image_tensor(reference_image_path)
+                reference_image_path = aux_c.input_metadata.get("reference_image_path", None)   # TODO: extend to a list of ref images
+                if control_video_path: control_video, _ = MediaProcessor.load_video(control_video_path, output_frames=False)    # (C, T, H, W)
+                if reference_image_path: reference_image = get_image_tensor(reference_image_path, height, width)    # (B, C, W, H)
                 
                 key_video = get_tensor_weak_hash(control_video)
                 key_mask = get_tensor_weak_hash(control_masks)
@@ -93,15 +93,16 @@ def _process_vace_context(cond_list: List[Conditioning], wrapper: ModelWrapper, 
                     final = _vace_cache[cache_key]
                 else:
                     if control_video is not None:
-                        control_video = common_upscale(control_video[:frame_count].movedim(-1, 1), width, height, "bilinear", "center").movedim(1, -1)
+                        control_video = common_upscale(control_video[:, :frame_count], width, height, "bilinear", "center")[0]
+                        control_video = control_video.permute(1, 2, 3, 0)   # (T, H, W, C)
                         if control_video.shape[0] < frame_count:
                             control_video = torch.nn.functional.pad(control_video, (0, 0, 0, 0, 0, 0, 0, frame_count - control_video.shape[0]), value=0.5)
                     else:
                         control_video = torch.ones((frame_count, height, width, 3)) * 0.5
 
                     if reference_image is not None:
-                        reference_image = common_upscale(reference_image[:1].movedim(-1, 1), width, height, "bilinear", "center").movedim(1, -1)
-                        reference_image = vae.encode(reference_image[:, :, :, :3])
+                        reference_image = common_upscale(reference_image[:1], width, height, "bilinear", "center")[0]
+                        reference_image = vae.encode(reference_image[:, :3, :, :].unsqueeze(0))  # encoding (1, B, 3, H, W)
                         reference_image = torch.cat([
                                 reference_image, 
                                 wrapper.model.model_arch_config.latent_format.process_out(torch.zeros_like(reference_image))    # dummy / no-mask background
@@ -111,15 +112,16 @@ def _process_vace_context(cond_list: List[Conditioning], wrapper: ModelWrapper, 
                         mask = torch.ones((frame_count, height, width, 1))
                     else:
                         mask = control_masks
-                        if mask.ndim == 3: mask = mask.unsqueeze(1)     # add channel dim
+                        if mask.ndim == 3: mask = mask.unsqueeze(1)     # (T, 1, H, W)
                         mask = common_upscale(mask[:frame_count], width, height, "bilinear", "center").movedim(1, -1)
+                        mask = mask.permute(0, 2, 3, 1) # (T, H, W, 1)
                         if mask.shape[0] < frame_count:
                             mask = torch.nn.functional.pad(mask, (0, 0, 0, 0, 0, 0, 0, frame_count - mask.shape[0]), value=1.0)
 
                     control_video = control_video - 0.5
                     inactive = (control_video * (1 - mask)) + 0.5
                     reactive = (control_video * mask) + 0.5
-
+                    # (C, T, H, W) -> (3, 0, 1, 2) on (T, H, W, C)
                     inactive = inactive.permute(3, 0, 1, 2)     # (B, C, T, H, W) vae format
                     reactive = reactive.permute(3, 0, 1, 2)
                     inactive = vae.encode(inactive[:3, :, :, :].unsqueeze(0))

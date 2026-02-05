@@ -91,7 +91,7 @@ def main(**params):
     latent.encode_keyframe_condition( 
         width, 
         height,
-        frame_count + extra_frames, 
+        frame_count + (extra_frames * wan_vae.temporal_compression_ratio), 
         latent_format, 
         wan_vae,
     )
