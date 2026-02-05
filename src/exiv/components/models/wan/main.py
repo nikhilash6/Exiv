@@ -579,6 +579,8 @@ class Wan21Model(ModelMixin):
         t_start = kwargs.get("t_start", 0)
         time_indices_map = kwargs.get("time_indices_map", None)
         freqs = self.rope_encode(t_len, h, w, t_start, time_indices_map=time_indices_map, device=x.device, dtype=x.dtype)
+        # from torch_tracer import TorchTracer
+        # with TorchTracer("./exiv_2.pkl"):
         out = self.forward_orig(x, timestep, cross_attn, clip_fea=visual_embedding, freqs=freqs, reference_latent=reference_latent, **kwargs)[:, :, :t, :h, :w]
         return out      # new variable for debugging purposes
 
@@ -670,15 +672,9 @@ class VaceWanAttentionBlock(WanAttentionBlock):
     def forward(self, c, x, **kwargs):
         if self.block_id == 0:
             c = self.before_proj(c) + x
-            all_c = []
-        else:
-            all_c = list(torch.unbind(c))
-            c = all_c.pop(-1)
         c = super().forward(c, **kwargs)
         c_skip = self.after_proj(c)
-        all_c += [c_skip, c]
-        c = torch.stack(all_c)
-        return c
+        return torch.stack([c, c_skip])
 
 class Wan21VaceModel(Wan22Model):
     def __init__(self, *args, **kwargs):
@@ -687,11 +683,9 @@ class Wan21VaceModel(Wan22Model):
 
         vace_layers, vace_in_dim = kwargs.get("vace_layers"), kwargs.get("vace_dim")
         # sparse vace layers, applying to alternate layers
-        self.vace_layers = [i * 2 for i in range(0, vace_layers)]
         self.vace_in_dim = self.in_dim if vace_in_dim is None else vace_in_dim
-
-        assert 0 in self.vace_layers
-        self.vace_layers_mapping = {i: n for n, i in enumerate(self.vace_layers)}
+        # assuming equal spacing, will update this later
+        self.vace_layers_mapping = {i: n for n, i in enumerate(range(0, self.num_layers, self.num_layers // vace_layers))}
 
         # blocks
         self.blocks = nn.ModuleList([
@@ -704,7 +698,7 @@ class Wan21VaceModel(Wan22Model):
         self.vace_blocks = nn.ModuleList([
             VaceWanAttentionBlock(self.cross_attn_type, self.dim, self.ffn_dim, self.num_heads, self.window_size, self.qk_norm,
                                      self.cross_attn_norm, self.eps, block_id=i)
-            for i in self.vace_layers
+            for i in range(vace_layers)
         ])
 
         # vace patch embeddings
@@ -727,16 +721,13 @@ class Wan21VaceModel(Wan22Model):
 
         new_kwargs = dict(x=x)
         new_kwargs.update(kwargs)
+        
         accumulated_hints = [0] * len(self.vace_blocks)
-        for i, c in enumerate(c):
-            # accumulates [skip0, skip1, ..., state] in 'c'
-            for block in self.vace_blocks:
-                c = block(c, **new_kwargs)
-            
-            # unbind returns tuple: (skip_0, skip_1, ..., final_state)
-            current_hints = torch.unbind(c)[:-1]
-            for layer_idx, hint in enumerate(current_hints):
-                accumulated_hints[layer_idx] = accumulated_hints[layer_idx] + hint
+        for i, c_item in enumerate(c):
+            for block_idx, block in enumerate(self.vace_blocks):
+                output = block(c_item, **new_kwargs)
+                c_item, c_skip = output[0], output[1]
+                accumulated_hints[block_idx] = accumulated_hints[block_idx] + c_skip
         return accumulated_hints
     
     def forward_orig(
@@ -807,8 +798,9 @@ class Wan21VaceModel(Wan22Model):
         hints = self.forward_vace(x, vace_context, kwargs)
         for block_idx, block in enumerate(self.blocks):
             x = block(x, **kwargs)
-            if block_idx in self.vace_layers:
-                x = x + hints[block_idx // 2] * vace_strength       # TODO: fix this mapping
+            if block_idx in self.vace_layers_mapping:
+                hint_idx = self.vace_layers_mapping[block_idx]
+                x = x + hints[hint_idx] * vace_strength
 
         # head
         x = self.head(x, e)
