@@ -16,7 +16,7 @@ def get_dummy_cond(
     negative: str = "bad image, blurry, low quality",
     enable_ref_latent=False,
     enable_visual_embed=False,
-    enable_vace_ctx=True
+    enable_vace_ctx=False
 ) -> str:
     defaults = [
         {
@@ -35,7 +35,7 @@ def get_dummy_cond(
         }
     ]
     
-    for d in defaults:
+    for i, d in enumerate(defaults):
         if enable_ref_latent: d["aux"].append({ "type": AuxCondType.REF_LATENT, "input_metadata": temp_img})
         if enable_visual_embed: d["aux"].append({ "type": AuxCondType.VISUAL_EMBEDDING, "input_metadata": temp_img})
         if enable_vace_ctx: 
@@ -74,10 +74,11 @@ def get_dummy_hook(
         
     if enable_causvid_lora:
         # "wan21_causvid_bidirect2_T2V_1_3B_lora_rank32.safetensors"
+        # wan21_causvid_14B_T2V_lora_rank32.safetensors"
         hook = {
             "type": FeatureType.LORA.value,
             "kwarg_data": {
-                "filename": "wan21_causvid_bidirect2_T2V_1_3B_lora_rank32.safetensors",
+                "filename": "wan21_causvid_14B_T2V_lora_rank32.safetensors",
                 "base_strength": 1.0
             }
         }

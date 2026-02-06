@@ -396,7 +396,10 @@ class ExecutionBatch:
         collated = {}
         for k in keys:
             values = [getattr(inp, k) for inp in inputs]
-            collated[k] = torch.cat(values, dim=0)
+            try:
+                collated[k] = torch.cat(values, dim=0)
+            except:
+                collated[k] = values
                 
         return collated
     

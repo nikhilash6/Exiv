@@ -716,6 +716,7 @@ class Wan21VaceModel(Wan22Model):
         self,
         x,
         vace_context,
+        vace_strengths,
         kwargs
     ):
         # embeddings
@@ -729,15 +730,16 @@ class Wan21VaceModel(Wan22Model):
         new_kwargs.update(kwargs)
         accumulated_hints = None
         for i, c_state in enumerate(c):
+            strength = vace_strengths[i] if i < len(vace_strengths) else vace_strengths[0]
             # stack(skip0, c_state) -> stack(skip0, skip1, c_state) -> ...
             for block in self.vace_blocks:
                 c_state = block(c_state, **new_kwargs)
             unstacked = torch.unbind(c_state)   # (skip0, skip1, ..., skipN, c_state)
             skips = unstacked[:-1]              # (skip0, skip1, ..., skipN)
-            if accumulated_hints is None: accumulated_hints = list(skips)
+            if accumulated_hints is None: accumulated_hints = [s * strength for s in skips]
             else:
                 for idx, s in enumerate(skips):
-                    accumulated_hints[idx] += s
+                    accumulated_hints[idx] += s * strength
 
         return accumulated_hints
     
@@ -746,8 +748,8 @@ class Wan21VaceModel(Wan22Model):
         x,
         t,
         cross_attn,
-        vace_context=None,  # (vace_ctx, strength)
-        clip_fea=None,
+        vace_context=None,
+        vace_strength=[1.0],
         freqs=None,
         **kwargs
     ):
@@ -774,8 +776,6 @@ class Wan21VaceModel(Wan22Model):
         """
 
         assert vace_context is not None, "vace_context is required for this pass"
-        vace_strength = 1.0
-        clip_fea = None
         # embeddings
         with torch.autocast(device_type=VRAM_DEVICE, dtype=torch.float32):
             x = self.patch_embedding(x.float()).to(x.dtype)
@@ -792,12 +792,12 @@ class Wan21VaceModel(Wan22Model):
 
         # clip conditioning
         context_img_len = None
-        if clip_fea is not None:
-            if self.img_emb is not None:
-                context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
-                context = torch.concat([context_clip, context], dim=1)
-            else: app_logger.warning(f"{self.__class__.__name__} doesn't support img embeds")
-            context_img_len = clip_fea.shape[-2]
+        # if clip_fea is not None:
+        #     if self.img_emb is not None:
+        #         context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
+        #         context = torch.concat([context_clip, context], dim=1)
+        #     else: app_logger.warning(f"{self.__class__.__name__} doesn't support img embeds")
+        #     context_img_len = clip_fea.shape[-2]
 
         # arguments
         kwargs = dict(
@@ -806,12 +806,12 @@ class Wan21VaceModel(Wan22Model):
             context=cross_attn,
             context_img_len=context_img_len)
 
-        hints = self.forward_vace(x, vace_context, kwargs)
+        hints = self.forward_vace(x, vace_context, vace_strength, kwargs)
         for block_idx, block in enumerate(self.blocks):
             x = block(x, **kwargs)
             if block_idx in self.vace_layers_mapping:
                 hint_idx = self.vace_layers_mapping[block_idx]
-                x = x + hints[hint_idx] * vace_strength
+                x = x + hints[hint_idx]
 
         # head
         x = self.head(x, e)

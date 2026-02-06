@@ -36,7 +36,8 @@ class ConditioningMixin:
                     
                 # vace ctx
                 elif c_aux.type == AuxCondType.VACE_CTX and (vace_ctx:=c_aux.data) is not None:
-                    output.vace_context = vace_ctx   # TODO: fix this (ctx, strength)
+                    output.vace_context = vace_ctx[0]
+                    output.vace_strength = vace_ctx[1]
 
         return output
     

@@ -178,7 +178,7 @@ class LoraMixin:
             header = json.loads(header_json)
             
             # Map entire file
-            mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+            mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_COPY)
             
             self.mmap_cache[path] = {
                 'mm': mm,

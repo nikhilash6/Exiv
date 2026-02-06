@@ -149,9 +149,10 @@ def _process_vace_context(cond_list: List[Conditioning], wrapper: ModelWrapper, 
                         control_video_latent[:, i:i + 16] = wrapper.model.process_latent_in(control_video_latent[:, i:i + 16])
                     final = torch.cat([control_video_latent, mask], dim=1)
                     final = final.unsqueeze(0)      # to support multi vace ctx inputs
-                
+                    final = (final, aux_c.input_metadata.get("strength", 1.0))      # ctx, strength tuple
+                    _vace_cache[cache_key] = final
+                    
                 aux_c.data = final
-        
         c.extra[ExtraCond.EXTRA_LATENT_FRAMES] = extra_frames       
     
 
@@ -187,10 +188,12 @@ def _process_ref_latents(cond_list, model_wrapper, wan_vae, height, width, frame
                     )
                     aux_c.data = data
 
-def process_auxiliaries(cond_list, wrapper, wan_vae, height, width, frame_count, progress_callback):
-    _process_visual_embeddings(cond_list, wrapper, height, width, progress_callback)
-    _process_ref_latents(cond_list, wrapper, wan_vae, height, width, frame_count, progress_callback)
-    _process_vace_context(cond_list, wrapper, wan_vae, height, width, frame_count, progress_callback)
+def process_auxiliaries(cond_list: List[Conditioning], wrapper: ModelWrapper, wan_vae, height, width, frame_count, progress_callback):
+    if wrapper.model.model_type in [Model.WAN21_VACE_14B_R2V.value, Model.WAN21_VACE_1_3B_R2V.value]:
+        _process_vace_context(cond_list, wrapper, wan_vae, height, width, frame_count, progress_callback)
+    else:
+        _process_visual_embeddings(cond_list, wrapper, height, width, progress_callback)
+        _process_ref_latents(cond_list, wrapper, wan_vae, height, width, frame_count, progress_callback)
 
 @register_preprocessor(Model.WAN21_VACE_14B_R2V.value)
 @register_preprocessor(Model.WAN21_VACE_1_3B_R2V.value)

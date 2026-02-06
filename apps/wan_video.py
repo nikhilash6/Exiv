@@ -132,8 +132,8 @@ def main(**params):
     
     return {"1": output_paths[0]}
 
-DEFAULT_CONDS = get_dummy_cond() #(positive="a dog running the park")
-DEFAULT_HOOKS = get_dummy_hook(enable_step_caching=False, enable_causvid_lora=True)
+DEFAULT_CONDS = get_dummy_cond(enable_vace_ctx=True) #(positive="a dog running the park")
+DEFAULT_HOOKS = get_dummy_hook(enable_step_caching=False, enable_causvid_lora=False)
 # DEFAULT_LATENT = get_dummy_latent(img_path_list=["./tests/test_utils/assets/media/dog_realistic.jpg"])
 DEFAULT_LATENT = get_dummy_latent()
 app = App(
@@ -143,8 +143,8 @@ app = App(
         'hooks': Input(label="Hooks (JSON)", type="json", default=DEFAULT_HOOKS),
         'latent': Input(label="Latent", type="json", default=DEFAULT_LATENT),
         'seed': Input(label="Seed", type="number", default=256347,),
-        'steps': Input(label="Steps", type="number", default=4, increment_controls=True, increment_step=2,),
-        'cfg': Input(label="CFG", type="number", default=1, increment_controls=True, increment_step=0.2,),
+        'steps': Input(label="Steps", type="number", default=20, increment_controls=True, increment_step=2,),
+        'cfg': Input(label="CFG", type="number", default=6, increment_controls=True, increment_step=0.2,),
         'sampler_name': Input(label="Sampler Name", type="select", options=KSamplerType.value_list(), \
             default=KSamplerType.EULER.value,),
         'scheduler_name': Input(label="Scheduler Name", type="select", options=SchedulerType.value_list(), \
