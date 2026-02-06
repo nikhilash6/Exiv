@@ -9,8 +9,9 @@ from dataclasses import dataclass
 
 from tqdm import tqdm
 
-from exiv.utils.enum import ExtendedEnum
-
+from ..utils.enum import ExtendedEnum
+from ..utils.file import ensure_model_availability
+from ..utils.file_path import FilePathData, FilePaths
 from ..utils.device import OFFLOAD_DEVICE, VRAM_DEVICE
 from ..utils.logging import app_logger
 
@@ -23,12 +24,19 @@ class LoraModelType(ExtendedEnum):
 
 @dataclass
 class LoraDefinition:
+    filename: Optional[str] = None
+    download_url: Optional[str] = None
     path: Optional[str] = None
     base_strength: Union[float, List[float]] = 1.0  # ideally this should be the complete stepwise strength
                                                     # expand_strength_schedule is a safety measure of sorts
     @classmethod
     def from_json(cls, data):
         try:
+            if data["filename"]:
+                model_path_data: FilePathData = FilePaths.get_path(filename=data["filename"], file_type="lora")
+                data["path"], data["download_url"] = model_path_data.path, model_path_data.url
+            assert data.get("path") is not None, "lora path is required"
+            data["path"] = ensure_model_availability(data["path"], data["download_url"])
             return cls(**data)
         except Exception as e:
             app_logger.error(f"Failed to load lora definition from json: {data}")
@@ -170,7 +178,7 @@ class LoraMixin:
             header = json.loads(header_json)
             
             # Map entire file
-            mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+            mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_COPY)
             
             self.mmap_cache[path] = {
                 'mm': mm,

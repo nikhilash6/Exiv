@@ -8,8 +8,6 @@ from einops import rearrange
 import math
 from typing import List
 
-from exiv.utils.device import VRAM_DEVICE
-
 from .cond_preprocessor import is_text_model, is_img_model, Wan21ModelArchConfig, Wan22ModelArchConfig
 from ...enum import Model, ModelType
 from ...attention import optimized_attention
@@ -18,7 +16,8 @@ from ...latent_format import LatentFormat, Wan21VAELatentFormat, Wan22VAELatentF
 from ....components.samplers.sampler_types import get_model_sampling
 from ....model_utils.model_mixin import ModelArchConfig, ModelMixin
 from ....utils.tensor import common_upscale, pad_to_patch_size
-
+from ....utils.device import VRAM_DEVICE
+from ....utils.logging import app_logger
 
 def sinusoidal_embedding_1d(dim, position):
     # preprocess
@@ -420,9 +419,9 @@ class Wan21Model(ModelMixin):
         self.time_projection = nn.Sequential(nn.SiLU(), nn.Linear(dim, dim * 6))
 
         # blocks
-        cross_attn_type = 't2v_cross_attn' if is_text_model(self.model_type) else 'i2v_cross_attn'
+        self.cross_attn_type = 't2v_cross_attn' if is_text_model(self.model_type) else 'i2v_cross_attn'
         self.blocks = nn.ModuleList([
-            wan_attn_block_class(cross_attn_type, dim, ffn_dim, num_heads,
+            wan_attn_block_class(self.cross_attn_type, dim, ffn_dim, num_heads,
                                  window_size, qk_norm, cross_attn_norm, eps)
             for _ in range(num_layers)
         ])
@@ -475,7 +474,7 @@ class Wan21Model(ModelMixin):
                 List of denoised video tensors with original input shapes [C_out, F, H / 8, W / 8]
         """
         # embeddings
-        with torch.autocast(device_type="cuda", dtype=torch.float32):
+        with torch.autocast(device_type=VRAM_DEVICE, dtype=torch.float32):
             x = self.patch_embedding(x.float()).to(x.dtype)
 
         grid_sizes = x.shape[2:]
@@ -499,10 +498,11 @@ class Wan21Model(ModelMixin):
 
         # clip conditioning
         context_img_len = None
-        if is_img_model(self.model_type) and clip_fea is not None:
+        if clip_fea is not None:
             if self.img_emb is not None:
                 context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
                 context = torch.concat([context_clip, context], dim=1)
+            else: app_logger.warning(f"{self.__class__.__name__} doesn't support img embeds")
             context_img_len = clip_fea.shape[-2]
 
         # running through all the attn blocks
@@ -521,17 +521,16 @@ class Wan21Model(ModelMixin):
         return x
 
     def rope_encode(self, t, h, w, t_start=0, time_indices_map=None, steps_t=None, steps_h=None, steps_w=None, device=None, dtype=None):
+        # (dimension + half_patch_size) // patch_size (effectively rounding)
         patch_size = self.patch_size
         t_len = ((t + (patch_size[0] // 2)) // patch_size[0])
         h_len = ((h + (patch_size[1] // 2)) // patch_size[1])
         w_len = ((w + (patch_size[2] // 2)) // patch_size[2])
 
-        if steps_t is None:
-            steps_t = t_len
-        if steps_h is None:
-            steps_h = h_len
-        if steps_w is None:
-            steps_w = w_len
+        # steps can be used to stretch the PEs
+        if steps_t is None: steps_t = t_len
+        if steps_h is None: steps_h = h_len
+        if steps_w is None: steps_w = w_len
 
         # FIX: doing higher precision calc for now
         # (this has marginal benefits on multi object scenes)
@@ -575,11 +574,13 @@ class Wan21Model(ModelMixin):
         x = pad_to_patch_size(x, self.patch_size)
         t_len = t
         if self.ref_conv is not None and reference_latent is not None:
-            t_len += 1      # the single latent that has been passed
+            t_len += 1      # the single latent that has been passed (wan specific logic)
 
         t_start = kwargs.get("t_start", 0)
         time_indices_map = kwargs.get("time_indices_map", None)
         freqs = self.rope_encode(t_len, h, w, t_start, time_indices_map=time_indices_map, device=x.device, dtype=x.dtype)
+        # from torch_tracer import TorchTracer
+        # with TorchTracer("./exiv_08.pkl"):
         out = self.forward_orig(x, timestep, cross_attn, clip_fea=visual_embedding, freqs=freqs, reference_latent=reference_latent, **kwargs)[:, :, :t, :h, :w]
         return out      # new variable for debugging purposes
 
@@ -640,7 +641,7 @@ class Wan21Model(ModelMixin):
 class Wan22Model(Wan21Model):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.model_arch_config: ModelArchConfig = Wan22ModelArchConfig()
+        self.model_arch_config: ModelArchConfig = Wan22ModelArchConfig(model_type=self.model_type)
         
     def scale_latent_inpaint(self, sigma, noise, latent_image, **kwargs):
         return latent_image
@@ -648,3 +649,188 @@ class Wan22Model(Wan21Model):
     def get_model_sampling_obj(self):
         shift = 5 if self.model_type == Model.WAN22_14B_TI2V.value else 8
         return get_model_sampling(ModelType.FLOW, {"sampling_settings": {"shift": shift}})
+
+class VaceWanAttentionBlock(WanAttentionBlock):
+    def __init__(
+            self,
+            cross_attn_type,
+            dim,
+            ffn_dim,
+            num_heads,
+            window_size=(-1, -1),
+            qk_norm=True,
+            cross_attn_norm=False,
+            eps=1e-6,
+            block_id=0
+    ):
+        super().__init__(cross_attn_type, dim, ffn_dim, num_heads, window_size, qk_norm, cross_attn_norm, eps)
+        self.block_id = block_id
+        if block_id == 0:
+            self.before_proj = nn.Linear(self.dim, self.dim)
+        self.after_proj = nn.Linear(self.dim, self.dim)
+
+    def forward(self, c, x, **kwargs):
+        prev_skips = []
+        if self.block_id > 0:
+            c_list = torch.unbind(c)
+            c = c_list[-1]                  # current state
+            prev_skips = list(c_list[:-1])  # skips till now
+            
+        if self.block_id == 0:
+            c = self.before_proj(c) + x
+        c = super().forward(c, **kwargs)
+        c_skip = self.after_proj(c)
+        return torch.stack(prev_skips + [c_skip, c])
+
+class Wan21VaceModel(Wan22Model):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.model_arch_config: ModelArchConfig = Wan21ModelArchConfig(model_type=self.model_type)
+
+        vace_layers, vace_in_dim = kwargs.get("vace_layers"), kwargs.get("vace_dim")
+        # sparse vace layers, applying to alternate layers
+        self.vace_in_dim = self.in_dim if vace_in_dim is None else vace_in_dim
+        # assuming equal spacing, will update this later
+        self.vace_layers_mapping = {i: n for n, i in enumerate(range(0, self.num_layers, self.num_layers // vace_layers))}
+
+        # blocks
+        self.blocks = nn.ModuleList([
+            WanAttentionBlock(self.cross_attn_type, self.dim, self.ffn_dim, self.num_heads, self.window_size, self.qk_norm,
+                                  self.cross_attn_norm, self.eps,)
+            for i in range(self.num_layers)
+        ])
+
+        # vace blocks
+        self.vace_blocks = nn.ModuleList([
+            VaceWanAttentionBlock(self.cross_attn_type, self.dim, self.ffn_dim, self.num_heads, self.window_size, self.qk_norm,
+                                     self.cross_attn_norm, self.eps, block_id=i)
+            for i in range(vace_layers)
+        ])
+
+        # vace patch embeddings
+        self.vace_patch_embedding = nn.Conv3d(
+            self.vace_in_dim, self.dim, kernel_size=self.patch_size, stride=self.patch_size
+        )
+        
+    def forward_vace(
+        self,
+        x,
+        vace_context,
+        vace_strengths,
+        kwargs
+    ):
+        # embeddings
+        orig_shape = list(vace_context.shape)
+        vace_context = vace_context.movedim(0, 1).reshape([-1] + orig_shape[2:])
+        c = self.vace_patch_embedding(vace_context).to(vace_context.dtype)
+        c = c.flatten(2).transpose(1, 2)
+        c = list(c.split(orig_shape[0], dim=0))
+
+        new_kwargs = dict(x=x)
+        new_kwargs.update(kwargs)
+        accumulated_hints = None
+        for i, c_state in enumerate(c):
+            strength = vace_strengths[i] if i < len(vace_strengths) else vace_strengths[0]
+            # stack(skip0, c_state) -> stack(skip0, skip1, c_state) -> ...
+            for block in self.vace_blocks:
+                c_state = block(c_state, **new_kwargs)
+            unstacked = torch.unbind(c_state)   # (skip0, skip1, ..., skipN, c_state)
+            skips = unstacked[:-1]              # (skip0, skip1, ..., skipN)
+            if accumulated_hints is None: accumulated_hints = [s * strength for s in skips]
+            else:
+                for idx, s in enumerate(skips):
+                    accumulated_hints[idx] += s * strength
+
+        return accumulated_hints
+    
+    def forward_orig(
+        self,
+        x,
+        t,
+        cross_attn,
+        vace_context=None,
+        vace_strength=[1.0],
+        freqs=None,
+        **kwargs
+    ):
+        r"""
+        Forward pass through the diffusion model
+
+        Args:
+            x (List[Tensor]):
+                List of input video tensors, each with shape [C_in, F, H, W]
+            t (Tensor):
+                Diffusion timesteps tensor of shape [B]
+            cross_attn (List[Tensor]):
+                List of text embeddings each with shape [L, C]
+            seq_len (`int`):
+                Maximum sequence length for positional encoding
+            clip_fea (Tensor, *optional*):
+                CLIP image features for image-to-video mode
+            y (List[Tensor], *optional*):
+                Conditional video inputs for image-to-video mode, same shape as x
+
+        Returns:
+            List[Tensor]:
+                List of denoised video tensors with original input shapes [C_out, F, H / 8, W / 8]
+        """
+
+        assert vace_context is not None, "vace_context is required for this pass"
+        # embeddings
+        with torch.autocast(device_type=VRAM_DEVICE, dtype=torch.float32):
+            x = self.patch_embedding(x.float()).to(x.dtype)
+
+        grid_sizes = x.shape[2:]
+        x = x.flatten(2).transpose(1, 2)
+
+        # time embeddings
+        e = self.time_embedding(sinusoidal_embedding_1d(self.freq_dim, t).to(dtype=x[0].dtype))
+        e0 = self.time_projection(e).unflatten(1, (6, self.dim))
+
+        # cross_attn
+        cross_attn = self.text_embedding(cross_attn)
+
+        # clip conditioning
+        context_img_len = None
+        # if clip_fea is not None:
+        #     if self.img_emb is not None:
+        #         context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
+        #         context = torch.concat([context_clip, context], dim=1)
+        #     else: app_logger.warning(f"{self.__class__.__name__} doesn't support img embeds")
+        #     context_img_len = clip_fea.shape[-2]
+
+        # arguments
+        kwargs = dict(
+            e=e0,
+            freqs=freqs,
+            context=cross_attn,
+            context_img_len=context_img_len)
+
+        hints = self.forward_vace(x, vace_context, vace_strength, kwargs)
+        for block_idx, block in enumerate(self.blocks):
+            x = block(x, **kwargs)
+            if block_idx in self.vace_layers_mapping:
+                hint_idx = self.vace_layers_mapping[block_idx]
+                x = x + hints[hint_idx]
+
+        # head
+        x = self.head(x, e)
+
+        # unpatchify
+        x = self.unpatchify(x, grid_sizes)
+        return x
+    
+    def get_memory_footprint_params(self):
+        try:
+             dtype_size = torch.tensor([], dtype=self.dtype).element_size()
+        except:
+             dtype_size = 2
+             
+        return {
+            "patch_size": self.patch_size,      # (1, 2, 2)
+            "hidden_dim": self.dim,             # 5120
+            "ffn_dim": self.ffn_dim,            # 13824
+            "attn_factor": 40.0,
+            "ffn_factor": 1.5,
+            "dtype_size": dtype_size,
+        }

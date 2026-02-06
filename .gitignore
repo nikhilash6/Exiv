@@ -43,7 +43,8 @@ temp.py
 apps/dummy_test.py
 keygen.sh
 copyparty-sfx.py
-boy_anime.jpg
+/*.jpg
+/*.mp4
 
 # Test files
 profile_data/*

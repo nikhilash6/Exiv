@@ -124,6 +124,7 @@ class Latent:
         return sorted(list(indices)), (t_lat, h_lat, w_lat)
     
     def encode_keyframe_condition(self, width, height, num_frames, latent_format: LatentFormat, vae: 'VAEBase'):
+        # this is mainly for inpainting at this point
         if len(self.image_path_list): self._load_images(height, width)
         num_inputs = len(self.samples) if self.samples else 0
         indices, dims = self.prepare_layout_and_schedule(width, height, num_frames, num_inputs, vae, mode="interpolate")
@@ -187,6 +188,7 @@ class ModelForwardInput:
     controlnet: Optional[Any] = None            # controlnet signal
     time_hint: Optional[Any] = None             # time_dim_concat
     reference_latent: Optional[Any] = None      # vae encoded latent as a hint
+    vace_context: Optional[Any] = None          # vace ctx
 
     def to_dict(self):
         return {k: v for k, v in self.__dict__.items() if v is not None}
@@ -197,6 +199,7 @@ class AuxCondType:
     REF_LATENT = "ref_latent"               # style transfer, audio timbre etc..
     VISUAL_EMBEDDING = "visual_embedding"   # ipa / vision embeds
     CONTROLNET = "controlnet"               # controlnet signal
+    VACE_CTX = "vace_ctx"                   # wan vace context
 
 @dataclass
 class AuxConditioning:
@@ -208,6 +211,9 @@ class AuxConditioning:
     input_metadata: Optional[Union[dict, str]] = None
     timestep_range: Tuple[float, float] = (0.0, -1)    # (0.0=start, -1.0=end)
     frame_range: Optional[Tuple[int, int]] = None       # (start_idx, end_idx)
+
+class ExtraCond:
+    EXTRA_LATENT_FRAMES = "extra_latent_frames"
 
 @dataclass
 class Conditioning:
@@ -390,7 +396,10 @@ class ExecutionBatch:
         collated = {}
         for k in keys:
             values = [getattr(inp, k) for inp in inputs]
-            collated[k] = torch.cat(values, dim=0)
+            try:
+                collated[k] = torch.cat(values, dim=0)
+            except:
+                collated[k] = values
                 
         return collated
     

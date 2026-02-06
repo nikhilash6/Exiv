@@ -192,8 +192,24 @@ def set_module_tensor_to_device(
     # freeing old_value (safety check)
     # MemoryManager.clear_memory()
 
+# TODO: merge with the code inside LoraMixin
+def clean_state_dict(state_dict, model_type=None):
+    if not model_type: return state_dict
+    if model_type == "checkpoint":
+        prefixes_to_strip = ["model.", "diffusion_model."]
+        new_state_dict = {}
+        for key, value in state_dict.items():
+            new_key = key
+            for prefix in prefixes_to_strip:
+                if new_key.startswith(prefix):
+                    new_key = new_key[len(prefix):]
+            new_state_dict[new_key] = value
+        state_dict = new_state_dict
+    
+    return state_dict
+
 # code adapted from ComfyUI
-def get_state_dict(model_path, device=torch.device("cpu")):
+def get_state_dict(model_path, model_type=None, device=torch.device("cpu")):
     if isinstance(device, str):
         device = torch.device(device)
     
@@ -227,7 +243,8 @@ def get_state_dict(model_path, device=torch.device("cpu")):
         elif len(sd) == 1:          # loading the first key (if it's a dict)
             val = next(iter(sd.values()))
             sd = val if isinstance(val, dict) else sd
-            
+    
+    sd = clean_state_dict(sd, model_type)
     return sd
 
 # TODO: create a proper dataclass for the memory_config

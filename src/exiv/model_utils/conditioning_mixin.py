@@ -33,6 +33,11 @@ class ConditioningMixin:
                 # ipa / custom vision embeds
                 elif c_aux.type == AuxCondType.VISUAL_EMBEDDING and (vis_embed:=c_aux.data) is not None:
                     output.visual_embedding = vis_embed
+                    
+                # vace ctx
+                elif c_aux.type == AuxCondType.VACE_CTX and (vace_ctx:=c_aux.data) is not None:
+                    output.vace_context = vace_ctx[0]
+                    output.vace_strength = vace_ctx[1]
 
         return output
     

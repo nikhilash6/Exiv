@@ -34,7 +34,7 @@ class FP8ScaledLinear(nn.Module):
             # torch._scaled_mm strictly requires 2D tensors
             input_shape = input.shape
             if input.dim() > 2:
-                input = input.view(-1, self.in_features)
+                input = input.reshape(-1, self.in_features)
                 
             scale_in_inv = (1.0 / self.scale_input).to(input.dtype)
             input_fp8 = (input * scale_in_inv).clamp(-448.0, 448.0).to(torch.float8_e4m3fn)

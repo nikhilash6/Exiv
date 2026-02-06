@@ -24,7 +24,7 @@ class FP8ScaledQuantizer(Quantizer):
         module, tensor_name = get_module_from_name(model, param_name)
         return isinstance(module, FP8ScaledLinear)
 
-    def process_model_before_weight_loading(self, model, keep_in_fp32_modules: List[str] = [], **kwargs):
+    def process_model_before_weight_loading(self, model, keep_in_fp32_modules: List[str] = ["ffn"], **kwargs):
         for name, module in model.named_modules():
             if isinstance(module, nn.Linear):
                 if any(k in name for k in keep_in_fp32_modules):
@@ -107,19 +107,10 @@ class FP8ScaledQuantizer(Quantizer):
                     requires_grad=False
                 )
             
-        elif tensor_name == "scale_weight":
-            module.scale_weight = torch.nn.Parameter(
-                 param_value.to(device=target_device, dtype=module.scale_weight.dtype),
-                 requires_grad=False
-             )
-
-        elif tensor_name == "bias":
-            if param_value is not None:
-                module.bias = torch.nn.Parameter(
-                    param_value.to(device=target_device, dtype=module.bias.dtype),
-                    requires_grad=False
-                )
-                
+        if tensor_name in ["scale_weight", "scale_input", "bias"] and param_value is not None:
+            target_attr = getattr(module, tensor_name)
+            new_param = param_value.to(device=target_device, dtype=target_attr.dtype)
+            setattr(module, tensor_name, torch.nn.Parameter(new_param, requires_grad=False))
                 
 def convert_e5m2_to_e4m3(t_e5m2, old_scale_fp32):
     weight_fp32 = t_e5m2.to(torch.float32)
