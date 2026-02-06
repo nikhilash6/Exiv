@@ -98,6 +98,7 @@ def main(**params):
         latent_format, 
         wan_vae,
     )
+    t_c = wan_vae.temporal_compression_ratio
     del wan_vae
     MemoryManager.clear_memory()
 
@@ -114,7 +115,7 @@ def main(**params):
         latent_image=latent
     )
     out = main_sampler.run_sampling(callback=lambda i, s: progress_callback(i, s))
-    if extra_frames > 0: out = out[:, :, extra_frames:]     # (B, C, T, H, W)
+    if extra_frames > 0: out = out[:, :, extra_frames*t_c:]     # (B, C, T, H, W)
     wan_dit_model.to("cpu")
     wan_type = model_wrapper.model.model_arch_config.default_vae_type
     del wan_dit_model, model_wrapper
@@ -128,7 +129,7 @@ def main(**params):
         use_tiling=use_vae_tiling
     )
     out = wan_vae.decode(out, (width, height, frame_count))
-    output_paths = MediaProcessor.save_latents_to_media(out)
+    output_paths = MediaProcessor.save_latents_to_media(out, start_frame=extra_frames)
     
     return {"1": output_paths[0]}
 

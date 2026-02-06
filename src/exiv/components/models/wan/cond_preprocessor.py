@@ -18,8 +18,8 @@ from ...vae.base import VAEBase, get_vae
 from ....model_utils.common_classes import AuxCondType, AuxConditioning, BatchedConditioning, Conditioning, ExtraCond, Latent, ModelWrapper
 from ....utils.common import fix_frame_count, null_func
 
-
-is_text_model = lambda model_type: model_type in [Model.WAN21_1_3B_T2V.value, Model.WAN22_5B_T2V.value, Model.WAN22_14B_TI2V.value]
+is_vace_model = lambda model_type: model_type in [Model.WAN21_VACE_1_3B_R2V.value, Model.WAN21_VACE_14B_R2V.value]
+is_text_model = lambda model_type: model_type in [Model.WAN21_1_3B_T2V.value, Model.WAN22_5B_T2V.value, Model.WAN22_14B_TI2V.value] or is_vace_model(model_type)
 is_img_model = lambda model_type: not is_text_model(model_type)
 
 class Wan21ModelArchConfig(ModelArchConfig):

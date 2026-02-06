@@ -580,7 +580,7 @@ class Wan21Model(ModelMixin):
         time_indices_map = kwargs.get("time_indices_map", None)
         freqs = self.rope_encode(t_len, h, w, t_start, time_indices_map=time_indices_map, device=x.device, dtype=x.dtype)
         # from torch_tracer import TorchTracer
-        # with TorchTracer("./exiv_2.pkl"):
+        # with TorchTracer("./exiv_08.pkl"):
         out = self.forward_orig(x, timestep, cross_attn, clip_fea=visual_embedding, freqs=freqs, reference_latent=reference_latent, **kwargs)[:, :, :t, :h, :w]
         return out      # new variable for debugging purposes
 
@@ -819,3 +819,18 @@ class Wan21VaceModel(Wan22Model):
         # unpatchify
         x = self.unpatchify(x, grid_sizes)
         return x
+    
+    def get_memory_footprint_params(self):
+        try:
+             dtype_size = torch.tensor([], dtype=self.dtype).element_size()
+        except:
+             dtype_size = 2
+             
+        return {
+            "patch_size": self.patch_size,      # (1, 2, 2)
+            "hidden_dim": self.dim,             # 5120
+            "ffn_dim": self.ffn_dim,            # 13824
+            "attn_factor": 40.0,
+            "ffn_factor": 1.5,
+            "dtype_size": dtype_size,
+        }
