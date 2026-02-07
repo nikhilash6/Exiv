@@ -44,6 +44,7 @@ apps/dummy_test.py
 keygen.sh
 copyparty-sfx.py
 /*.jpg
+/*.png
 /*.mp4
 
 # Test files

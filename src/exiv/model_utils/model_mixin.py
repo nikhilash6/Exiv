@@ -201,8 +201,18 @@ class ModelMixin(nn.Module, LoraMixin, ConditioningMixin, metaclass=ModuleMeta):
             app_logger.info("Applying quantization patches...")
             self.quantizer.validate_environment()
             self.quantizer.process_model_before_weight_loading(model=self)
+            
+    def _get_param_context(self, param_name):
+        """Traverses module hierarchy and determines dtype"""
+        parent_module = self
+        splits = param_name.split(".")
+        for split in splits[:-1]: parent_module = getattr(parent_module, split)
+        # TODO: rn only doing conv3d patch embedding in fp32
+        local_target_dtype = self.dtype
+        if isinstance(parent_module, torch.nn.Conv3d) and "embedding" in param_name:
+            local_target_dtype = torch.float32
+        return parent_module, splits[-1], local_target_dtype
 
-    # code adapted from Huggingface Diffusers
     def load_model(
         self,
         model_path = None,              # model file path (override for flexibility)
@@ -228,21 +238,13 @@ class ModelMixin(nn.Module, LoraMixin, ConditioningMixin, metaclass=ModuleMeta):
                 app_logger.warning(f"skipping the param {param_name} as it's not present in the model definition")
                 continue
             
+            parent_module, leaf_name, local_target_dtype = self._get_param_context(param_name)
             if self.dtype is not None:
                 if self.quantizer is not None:
                     pass    # not overiding dtype of quantized models
                 else:
-                    param = param.to(self.dtype)
-            
-            # For compatibility with PyTorch load_state_dict which converts state dict dtype to existing dtype in model, and which
-            # uses `param.copy_(input_param)` that preserves the contiguity of the parameter in the model
-            # Reference: https://github.com/pytorch/pytorch/blob/db79ceb110f6646523019a59bbd7b838f43d4a86/torch/nn/modules/module.py#L2040C29-L2040C29
-            old_param = self
-            splits = param_name.split(".")
-            for split in splits:
-                # recursively drill down: model.down_blocks[0].attentions[0].proj_in.weight
-                old_param = getattr(old_param, split)
-            
+                    param = param.to(local_target_dtype)
+            old_param = getattr(parent_module, leaf_name, None)
             # param_name might be for a buffer or something not loadable, skip it
             if not isinstance(old_param, (torch.nn.Parameter, torch.Tensor)):
                 old_param = None
@@ -254,7 +256,7 @@ class ModelMixin(nn.Module, LoraMixin, ConditioningMixin, metaclass=ModuleMeta):
                 if old_param.is_contiguous():
                     param = param.contiguous()
             
-            # bnb params are flattened.
+            # bnb params are flattened
             # gguf quants have a different shape based on the type of quantization applied
             if model_state_dict[param_name].shape != param.shape:
                 if self.quantizer is not None:
@@ -277,17 +279,18 @@ class ModelMixin(nn.Module, LoraMixin, ConditioningMixin, metaclass=ModuleMeta):
                     dtype=self.dtype
                 )
             else:
-                set_module_tensor_to_device(self, param_name, device, value=param, dtype=self.dtype)
+                set_module_tensor_to_device(self, param_name, device, value=param, dtype=local_target_dtype)
                 
         for name, param in self.named_parameters():
             if param.device.type == "meta":
                 app_logger.warning(f"Initializing missing meta parameter: {name}")
+                _, _, local_target_dtype = self._get_param_context(name)
                 # NOTE: heuristic: Scales = 1.0, biases/weights = 0.0
                 if "scale" in name:
                     val = torch.ones_like(param, device=device)
                 else:
                     val = torch.zeros_like(param, device=device)
-                set_module_tensor_to_device(self, name, device, value=val, dtype=self.dtype)
+                set_module_tensor_to_device(self, name, device, value=val, dtype=local_target_dtype)
     
     def process_latent_in(self, latent_in: Tensor) -> Tensor:
         assert self.model_arch_config is not None, "model_arch_config not set"

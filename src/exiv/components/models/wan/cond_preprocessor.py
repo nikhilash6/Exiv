@@ -101,8 +101,8 @@ def _process_vace_context(cond_list: List[Conditioning], wrapper: ModelWrapper, 
                         control_video = torch.ones((frame_count, height, width, 3)) * 0.5
 
                     if reference_image is not None:
-                        reference_image = common_upscale(reference_image[:1], width, height, "bilinear", "center")[0]
-                        reference_image = vae.encode(reference_image[:, :3, :, :].unsqueeze(0))  # encoding (1, B, 3, H, W)
+                        reference_image = common_upscale(reference_image[:1], width, height, "bilinear", "center")[0]   # ([1, 3, 720, 720])
+                        reference_image = vae.encode(reference_image[:, :3, :, :].unsqueeze(2))  # encoding (B, 3, 1, H, W) for (b, c, t, h, w)
                         reference_image = torch.cat([
                                 reference_image, 
                                 wrapper.model.model_arch_config.latent_format.process_out(torch.zeros_like(reference_image))    # dummy / no-mask background
