@@ -143,7 +143,7 @@ app = App(
         'conditions': Input(label="Conditions (JSON)", type="json", default=DEFAULT_CONDS,),
         'hooks': Input(label="Hooks (JSON)", type="json", default=DEFAULT_HOOKS),
         'latent': Input(label="Latent", type="json", default=DEFAULT_LATENT),
-        'seed': Input(label="Seed", type="number", default=256347,),
+        'seed': Input(label="Seed", type="number", default=-1,),
         'steps': Input(label="Steps", type="number", default=20, increment_controls=True, increment_step=2,),
         'cfg': Input(label="CFG", type="number", default=6, increment_controls=True, increment_step=0.2,),
         'sampler_name': Input(label="Sampler Name", type="select", options=KSamplerType.value_list(), \

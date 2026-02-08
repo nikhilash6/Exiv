@@ -52,12 +52,15 @@ class RMS_norm(nn.Module):
         shape = (dim, *broadcastable_dims) if channel_first else (dim,)
 
         self.channel_first = channel_first
-        self.scale = dim**0.5
         self.gamma = nn.Parameter(torch.ones(shape))
-        self.bias = nn.Parameter(torch.zeros(shape)) if bias else 0.0
+        self.bias = nn.Parameter(torch.zeros(shape)) if bias else None
 
     def forward(self, x):
-        return F.normalize(x, dim=(1 if self.channel_first else -1)) * self.scale * self.gamma + self.bias
+        # many repos use fp32 for stable norm calculations
+        # llama - https://github.com/meta-llama/llama/blob/689c7f261b9c5514636ecc3c5fefefcbb3e6eed7/llama/model.py#L76
+        dim = 1 if self.channel_first else -1
+        norm_x = torch.rsqrt(torch.mean(x.float()**2, dim=dim, keepdim=True) + 1e-6).to(x.dtype)
+        return x * norm_x * self.gamma.to(x) + (self.bias.to(x) if self.bias is not None else 0)
 
 
 class Upsample(nn.Upsample):
