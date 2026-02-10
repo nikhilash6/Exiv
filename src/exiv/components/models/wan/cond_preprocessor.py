@@ -110,14 +110,14 @@ def _process_vace_context(cond_list: List[Conditioning], wrapper: ModelWrapper, 
                 latent_length = ((frame_count - 1) // vae.temporal_compression_ratio) + 1
                 reference_image, control_masks, control_video = None, None, None
                 
-                # Check for direct tensor inputs (e.g. from _process_vace_keyframes)
+                # check for direct tensor inputs (e.g. from _process_vace_keyframes)
                 control_video = aux_c.input_metadata.get("control_video_tensor", None)
                 control_masks = aux_c.input_metadata.get("control_mask_tensor", None)
-                
-                control_video_path = aux_c.input_metadata.get("control_video_path", None)
-                reference_image_path = aux_c.input_metadata.get("reference_image_path", None)   # TODO: extend to a list of ref images
-                if control_video_path: control_video, _ = MediaProcessor.load_video(control_video_path, output_frames=False)    # (C, T, H, W)
-                if reference_image_path: reference_image = get_image_tensor(reference_image_path, height, width)    # (B, C, W, H)
+                if not control_video:
+                    control_video_path = aux_c.input_metadata.get("control_video_path", None)
+                    reference_image_path = aux_c.input_metadata.get("reference_image_path", None)   # TODO: extend to a list of ref images
+                    if control_video_path: control_video, _ = MediaProcessor.load_video(control_video_path, output_frames=False)    # (C, T, H, W)
+                    if reference_image_path: reference_image = get_image_tensor(reference_image_path, height, width)    # (B, C, W, H)
                 
                 key_video = get_tensor_weak_hash(control_video)
                 key_mask = get_tensor_weak_hash(control_masks)

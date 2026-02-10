@@ -25,7 +25,6 @@ setup(
     author="Piyush Kumar",
     package_dir={"": "src"},
     packages=find_packages(where="src"),
-    # package_data={"test_pkg": ["data.txt"]},
     install_requires=main_deps,
     extras_require={
         'dev': dev_deps,
