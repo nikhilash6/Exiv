@@ -6,6 +6,7 @@ import traceback
 from typing import Dict, List, Type, Any, Union
 from .extensions import Extension
 from ..utils.logging import app_logger
+from ..utils.file import find_file_path, CONFIG_FILENAME
 
 class ExtensionRegistry:
     _instance = None
@@ -37,7 +38,7 @@ class ExtensionRegistry:
         if directory not in sys.path:
             sys.path.append(directory)
             
-        app_logger.info(f"Scanning for extensions in: {directory}")
+        app_logger.debug(f"Scanning for extensions in: {directory}")
         for item in os.listdir(directory):
             ext_path = os.path.join(directory, item)
             # NOTE: only folders containing __init__.py are scanned
@@ -114,7 +115,7 @@ class ExtensionRegistry:
         if count > 0:
             app_logger.info(f"Applied {count} system patches.")
 
-    def initialize(self):
+    def initialize(self, run_patches: bool = True):
         """
         Loads built-in extensions and user-registered extensions.
         """
@@ -128,25 +129,33 @@ class ExtensionRegistry:
         if os.path.exists(builtin_dir):
             self.load_extensions_from_path(builtin_dir)
 
-        # loading registered extensions from .exivrc
-        config_path = os.path.join(os.getcwd(), ".exivrc")
-        if os.path.exists(config_path):
+        # loading registered extensions from exiv_config.json
+        config_file, config_dir = find_file_path(CONFIG_FILENAME, recursive=True)
+        
+        if config_file and config_dir:
             try:
-                with open(config_path, 'r') as f:
+                with open(config_file, 'r') as f:
                     config = json.load(f)
                     
                 registered_paths = config.get("extensions", [])
                 for ext_path in registered_paths:
-                    # resolve relative paths against the config file location (CWD)
-                    abs_path = os.path.abspath(ext_path)
+                    # resolve relative paths against the config file location
+                    if not os.path.isabs(ext_path):
+                        abs_path = os.path.abspath(os.path.join(config_dir, ext_path))
+                    else:
+                        abs_path = ext_path
+
                     if os.path.exists(abs_path):
                         self.load_extensions_from_path(abs_path)
                     else:
                         app_logger.warning(f"Registered extension path not found: {abs_path}")
             except Exception as e:
-                app_logger.error(f"Failed to load .exivrc: {e}")
+                app_logger.error(f"Failed to load exiv_config.json: {e}")
+        else:
+            app_logger.debug("No exiv_config.json found")
 
-        self.run_patches()
+        if run_patches:
+            self.run_patches()
 
     def get_all_extensions_metadata(self):
         """
@@ -158,6 +167,5 @@ class ExtensionRegistry:
                 "id": ext.ID,
                 "name": ext.DISPLAY_NAME,
                 "version": ext.VERSION,
-                "slot": ext.SLOT,
             })
         return meta

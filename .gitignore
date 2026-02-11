@@ -5,6 +5,7 @@
 .idea
 .DS_store
 .ipynb_checkpoints/*
+exiv_config.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -38,6 +39,7 @@ venv/
 input/
 output/
 /models/
+/extensions
 note.md
 temp.py
 apps/dummy_test.py

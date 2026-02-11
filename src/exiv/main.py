@@ -4,11 +4,10 @@ import json
 import subprocess
 import sys
 
-from .server.server import run_server, start_worker
-from .server.task_manager import task_manager
 from .utils.logging import app_logger
 from .config import global_config
 from .components.extension_registry import ExtensionRegistry
+from .utils.file import find_file_path, CONFIG_FILENAME
 
 @click.group()
 def cli():
@@ -24,6 +23,9 @@ def cli():
 @click.pass_context
 def run(ctx, app_name):
     """ Runs a task synchronously """
+    from .server.server import start_worker
+    from .server.task_manager import task_manager
+
     metadata = {}
     # ctx.args will be a list like ['--seed', '12345', '--negative-prompt', 'blurry']
     for i, arg in enumerate(ctx.args):
@@ -45,6 +47,7 @@ def run(ctx, app_name):
 
 @cli.command(name="serve")
 def serve():
+    from .server.server import run_server
     app_logger.info("Starting the web server on http://0.0.0.0:8000")
     run_server()
 
@@ -53,35 +56,40 @@ def serve():
 def register(path):
     """
     - Registers a local folder as an extensions folder
-    - Updates (or creates) the .exivrc file in the current directory
+    - Updates (or creates) the exiv_config.json file in the current directory
     - Installs requirements.txt if present
     - Does NOT imports the extension modules (see load_extensions_from_path)
     """
     app_logger.info(f"Registering extension from: {path}")
     
-    # update .exivrc
-    config_path = os.path.join(os.getcwd(), ".exivrc")
-    config = {"extensions": []}
+    # update exiv_config.json
+    config_file, config_dir = find_file_path(CONFIG_FILENAME, recursive=True)
     
-    if os.path.exists(config_path):
+    if not config_file:
+        config_dir = os.getcwd()
+        config_file = os.path.join(config_dir, CONFIG_FILENAME)
+        config = {"extensions": []}
+    else:
         try:
-            with open(config_path, 'r') as f:
+            with open(config_file, 'r') as f:
                 config = json.load(f)
         except Exception as e:
-            app_logger.warning(f"Could not read existing .exivrc, creating new one. Error: {e}")
+            app_logger.warning(f"Could not read existing exiv_config.json, creating new one. Error: {e}")
+            config = {"extensions": []}
 
-    # using relative path if possible for portability, else absolute
+    # using relative path if possible (relative to the config file location)
     try:
-        rel_path = os.path.relpath(path, os.getcwd())
+        # We want the path relative to where the config file is stored
+        rel_path = os.path.relpath(path, config_dir)
         final_path = rel_path
     except ValueError:
         final_path = path
         
     if final_path not in config.get("extensions", []):
         config["extensions"] = config.get("extensions", []) + [final_path]
-        with open(config_path, 'w') as f:
+        with open(config_file, 'w') as f:
             json.dump(config, f, indent=2)
-        app_logger.info(f"Added {final_path} to .exivrc")
+        app_logger.info(f"Added {final_path} to {config_file}")
     else:
         app_logger.info(f"Extension {final_path} is already registered.")
 
@@ -105,7 +113,7 @@ def list_resources():
 def list_extensions():
     """List all available extensions (built-in + registered)"""
     registry = ExtensionRegistry.get_instance()
-    registry.initialize()
+    registry.initialize(run_patches=False)
     
     meta = registry.get_all_extensions_metadata()
     if not meta:
@@ -113,10 +121,10 @@ def list_extensions():
         return
 
     print(f"\nFound {len(meta)} extensions:\n")
-    print(f"{'ID':<30} {'Version':<10} {'Name':<20} {'Slot'}")
+    print(f"{'ID':<30} {'Version':<10} {'Name':<20}")
     print("-" * 70)
     for ext in meta:
-        print(f"{ext['id']:<30} {ext['version']:<10} {ext['name']:<20} {ext['slot']}")
+        print(f"{ext['id']:<30} {ext['version']:<10} {ext['name']:<20}")
     print("")
 
 if __name__ == '__main__':

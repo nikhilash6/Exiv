@@ -10,8 +10,10 @@ import glob
 import urllib.parse
 import requests
 import json
-from typing import List, Dict
+from typing import List, Dict, Tuple, Optional
 from tqdm import tqdm
+
+CONFIG_FILENAME = "exiv_config.json"
 
 from .file_path import FilePaths
 from ..utils.common import is_ffmpeg_present
@@ -49,6 +51,32 @@ def get_numbered_filename(folder: str, filename: str) -> str:
         counter += 1
         
     return full_path
+
+def find_file_path(filename: str, start_path: str = None, recursive: bool = True) -> Tuple[Optional[str], Optional[str]]:
+    """
+    - Searches for a file starting from start_path (or cwd)
+    - If recursive is True, it walks up the directory tree until it finds the file or hits root
+    Returns (abs_path_to_file, directory_containing_file)
+    """
+    if start_path is None:
+        start_path = os.getcwd()
+        
+    current = os.path.abspath(start_path)
+    
+    while True:
+        check_path = os.path.join(current, filename)
+        if os.path.exists(check_path):
+            return check_path, current
+        
+        if not recursive:
+            break
+
+        parent = os.path.dirname(current)
+        if parent == current:  # reached root
+            break
+        current = parent
+        
+    return None, None
 
 def _interactive_download_check(model_path: str, download_url: str) -> bool:
     from .logging import app_logger
