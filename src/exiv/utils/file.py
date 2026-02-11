@@ -1,17 +1,16 @@
-import subprocess
-import torch
-import torchvision
-import numpy as np
-
+from __future__ import annotations
 import os
 import re
-import av
 import glob
 import urllib.parse
-import requests
 import json
-from typing import List, Dict, Tuple, Optional
-from tqdm import tqdm
+from typing import List, Dict, Tuple, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:   # mainly for IDE suggestions
+    import torch
+    import numpy as np
+    import av
+
 
 CONFIG_FILENAME = "exiv_config.json"
 
@@ -81,6 +80,8 @@ def find_file_path(filename: str, start_path: str = None, recursive: bool = True
 def _interactive_download_check(model_path: str, download_url: str) -> bool:
     from .logging import app_logger
     from ..config import global_config
+    from .logging import app_logger
+    from ..config import global_config
     import requests
 
     if global_config.auto_download:
@@ -141,6 +142,7 @@ def ensure_model_availability(model_path: str, download_url: str = None, force_d
         total_size = int(response.headers.get('content-length', 0))
         block_size = 8192
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
+        from tqdm import tqdm
         with tqdm(total=total_size, unit='B', unit_scale=True, desc=os.path.basename(model_path)) as pbar:
             with open(model_path, "wb") as f:
                 for chunk in response.iter_content(chunk_size=block_size):
@@ -158,7 +160,10 @@ class MediaProcessor:
     @staticmethod
     def load_image_list(image_path_list: List[str] | str):
         from PIL import Image
+        from PIL import Image
         from .logging import app_logger
+        import torch
+        import numpy as np
         
         if isinstance(image_path_list, str):
             image_path_list = [image_path_list]
@@ -193,6 +198,10 @@ class MediaProcessor:
         """
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"Video file not found: {video_path}")
+
+        import av
+        import numpy as np
+        import torch
 
         container = av.open(video_path)
         stream = container.streams.video[0]
@@ -231,6 +240,7 @@ class MediaProcessor:
     def save_latents_to_media(out, metadata: Dict | None = None, subfolder: str | None = None, start_frame = 0, end_frame = -1):
         # TODO: make this a generic method, allowing saving images/audio/3d as well
         # rn it is only for video
+        import torch
         video_tensor = out.sample if hasattr(out, "sample") else out
 
         # IMPORTANT: VAE outputs should always be in [0, 1]
@@ -250,6 +260,7 @@ class MediaProcessor:
             
             save_path = f"output_video_{i}.mp4"
             save_path = get_numbered_filename(save_dir, save_path)
+            import torchvision
             torchvision.io.write_video(
                 save_path,
                 video_formatted,
@@ -301,6 +312,7 @@ class MediaProcessor:
             options = {'movflags': 'use_metadata_tags'}
 
         try:
+            import av
             with av.open(file_path) as input_container:
                 with av.open(temp_path, mode='w', options=options) as output_container:
                     # update global metadata
@@ -361,6 +373,7 @@ class MediaProcessor:
                 pass
 
         try:
+            import av
             with av.open(file_path) as container:
                 return dict(container.metadata)
         except Exception:
