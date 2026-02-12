@@ -8,10 +8,86 @@ import subprocess
 from unittest.mock import patch, MagicMock
 from click.testing import CliRunner
 
-from exiv.components.extension_registry import ExtensionRegistry
+from exiv.components.extension_registry import ExtensionRegistry, EXTENSION_ENTRYPOINT
 from exiv.components.extensions import Extension
 from exiv.utils.file import CONFIG_FILENAME
 from exiv.main import cli
+
+
+
+class TestExtensionNamespace(unittest.TestCase):
+    def setUp(self):
+        # Reset singleton
+        ExtensionRegistry._instance = None
+        
+        # Create temp dir
+        self.test_dir = tempfile.mkdtemp()
+        self.original_cwd = os.getcwd()
+        os.chdir(self.test_dir)
+        
+        # Setup config
+        self.config_path = os.path.join(self.test_dir, CONFIG_FILENAME)
+        
+    def tearDown(self):
+        os.chdir(self.original_cwd)
+        shutil.rmtree(self.test_dir)
+        ExtensionRegistry._instance = None
+        
+        # Clean up sys.modules to avoid pollution
+        to_remove = [k for k in sys.modules if k.startswith("exiv.ext.test_namespace_ext")]
+        for k in to_remove:
+            del sys.modules[k]
+
+    def test_extension_loads_in_namespace(self):
+        """
+        Test that an extension is loaded into 'exiv.ext.<name>'
+        and can perform relative imports.
+        """
+        ext_name = "test_namespace_ext"
+        ext_dir = os.path.join(self.test_dir, ext_name)
+        os.makedirs(ext_dir)
+        
+        # Create a helper module
+        with open(os.path.join(ext_dir, "helper.py"), "w") as f:
+            f.write("def get_msg(): return 'hello from helper'")
+            
+        # Create extension entry point with relative import
+        with open(os.path.join(ext_dir, EXTENSION_ENTRYPOINT), "w") as f:
+            f.write("from . import helper\n")
+            f.write("from exiv.components.extensions import Extension\n\n")
+            f.write("class NamespaceExt(Extension):\n")
+            f.write("    ID = 'namespace_ext'\n")
+            f.write("    DISPLAY_NAME = 'Namespace Ext'\n")
+            f.write("    VERSION = '1.0'\n")
+            f.write("    def register(self):\n")
+            f.write("        return [helper.get_msg()]\n")
+            
+        # Point config to it
+        with open(self.config_path, "w") as f:
+            json.dump({"extensions": [ext_dir]}, f)
+            
+        # Initialize
+        registry = ExtensionRegistry.get_instance()
+        registry.initialize(run_patches=False)
+        
+        # 1. Check if extension is registered
+        self.assertIn("namespace_ext", registry.extensions)
+        
+        # 2. Check if module is in sys.modules with correct name
+        full_name = f"exiv.ext.{ext_name}"
+        self.assertIn(full_name, sys.modules)
+        
+        # 3. Check if the capability (from relative import) was loaded
+        # The 'register' method returns [helper.get_msg()] -> ['hello from helper']
+        # This is stored in registry.patches
+        self.assertIn("hello from helper", registry.patches)
+        
+        # 4. Check that the helper is also in the namespace (implicitly)
+        # Note: 'helper' itself might not be in sys.modules as a top-level key,
+        # but it should be accessible via the parent
+        module = sys.modules[full_name]
+        self.assertTrue(hasattr(module, 'helper'))
+        self.assertEqual(module.helper.get_msg(), 'hello from helper')
 
 class TestExtensionRegistryFlow(unittest.TestCase):
     def setUp(self):
@@ -41,7 +117,7 @@ class TestExtensionRegistryFlow(unittest.TestCase):
         ext_dir = os.path.join(base_dir, name)
         os.makedirs(ext_dir, exist_ok=True)
         
-        init_file = os.path.join(ext_dir, "__init__.py")
+        entry_file = os.path.join(ext_dir, EXTENSION_ENTRYPOINT)
         content = (
             f"from exiv.components.extensions import Extension\n"
             f"\n"
@@ -49,13 +125,12 @@ class TestExtensionRegistryFlow(unittest.TestCase):
             f"    ID = \"{name}_id\"\n"
             f"    DISPLAY_NAME = \"{name}\"\n"
             f"    VERSION = \"1.0\"\n"
-            f"    VERSION = \"1.0\"\n"
             f"\n"
             f"\n"
             f"    def register(self):\n"
             f"        return []\n"
         )
-        with open(init_file, "w") as f:
+        with open(entry_file, "w") as f:
             f.write(content)
         return ext_dir
 
@@ -69,7 +144,7 @@ class TestExtensionRegistryFlow(unittest.TestCase):
         # Create extension that patches something
         ext_dir = os.path.join(self.user_ext_dir, "patch_ext")
         os.makedirs(ext_dir)
-        with open(os.path.join(ext_dir, "__init__.py"), "w") as f:
+        with open(os.path.join(ext_dir, EXTENSION_ENTRYPOINT), "w") as f:
             f.write(
                 "from exiv.components.extensions import Extension\n"
                 "from unittest.mock import MagicMock\n"
@@ -93,7 +168,7 @@ class TestExtensionRegistryFlow(unittest.TestCase):
         
         # check that patch was NOT called
         import sys
-        patch_module = sys.modules["patch_ext"]
+        patch_module = sys.modules["exiv.ext.patch_ext"]
         patch_module.mock_patch.assert_not_called()
         
         # run patches manually
@@ -246,3 +321,7 @@ class TestExtensionRegistryFlow(unittest.TestCase):
         registry = ExtensionRegistry.get_instance()
         registry.initialize(run_patches=False)
         self.assertIn("ext1_id", registry.extensions)
+
+if __name__ == '__main__':
+    unittest.main()
+

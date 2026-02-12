@@ -67,6 +67,7 @@ class AppOutputType(ExtendedEnum):
     AUDIO  = 'audio'
     VIDEO  = 'video'
     THREE_D = '3D'
+    JSON = 'json'
 
 class Output(BaseModel):
     id: int

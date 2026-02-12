@@ -3,7 +3,7 @@ import os
 import re
 import glob
 import urllib.parse
-import json
+import requests
 from typing import List, Dict, Tuple, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:   # mainly for IDE suggestions
@@ -237,9 +237,8 @@ class MediaProcessor:
         return video_tensor, metadata
     
     @staticmethod
-    def save_latents_to_media(out, metadata: Dict | None = None, subfolder: str | None = None, start_frame = 0, end_frame = -1):
+    def save_latents_to_media(out, metadata: Dict | None = None, subfolder: str | None = None, start_frame = 0, end_frame = None, media_type = "video"):
         # TODO: make this a generic method, allowing saving images/audio/3d as well
-        # rn it is only for video
         import torch
         video_tensor = out.sample if hasattr(out, "sample") else out
 
@@ -251,22 +250,35 @@ class MediaProcessor:
         for i, video in enumerate(video_tensor):
             # (C, T, H, W) -> (T, H, W, C), for torchvision
             video_formatted = video.permute(1, 2, 3, 0).cpu()
-            video_formatted = video_formatted[start_frame:end_frame]
+            if end_frame is None or end_frame == -1:
+                video_formatted = video_formatted[start_frame:]
+            else:
+                video_formatted = video_formatted[start_frame:end_frame]
+
             save_dir = FilePaths.OUTPUT_DIRECTORY
             if subfolder:
                 save_dir = os.path.join(save_dir, subfolder)
                 if not os.path.exists(save_dir):
                     os.makedirs(save_dir)
             
-            save_path = f"output_video_{i}.mp4"
-            save_path = get_numbered_filename(save_dir, save_path)
-            import torchvision
-            torchvision.io.write_video(
-                save_path,
-                video_formatted,
-                fps=24,
-                options={"crf": "25"}  # 'Constant Rate Factor' for quality (lower is better)
-            )
+            if media_type == "image":
+                save_path = f"output_image_{i}.png"
+                save_path = get_numbered_filename(save_dir, save_path)
+                from PIL import Image
+                import numpy as np
+                # video_formatted is (T, H, W, C). For image, T should be 1 or we take the first frame.
+                img_np = video_formatted[0].numpy()
+                Image.fromarray(img_np).save(save_path)
+            else:
+                save_path = f"output_video_{i}.mp4"
+                save_path = get_numbered_filename(save_dir, save_path)
+                import torchvision
+                torchvision.io.write_video(
+                    save_path,
+                    video_formatted,
+                    fps=24,
+                    options={"crf": "25"}  # 'Constant Rate Factor' for quality (lower is better)
+                )
             
             try:
                 if metadata:

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .utils.logging import app_logger
 from .config import global_config
-from .components.extension_registry import ExtensionRegistry
+from .components.extension_registry import ExtensionRegistry, EXTENSION_ENTRYPOINT
 from .utils.file import find_file_path, CONFIG_FILENAME
 
 DEFAULT_CONFIG = {"extensions": []}
@@ -99,14 +99,14 @@ def register(path: str) -> None:
     
     # extensions to add
     extensions_to_add = []
-    if (target / "__init__.py").is_file():
+    if (target / EXTENSION_ENTRYPOINT).is_file():
         extensions_to_add.append(target)
     else:
         for item in target.iterdir():
-            if item.is_dir() and (item / "__init__.py").is_file():
+            if item.is_dir() and (item / EXTENSION_ENTRYPOINT).is_file():
                 extensions_to_add.append(item)
     if not extensions_to_add:
-        app_logger.warning(f"No valid extensions found in {target} (looking for folders with __init__.py)")
+        app_logger.warning(f"No valid extensions found in {target} (looking for folders with {EXTENSION_ENTRYPOINT})")
         return
 
     existing_paths = config.get("extensions", [])

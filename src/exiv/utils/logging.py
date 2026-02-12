@@ -11,7 +11,7 @@ class AppLogger(logging.Logger):
 
     def _configure_logging(self):
         log_formatter = colorlog.ColoredFormatter(
-            "%(log_color)s%(levelname)s:%(name)s:%(message)s",
+            "%(log_color)s%(levelname)s:%(message)s",
             log_colors={
                 "DEBUG": "cyan",
                 "INFO": "green",

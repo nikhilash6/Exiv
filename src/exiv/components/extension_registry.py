@@ -8,6 +8,8 @@ from .extensions import Extension
 from ..utils.logging import app_logger
 from ..utils.file import find_file_path, CONFIG_FILENAME
 
+EXTENSION_ENTRYPOINT = "extension.py"
+
 class ExtensionRegistry:
     _instance = None
     
@@ -41,31 +43,56 @@ class ExtensionRegistry:
         app_logger.debug(f"Scanning for extensions in: {directory}")
         for item in os.listdir(directory):
             ext_path = os.path.join(directory, item)
-            # NOTE: only folders containing __init__.py are scanned
-            if os.path.isdir(ext_path) and os.path.exists(os.path.join(ext_path, "__init__.py")):
+            # NOTE: only folders containing EXTENSION_ENTRYPOINT are scanned
+            if os.path.isdir(ext_path) and os.path.exists(os.path.join(ext_path, EXTENSION_ENTRYPOINT)):
                 self._load_single_extension(item, ext_path)
 
     def _load_single_extension(self, module_name: str, path: str):
         try:
+            # Create a consistent namespace: exiv.ext.<module_name>
+            full_module_name = f"exiv.ext.{module_name}"
+            
+            # Ensure parent packages exist so the dotted name is valid
+            import types
+            if "exiv" not in sys.modules:
+                sys.modules["exiv"] = types.ModuleType("exiv")
+            if "exiv.ext" not in sys.modules:
+                sys.modules["exiv.ext"] = types.ModuleType("exiv.ext")
+
             # using spec_from_file_location is safer for arbitrary paths
-            init_path = os.path.join(path, "__init__.py")
-            spec = importlib.util.spec_from_file_location(module_name, init_path)
+            entry_path = os.path.join(path, EXTENSION_ENTRYPOINT)
+            spec = importlib.util.spec_from_file_location(full_module_name, entry_path)
+            
+            if spec:
+                # mark as a package to allow relative imports
+                spec.submodule_search_locations = [path]
+                
             if spec and spec.loader:
                 module = importlib.util.module_from_spec(spec)
-                sys.modules[module_name] = module
-                spec.loader.exec_module(module)
                 
-                extension_class = None
-                for attr_name in dir(module):
-                    attr = getattr(module, attr_name)
-                    if isinstance(attr, type) and issubclass(attr, Extension) and attr is not Extension:
-                        extension_class = attr
-                        break
+                # Register in sys.modules so imports like 'import exiv.ext.foo' work
+                sys.modules[full_module_name] = module
                 
-                if extension_class:
-                    self._register_extension(extension_class)
-                else:
-                    app_logger.debug(f"No Extension subclass found in {module_name}")
+                try:
+                    spec.loader.exec_module(module)
+                    
+                    extension_class = None
+                    for attr_name in dir(module):
+                        attr = getattr(module, attr_name)
+                        if isinstance(attr, type) and issubclass(attr, Extension) and attr is not Extension:
+                            extension_class = attr
+                            break
+                    
+                    if extension_class:
+                        self._register_extension(extension_class)
+                    else:
+                        app_logger.debug(f"No Extension subclass found in {module_name}")
+                        
+                except Exception as e:
+                    # Clean up if execution fails
+                    if full_module_name in sys.modules:
+                        del sys.modules[full_module_name]
+                    raise e
                     
         except Exception as e:
             app_logger.error(f"Failed to load extension {module_name}: {e}")
@@ -75,11 +102,8 @@ class ExtensionRegistry:
         try:
             instance = cls()
             self.extensions[cls.ID] = instance
-            app_logger.info(f"Loaded Extension: {cls.DISPLAY_NAME} ({cls.ID}) v{cls.VERSION}")
-            
             # get capabilities
             capabilities = instance.register()
-            
             for item in capabilities:
                 # Treat everything as a patch/capability
                 self.patches.append(item)
@@ -101,10 +125,7 @@ class ExtensionRegistry:
         count = 0
         for handler in self.patches:
             if callable(handler) and not isinstance(handler, Extension):
-                # We generally don't "call" the Extension object itself unless it implements __call__
-                # But usually patches are separate functions.
-                # If an Extension object IS callable, we call it? 
-                # Let's assume 'patches' are meant to be executed if they are functions.
+                # extensions implementing the __call__ method are ran here
                 try:
                     handler()
                     count += 1
@@ -113,7 +134,7 @@ class ExtensionRegistry:
                     traceback.print_exc()
         
         if count > 0:
-            app_logger.info(f"Applied {count} system patches.")
+            app_logger.debug(f"Applied {count} system patches.")
 
     def initialize(self, run_patches: bool = True):
         """
@@ -146,7 +167,7 @@ class ExtensionRegistry:
                         abs_path = ext_path
 
                     if os.path.exists(abs_path):
-                        if os.path.isdir(abs_path) and os.path.exists(os.path.join(abs_path, "__init__.py")):
+                        if os.path.isdir(abs_path) and os.path.exists(os.path.join(abs_path, EXTENSION_ENTRYPOINT)):
                             self._load_single_extension(os.path.basename(abs_path), abs_path)
                         else:
                             self.load_extensions_from_path(abs_path)
