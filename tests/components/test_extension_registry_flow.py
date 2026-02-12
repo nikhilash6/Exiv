@@ -4,11 +4,13 @@ import json
 import shutil
 import tempfile
 import sys
+import subprocess
 from unittest.mock import patch, MagicMock
 from click.testing import CliRunner
 
 from exiv.components.extension_registry import ExtensionRegistry
 from exiv.components.extensions import Extension
+from exiv.utils.file import CONFIG_FILENAME
 from exiv.main import cli
 
 class TestExtensionRegistryFlow(unittest.TestCase):
@@ -81,7 +83,7 @@ class TestExtensionRegistryFlow(unittest.TestCase):
                 "        return [mock_patch]\n"
             )
             
-        config_path = os.path.join(self.test_dir, "exiv_config.json")
+        config_path = os.path.join(self.test_dir, CONFIG_FILENAME)
         with open(config_path, "w") as f:
             json.dump({"extensions": [self.user_ext_dir]}, f)
             
@@ -118,24 +120,68 @@ class TestExtensionRegistryFlow(unittest.TestCase):
         with open(os.path.join(self.user_ext_dir, "requirements.txt"), "w") as f:
             f.write("dummy-package")
 
-        # run command
-        # we pass the absolute path, but the tool should convert it to relative if possible
+        # run command on the PARENT directory
+        # scan this parent directory and add the child 'cli_ext' to config
         result = runner.invoke(cli, ['register', self.user_ext_dir])
         self.assertEqual(result.exit_code, 0)
 
         # verify exiv_config.json content
-        config_path = os.path.join(self.test_dir, "exiv_config.json")
+        config_path = os.path.join(self.test_dir, CONFIG_FILENAME)
         self.assertTrue(os.path.exists(config_path))
         with open(config_path, "r") as f:
             config = json.load(f)
-            # tool logic prefers relative paths
-            expected_rel_path = os.path.relpath(self.user_ext_dir, self.test_dir)
-            self.assertIn(expected_rel_path, config["extensions"])
+            expected_rel_path = os.path.relpath(ext_path, self.test_dir)
+            
+            # checking if any path in config matches our expectation
+            # (Windows/Posix path separators might differ so we normalize or check existence)
+            found = False
+            for p in config["extensions"]:
+                if os.path.normpath(p) == os.path.normpath(expected_rel_path):
+                    found = True
+                    break
+            self.assertTrue(found, f"Expected {expected_rel_path} in {config['extensions']}")
+
+    @patch('subprocess.check_call')
+    def test_cli_register_fails_on_install_error(self, mock_subprocess):
+        """Test that 'exiv register' does NOT add extension if requirements fail to install"""
+        runner = CliRunner()
+        # dummy extension with requirements
+        ext_path = self.create_dummy_extension(self.user_ext_dir, "fail_ext", "FailExt")
+        with open(os.path.join(ext_path, "requirements.txt"), "w") as f:
+            f.write("non-existent-package-xyz-123")
+
+        # mocking subprocess.check_call to raise CalledProcessError
+        mock_subprocess.side_effect = subprocess.CalledProcessError(1, ["pip", "install"])
+        result = runner.invoke(cli, ['register', ext_path])
+        config_path = os.path.join(self.test_dir, CONFIG_FILENAME)
+        
+        if os.path.exists(config_path):
+            with open(config_path, "r") as f:
+                config = json.load(f)
+                extensions = config.get("extensions", [])
+                # path should NOT be in there
+                self.assertFalse(any("fail_ext" in p for p in extensions), "Extension should not be registered on failure")
+        
+        # verify the mock was called
+        mock_subprocess.assert_called()
+
+    def test_cli_list_extensions(self):
+        """Test 'exiv list extensions' command"""
+        runner = CliRunner()
+        config_path = os.path.join(self.test_dir, CONFIG_FILENAME)
+        with open(config_path, "w") as f:
+            json.dump({"extensions": ["some/relative/path"]}, f)
+            
+        result = runner.invoke(cli, ['list', 'extensions'])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("[Built-in Extensions Directory]:", result.output)
+        self.assertIn("[Registered Extensions]", result.output)
+        self.assertIn("some/relative/path", result.output)
 
     def test_initialize_loads_from_config(self):
         """Test that registry.initialize() reads exiv_config.json and loads extensions"""
         self.create_dummy_extension(self.user_ext_dir, "config_ext", "ConfigExt")
-        config_path = os.path.join(self.test_dir, "exiv_config.json")
+        config_path = os.path.join(self.test_dir, CONFIG_FILENAME)
         with open(config_path, "w") as f:
             json.dump({"extensions": [self.user_ext_dir]}, f)
             

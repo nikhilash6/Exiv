@@ -146,7 +146,10 @@ class ExtensionRegistry:
                         abs_path = ext_path
 
                     if os.path.exists(abs_path):
-                        self.load_extensions_from_path(abs_path)
+                        if os.path.isdir(abs_path) and os.path.exists(os.path.join(abs_path, "__init__.py")):
+                            self._load_single_extension(os.path.basename(abs_path), abs_path)
+                        else:
+                            self.load_extensions_from_path(abs_path)
                     else:
                         app_logger.warning(f"Registered extension path not found: {abs_path}")
             except Exception as e:

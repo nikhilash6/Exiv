@@ -2,6 +2,17 @@ from typing import Any, List, Optional
 from pydantic import BaseModel, ConfigDict
 from .enum import ExtendedEnum
 
+class InputType(ExtendedEnum):
+    VIDEO = "video"
+    IMAGE = "image"
+    INTEGER = "integer"
+    NUMBER = "number"
+    BOOLEAN = "boolean"
+    SELECT = "select"
+    JSON = "json"
+    TEXT = "text"
+    FILE = "file"
+
 class Input(BaseModel):
     # interface class for the inputs
     label: str

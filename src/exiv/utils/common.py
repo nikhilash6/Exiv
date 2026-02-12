@@ -123,4 +123,28 @@ def is_ffmpeg_present():
     
     return True
 
+def install_requirements(directory: str, show_logs: bool = True) -> bool:
+    import os
+    import subprocess
+    import sys
+    from .logging import app_logger
+
+    req_path = os.path.join(directory, "requirements.txt")
+    if os.path.exists(req_path):
+        app_logger.info(f"Installing requirements for extension in {directory}...")
+        stdout_dest = None if show_logs else subprocess.DEVNULL
+        stderr_dest = None if show_logs else subprocess.DEVNULL
+
+        try:
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install", "-r", req_path], 
+                stdout=stdout_dest, 
+                stderr=stderr_dest
+            )
+            return True
+        except subprocess.CalledProcessError as e:
+            app_logger.error(f"Failed to install requirements (silent mode): {e}")
+            return False
+    return True
+
 null_func = lambda *args, **kwargs: None

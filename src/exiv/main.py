@@ -3,11 +3,33 @@ import os
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 from .utils.logging import app_logger
 from .config import global_config
 from .components.extension_registry import ExtensionRegistry
 from .utils.file import find_file_path, CONFIG_FILENAME
+
+DEFAULT_CONFIG = {"extensions": []}
+
+def _load_config(config_file: Path) -> dict:
+    if not config_file.exists():
+        return DEFAULT_CONFIG.copy()
+
+    try:
+        with config_file.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+            if not isinstance(data.get("extensions", []), list):
+                data["extensions"] = []
+            return data
+    except (OSError, json.JSONDecodeError) as e:
+        app_logger.warning(f"Could not read {config_file}, creating new one. Error: {e}")
+        return DEFAULT_CONFIG.copy()
+
+def _save_config(config_file: Path, config: dict) -> None:
+    with config_file.open("w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2)
+        f.write("\n")
 
 @click.group()
 def cli():
@@ -52,56 +74,77 @@ def serve():
     run_server()
 
 @cli.command(name="register")
-@click.argument('path', type=click.Path(exists=True, file_okay=False, dir_okay=True, resolve_path=True))
-def register(path):
+@click.argument(
+    "path",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, resolve_path=True),
+)
+def register(path: str) -> None:
     """
-    - Registers a local folder as an extensions folder
-    - Updates (or creates) the exiv_config.json file in the current directory
-    - Installs requirements.txt if present
-    - Does NOT imports the extension modules (see load_extensions_from_path)
+    - Registers extensions found in a local path (or the path itself if it is an extension)
+    - Updates (or creates) the exiv_config.json file with individual extension paths
+    - Installs requirements.txt if present for each extension
+    - Does NOT imports the extension modules
     """
-    app_logger.info(f"Registering extension from: {path}")
-    
-    # update exiv_config.json
-    config_file, config_dir = find_file_path(CONFIG_FILENAME, recursive=True)
-    
-    if not config_file:
-        config_dir = os.getcwd()
-        config_file = os.path.join(config_dir, CONFIG_FILENAME)
-        config = {"extensions": []}
-    else:
-        try:
-            with open(config_file, 'r') as f:
-                config = json.load(f)
-        except Exception as e:
-            app_logger.warning(f"Could not read existing exiv_config.json, creating new one. Error: {e}")
-            config = {"extensions": []}
+    config_file_str, config_dir_str = find_file_path(CONFIG_FILENAME, recursive=True)
 
-    # using relative path if possible (relative to the config file location)
-    try:
-        # We want the path relative to where the config file is stored
-        rel_path = os.path.relpath(path, config_dir)
-        final_path = rel_path
-    except ValueError:
-        final_path = path
-        
-    if final_path not in config.get("extensions", []):
-        config["extensions"] = config.get("extensions", []) + [final_path]
-        with open(config_file, 'w') as f:
-            json.dump(config, f, indent=2)
-        app_logger.info(f"Added {final_path} to {config_file}")
+    if config_file_str:
+        config_file = Path(config_file_str)
+        config_dir = Path(config_dir_str)
     else:
-        app_logger.info(f"Extension {final_path} is already registered.")
+        config_dir = Path.cwd()
+        config_file = config_dir / CONFIG_FILENAME
 
-    # dependencies
-    req_file = os.path.join(path, "requirements.txt")
-    if os.path.exists(req_file):
-        app_logger.info(f"Found requirements.txt, installing dependencies...")
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", req_file])
-            app_logger.info("Dependencies installed successfully.")
-        except subprocess.CalledProcessError as e:
-            app_logger.error(f"Failed to install dependencies: {e}")
+    config = _load_config(config_file)
+    target = Path(path).resolve()
+    
+    # extensions to add
+    extensions_to_add = []
+    if (target / "__init__.py").is_file():
+        extensions_to_add.append(target)
+    else:
+        for item in target.iterdir():
+            if item.is_dir() and (item / "__init__.py").is_file():
+                extensions_to_add.append(item)
+    if not extensions_to_add:
+        app_logger.warning(f"No valid extensions found in {target} (looking for folders with __init__.py)")
+        return
+
+    existing_paths = config.get("extensions", [])
+    existing_norm = set()
+    for p in existing_paths:
+        p_obj = Path(p)
+        if not p_obj.is_absolute():
+            p_obj = (config_dir / p_obj).resolve()
+        existing_norm.add(str(p_obj))
+
+    updated = False
+    from .utils.common import install_requirements
+    for ext_path in extensions_to_add:
+        # 1. Install requirements first
+        if not install_requirements(str(ext_path)):
+            app_logger.warning(f"Skipping registration of {ext_path.name} due to installation failure.")
+            continue
+
+        # 2. Register if successful
+        ext_path_resolved = ext_path.resolve()
+        if str(ext_path_resolved) not in existing_norm:
+            try:
+                rel = ext_path_resolved.relative_to(config_dir)
+                final_path = str(rel)
+            except ValueError:
+                final_path = str(ext_path_resolved)
+
+            existing_paths.append(final_path)
+            existing_norm.add(str(ext_path_resolved))
+            updated = True
+            app_logger.info(f"Registered extension: {ext_path.name}")
+        else:
+            app_logger.info(f"Extension already registered: {ext_path.name}")
+
+    if updated:
+        config["extensions"] = existing_paths
+        _save_config(config_file, config)
+        app_logger.info(f"Updated {config_file}")
 
 @cli.group(name="list")
 def list_resources():
@@ -111,20 +154,24 @@ def list_resources():
 
 @list_resources.command(name="extensions")
 def list_extensions():
-    """List all available extensions (built-in + registered)"""
-    registry = ExtensionRegistry.get_instance()
-    registry.initialize(run_patches=False)
+    """List all registered extension paths from config"""
+    config_file_str, _ = find_file_path(CONFIG_FILENAME, recursive=True)
+    current_dir = Path(__file__).resolve().parent
+    builtin_dir = current_dir / "extensions"
+    print(f"\n[Built-in Extensions Directory]:\n  {builtin_dir}")
     
-    meta = registry.get_all_extensions_metadata()
-    if not meta:
-        print("No extensions found.")
+    if not config_file_str:
+        print("\n[Registered Extensions]:\n  (No exiv_config.json found)")
         return
 
-    print(f"\nFound {len(meta)} extensions:\n")
-    print(f"{'ID':<30} {'Version':<10} {'Name':<20}")
-    print("-" * 70)
-    for ext in meta:
-        print(f"{ext['id']:<30} {ext['version']:<10} {ext['name']:<20}")
+    config = _load_config(Path(config_file_str))
+    paths = config.get("extensions", [])
+    if not paths:
+        print("\n[Registered Extensions]:\n  (None)")
+    else:
+        print(f"\n[Registered Extensions] (from {config_file_str}):")
+        for p in paths:
+            print(f"  - {p}")
     print("")
 
 if __name__ == '__main__':
