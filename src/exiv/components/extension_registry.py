@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import sys
 import json
 import importlib.util
@@ -9,47 +10,65 @@ from ..utils.logging import app_logger
 from ..utils.file import find_file_path, CONFIG_FILENAME
 
 EXTENSION_ENTRYPOINT = "extension.py"
+DEFAULT_CONFIG = {"extensions": []}
 
 class ExtensionRegistry:
     _instance = None
     
     def __init__(self):
-        """
-        - patches: All registered capabilities from extensions. 
-                   If callable, they are executed at startup.
-                   If objects, they are just stored here.
-        """
         # maps ID -> extension manifest instance
         self.extensions: Dict[str, Extension] = {}
-        
-        # capabilities
-        self.patches: List[Any] = []
         
     @classmethod
     def get_instance(cls):
         if cls._instance is None:
             cls._instance = ExtensionRegistry()
+            cls._instance.initialize()
+            cls._instance.execute_all_extensions()
         return cls._instance
+    
+    @classmethod
+    def load_config(cls, config_file: Path) -> dict:
+        if not config_file.exists():
+            return DEFAULT_CONFIG.copy()
 
-    def load_extensions_from_path(self, directory: str):
+        try:
+            with config_file.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+                if not isinstance(data.get("extensions", []), list):
+                    data["extensions"] = []
+                return data
+        except (OSError, json.JSONDecodeError) as e:
+            app_logger.warning(f"Could not read {config_file}, creating new one. Error: {e}")
+            return DEFAULT_CONFIG.copy()
+
+    @classmethod
+    def save_config(cls, config_file: Path, config: dict) -> None:
+        with config_file.open("w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2)
+            f.write("\n")
+
+    def load_extensions_from_directory(self, directory: str):
         if not os.path.exists(directory):
             app_logger.warning(f"Extension directory not found: {directory}")
             return
 
         # ensuring the directory is importable
-        if directory not in sys.path:
-            sys.path.append(directory)
-            
+        if directory not in sys.path: sys.path.append(directory)
         app_logger.debug(f"Scanning for extensions in: {directory}")
         for item in os.listdir(directory):
             ext_path = os.path.join(directory, item)
             # NOTE: only folders containing EXTENSION_ENTRYPOINT are scanned
             if os.path.isdir(ext_path) and os.path.exists(os.path.join(ext_path, EXTENSION_ENTRYPOINT)):
-                self._load_single_extension(item, ext_path)
+                self.load_single_extension(ext_path)
 
-    def _load_single_extension(self, module_name: str, path: str):
+    def load_single_extension(self, path: str):
+        """
+        Creates a consistent namespace and imports the extension class in the main code
+        """
+        module_name = os.path.basename(path)
         try:
-            # Create a consistent namespace: exiv.ext.<module_name>
+            # consistent namespace: exiv.ext.<module_name>
             full_module_name = f"exiv.ext.{module_name}"
             
             # Ensure parent packages exist so the dotted name is valid
@@ -63,133 +82,128 @@ class ExtensionRegistry:
             entry_path = os.path.join(path, EXTENSION_ENTRYPOINT)
             spec = importlib.util.spec_from_file_location(full_module_name, entry_path)
             
-            if spec:
-                # mark as a package to allow relative imports
-                spec.submodule_search_locations = [path]
-                
+            # mark as a package to allow relative imports
+            if spec: spec.submodule_search_locations = [path]
             if spec and spec.loader:
                 module = importlib.util.module_from_spec(spec)
-                
-                # Register in sys.modules so imports like 'import exiv.ext.foo' work
+                # registering so imports like 'import exiv.ext.foo' work
                 sys.modules[full_module_name] = module
-                
                 try:
                     spec.loader.exec_module(module)
-                    
-                    extension_class = None
                     for attr_name in dir(module):
                         attr = getattr(module, attr_name)
                         if isinstance(attr, type) and issubclass(attr, Extension) and attr is not Extension:
-                            extension_class = attr
+                            if attr.ID in self.extensions:
+                                app_logger.warning(f"Extension {attr.ID} already registered. Skipping reload from {path}")
+                                return
+                            self.extensions[attr.ID] = attr
+                            app_logger.debug(f"Registered extension: {attr.ID}")
                             break
-                    
-                    if extension_class:
-                        self._register_extension(extension_class)
-                    else:
-                        app_logger.debug(f"No Extension subclass found in {module_name}")
-                        
+                            
                 except Exception as e:
                     # Clean up if execution fails
                     if full_module_name in sys.modules:
                         del sys.modules[full_module_name]
                     raise e
-                    
         except Exception as e:
             app_logger.error(f"Failed to load extension {module_name}: {e}")
             traceback.print_exc()
 
-    def _register_extension(self, cls: Type[Extension]):
+    def _execute_extension(self, cls: Type[Extension]):
+        """
+        Executes all callables in the given extension
+        """
         try:
-            instance = cls()
-            self.extensions[cls.ID] = instance
-            # get capabilities
-            capabilities = instance.register()
-            for item in capabilities:
-                # Treat everything as a patch/capability
-                self.patches.append(item)
-                if callable(item):
-                    app_logger.debug(f"  - Registered Callable Patch")
-                else:
-                    app_logger.debug(f"  - Registered Object Patch: {item}")
-
+            capabilities = cls().register()
+            for item in capabilities: 
+                if callable(item): item()
         except Exception as e:
-            app_logger.error(f"Error registering extension {cls.ID}: {e}")
+            app_logger.error(f"Error executing extension {cls}: {e}")
             traceback.print_exc()
 
-    def run_patches(self):
+    def execute_all_extensions(self):
         """
-        Executes all registered callable patches.
+        Executes all callables returned by the registered extensions
         """
-        if not self.patches: return
-        
-        count = 0
-        for handler in self.patches:
-            if callable(handler) and not isinstance(handler, Extension):
-                # extensions implementing the __call__ method are ran here
-                try:
-                    handler()
-                    count += 1
-                except Exception as e:
-                    app_logger.error(f"Patch failed: {e}")
-                    traceback.print_exc()
-        
-        if count > 0:
-            app_logger.debug(f"Applied {count} system patches.")
+        if not self.extensions: return
+        for e_id, ext in self.extensions.items(): self._execute_extension(ext)
+        app_logger.debug(f"Applied {len(self.extensions)} system patches.")
 
-    def initialize(self, run_patches: bool = True):
+    def initialize(self):
         """
         Loads built-in extensions and user-registered extensions.
         """
-        if self.extensions:
-            return
-
         # loading built-in extensions
         current_dir = os.path.dirname(os.path.abspath(__file__))
         builtin_dir = os.path.abspath(os.path.join(current_dir, "..", "extensions"))
-        
-        if os.path.exists(builtin_dir):
-            self.load_extensions_from_path(builtin_dir)
+        if os.path.exists(builtin_dir): self.load_extensions_from_directory(builtin_dir)
 
         # loading registered extensions from exiv_config.json
-        config_file, config_dir = find_file_path(CONFIG_FILENAME, recursive=True)
+        abs_paths = self.get_all_registered_paths(absolute_path=True)
+        for p in abs_paths: self.load_single_extension(p)
         
-        if config_file and config_dir:
-            try:
-                with open(config_file, 'r') as f:
-                    config = json.load(f)
-                    
-                registered_paths = config.get("extensions", [])
-                for ext_path in registered_paths:
-                    # resolve relative paths against the config file location
-                    if not os.path.isabs(ext_path):
-                        abs_path = os.path.abspath(os.path.join(config_dir, ext_path))
-                    else:
-                        abs_path = ext_path
+    def get_all_registered_paths(self, absolute_path=False) -> List[str]:
+        """
+        Returns the paths to all the extensions registered / installed.
+        Always reads from the config file to ensure paths are returned.
+        """
+        config_file_str, config_dir_str = find_file_path(CONFIG_FILENAME, recursive=True)
+        if not config_file_str:
+            app_logger.debug("No exiv_config.json found, returning empty extension list.")
+            return []
 
-                    if os.path.exists(abs_path):
-                        if os.path.isdir(abs_path) and os.path.exists(os.path.join(abs_path, EXTENSION_ENTRYPOINT)):
-                            self._load_single_extension(os.path.basename(abs_path), abs_path)
-                        else:
-                            self.load_extensions_from_path(abs_path)
-                    else:
-                        app_logger.warning(f"Registered extension path not found: {abs_path}")
-            except Exception as e:
-                app_logger.error(f"Failed to load exiv_config.json: {e}")
-        else:
-            app_logger.debug("No exiv_config.json found")
+        config = self.load_config(Path(config_file_str))
+        paths = config.get("extensions", [])
+        if absolute_path:
+            abs_paths = []
+            for p in paths:
+                if not os.path.isabs(p): p = os.path.abspath(os.path.join(config_dir_str, p))
+                abs_paths.append(p)
+            paths = abs_paths
+        return paths
+    
+    def get_extension_info_from_path(self, path: str) -> Dict[str, str]:
+        """
+        Reads metadata from an extension at a specific path without registering it.
+        """
+        entry_path = os.path.join(path, EXTENSION_ENTRYPOINT)
+        default_return = None
+        if not os.path.exists(entry_path): return default_return
 
-        if run_patches:
-            self.run_patches()
+        try:
+            module_name = f"exiv.ext.inspect.{os.path.basename(path)}"
+            spec = importlib.util.spec_from_file_location(module_name, entry_path)
+
+            if spec and spec.loader:
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = module   # temporarily register in sys.modules to support imports
+                try:
+                    spec.loader.exec_module(module)
+                    for attr_name in dir(module):
+                        attr = getattr(module, attr_name)
+                        if isinstance(attr, type) and issubclass(attr, Extension) and attr is not Extension:
+                            return {
+                                "id": attr.ID,
+                                "name": attr.DISPLAY_NAME,
+                                "version": attr.VERSION,
+                                "path": path
+                            }
+                finally:
+                    # clean up
+                    if module_name in sys.modules:
+                        del sys.modules[module_name]
+        except Exception as e:
+            app_logger.debug(f"Error inspecting extension at {path}: {e}")
+
+        return default_return
 
     def get_all_extensions_metadata(self):
         """
         Returns metadata for ALL registered extensions.
         """
+        abs_paths = self.get_all_registered_paths(absolute_path=True)
         meta = []
-        for ext_id, ext in self.extensions.items():
-            meta.append({
-                "id": ext.ID,
-                "name": ext.DISPLAY_NAME,
-                "version": ext.VERSION,
-            })
+        for p in abs_paths:
+            res = self.get_extension_info_from_path(p)
+            if res: meta.append(res)
         return meta

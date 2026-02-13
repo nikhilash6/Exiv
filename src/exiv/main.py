@@ -10,26 +10,6 @@ from .config import global_config
 from .components.extension_registry import ExtensionRegistry, EXTENSION_ENTRYPOINT
 from .utils.file import find_file_path, CONFIG_FILENAME
 
-DEFAULT_CONFIG = {"extensions": []}
-
-def _load_config(config_file: Path) -> dict:
-    if not config_file.exists():
-        return DEFAULT_CONFIG.copy()
-
-    try:
-        with config_file.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-            if not isinstance(data.get("extensions", []), list):
-                data["extensions"] = []
-            return data
-    except (OSError, json.JSONDecodeError) as e:
-        app_logger.warning(f"Could not read {config_file}, creating new one. Error: {e}")
-        return DEFAULT_CONFIG.copy()
-
-def _save_config(config_file: Path, config: dict) -> None:
-    with config_file.open("w", encoding="utf-8") as f:
-        json.dump(config, f, indent=2)
-        f.write("\n")
 
 @click.group()
 def cli():
@@ -94,7 +74,7 @@ def register(path: str) -> None:
         config_dir = Path.cwd()
         config_file = config_dir / CONFIG_FILENAME
 
-    config = _load_config(config_file)
+    config = ExtensionRegistry.load_config(config_file)
     target = Path(path).resolve()
     
     # extensions to add
@@ -143,7 +123,7 @@ def register(path: str) -> None:
 
     if updated:
         config["extensions"] = existing_paths
-        _save_config(config_file, config)
+        ExtensionRegistry.save_config(config_file, config)
         app_logger.info(f"Updated {config_file}")
 
 @cli.group(name="list")
@@ -154,24 +134,33 @@ def list_resources():
 
 @list_resources.command(name="extensions")
 def list_extensions():
-    """List all registered extension paths from config"""
-    config_file_str, _ = find_file_path(CONFIG_FILENAME, recursive=True)
-    current_dir = Path(__file__).resolve().parent
-    builtin_dir = current_dir / "extensions"
-    print(f"\n[Built-in Extensions Directory]:\n  {builtin_dir}")
-    
-    if not config_file_str:
-        print("\n[Registered Extensions]:\n  (No exiv_config.json found)")
+    """List all registered extension paths from config with metadata"""
+    registry = ExtensionRegistry.get_instance()
+    if not (extensions_metadata:=registry.get_all_extensions_metadata()):
+        print("No extensions registered.")
         return
+    
+    # column widths
+    headers = ["ID", "Name", "Version", "Path"]
+    widths = [len(h) for h in headers]
+    for meta in extensions_metadata:
+        widths[0] = max(widths[0], len(str(meta.get('id', 'N/A'))))
+        widths[1] = max(widths[1], len(str(meta.get('name', 'N/A'))))
+        widths[2] = max(widths[2], len(str(meta.get('version', 'N/A'))))
+        widths[3] = max(widths[3], len(str(meta.get('path', 'N/A'))))
 
-    config = _load_config(Path(config_file_str))
-    paths = config.get("extensions", [])
-    if not paths:
-        print("\n[Registered Extensions]:\n  (None)")
-    else:
-        print(f"\n[Registered Extensions] (from {config_file_str}):")
-        for p in paths:
-            print(f"  - {p}")
+    widths = [w + 2 for w in widths]    # padding
+    header_str = "".join(h.ljust(w) for h, w in zip(headers, widths))
+    print(f"\n{header_str}")
+    print("-" * sum(widths))
+    for meta in extensions_metadata:
+        row = [
+            str(meta.get('id', 'N/A')),
+            str(meta.get('name', 'N/A')),
+            str(meta.get('version', 'N/A')),
+            str(meta.get('path', 'N/A'))
+        ]
+        print("".join(val.ljust(w) for val, w in zip(row, widths)))
     print("")
 
 if __name__ == '__main__':

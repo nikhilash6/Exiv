@@ -60,7 +60,7 @@ class TestExtensionNamespace(unittest.TestCase):
             f.write("    DISPLAY_NAME = 'Namespace Ext'\n")
             f.write("    VERSION = '1.0'\n")
             f.write("    def register(self):\n")
-            f.write("        return [helper.get_msg()]\n")
+            f.write("        return []\n")
             
         # Point config to it
         with open(self.config_path, "w") as f:
@@ -68,7 +68,6 @@ class TestExtensionNamespace(unittest.TestCase):
             
         # Initialize
         registry = ExtensionRegistry.get_instance()
-        registry.initialize(run_patches=False)
         
         # 1. Check if extension is registered
         self.assertIn("namespace_ext", registry.extensions)
@@ -77,12 +76,7 @@ class TestExtensionNamespace(unittest.TestCase):
         full_name = f"exiv.ext.{ext_name}"
         self.assertIn(full_name, sys.modules)
         
-        # 3. Check if the capability (from relative import) was loaded
-        # The 'register' method returns [helper.get_msg()] -> ['hello from helper']
-        # This is stored in registry.patches
-        self.assertIn("hello from helper", registry.patches)
-        
-        # 4. Check that the helper is also in the namespace (implicitly)
+        # 3. Check that the helper is also in the namespace (implicitly)
         # Note: 'helper' itself might not be in sys.modules as a top-level key,
         # but it should be accessible via the parent
         module = sys.modules[full_name]
@@ -140,7 +134,7 @@ class TestExtensionRegistryFlow(unittest.TestCase):
         self.assertIs(reg1, reg2)
         
     def test_initialize_no_patches(self):
-        """Test that run_patches=False prevents patches from running"""
+        """Test that separating initialize from execute_all_extensions works"""
         # Create extension that patches something
         ext_dir = os.path.join(self.user_ext_dir, "patch_ext")
         os.makedirs(ext_dir)
@@ -160,10 +154,11 @@ class TestExtensionRegistryFlow(unittest.TestCase):
             
         config_path = os.path.join(self.test_dir, CONFIG_FILENAME)
         with open(config_path, "w") as f:
-            json.dump({"extensions": [self.user_ext_dir]}, f)
+            json.dump({"extensions": [ext_dir]}, f)
             
-        registry = ExtensionRegistry.get_instance()
-        registry.initialize(run_patches=False)
+        # Manually instantiate to avoid auto-execution in get_instance
+        registry = ExtensionRegistry()
+        registry.initialize()
         self.assertIn("patch_ext", registry.extensions)
         
         # check that patch was NOT called
@@ -172,7 +167,7 @@ class TestExtensionRegistryFlow(unittest.TestCase):
         patch_module.mock_patch.assert_not_called()
         
         # run patches manually
-        registry.run_patches()
+        registry.execute_all_extensions()
         patch_module.mock_patch.assert_called_once()
 
     def test_load_extensions_direct_path(self):
@@ -180,7 +175,7 @@ class TestExtensionRegistryFlow(unittest.TestCase):
         self.create_dummy_extension(self.user_ext_dir, "ext1", "ExtOne")
         
         registry = ExtensionRegistry.get_instance()
-        registry.load_extensions_from_path(self.user_ext_dir)
+        registry.load_extensions_from_directory(self.user_ext_dir)
         
         self.assertIn("ext1_id", registry.extensions)
         self.assertEqual(registry.extensions["ext1_id"].DISPLAY_NAME, "ext1")
@@ -243,26 +238,34 @@ class TestExtensionRegistryFlow(unittest.TestCase):
     def test_cli_list_extensions(self):
         """Test 'exiv list extensions' command"""
         runner = CliRunner()
+        
+        # Setup: Create a dummy extension and register it via config
+        ext_path = self.create_dummy_extension(self.user_ext_dir, "list_ext", "ListExt")
         config_path = os.path.join(self.test_dir, CONFIG_FILENAME)
         with open(config_path, "w") as f:
-            json.dump({"extensions": ["some/relative/path"]}, f)
+            json.dump({"extensions": [ext_path]}, f)
             
         result = runner.invoke(cli, ['list', 'extensions'])
         self.assertEqual(result.exit_code, 0)
-        self.assertIn("[Built-in Extensions Directory]:", result.output)
-        self.assertIn("[Registered Extensions]", result.output)
-        self.assertIn("some/relative/path", result.output)
+        
+        # Check for table headers and content
+        self.assertIn("ID", result.output)
+        self.assertIn("Name", result.output)
+        self.assertIn("Version", result.output)
+        self.assertIn("Path", result.output)
+        self.assertIn("list_ext_id", result.output)
+        self.assertIn("list_ext", result.output)
 
     def test_initialize_loads_from_config(self):
         """Test that registry.initialize() reads exiv_config.json and loads extensions"""
-        self.create_dummy_extension(self.user_ext_dir, "config_ext", "ConfigExt")
+        ext_path = self.create_dummy_extension(self.user_ext_dir, "config_ext", "ConfigExt")
         config_path = os.path.join(self.test_dir, CONFIG_FILENAME)
         with open(config_path, "w") as f:
-            json.dump({"extensions": [self.user_ext_dir]}, f)
+            json.dump({"extensions": [ext_path]}, f)
             
         # initialize registry
         registry = ExtensionRegistry.get_instance()
-        registry.initialize()
+        # initialize is called by get_instance
         self.assertIn("config_ext_id", registry.extensions)
 
     def test_multiple_registries(self):
@@ -270,15 +273,14 @@ class TestExtensionRegistryFlow(unittest.TestCase):
         dir1 = os.path.join(self.test_dir, "dir1")
         dir2 = os.path.join(self.test_dir, "dir2")
         
-        self.create_dummy_extension(dir1, "ext_d1", "ExtD1")
-        self.create_dummy_extension(dir2, "ext_d2", "ExtD2")
+        ext_d1 = self.create_dummy_extension(dir1, "ext_d1", "ExtD1")
+        ext_d2 = self.create_dummy_extension(dir2, "ext_d2", "ExtD2")
         
         config_path = os.path.join(self.test_dir, "exiv_config.json")
         with open(config_path, "w") as f:
-            json.dump({"extensions": [dir1, dir2]}, f)
+            json.dump({"extensions": [ext_d1, ext_d2]}, f)
             
         registry = ExtensionRegistry.get_instance()
-        registry.initialize()
         
         self.assertIn("ext_d1_id", registry.extensions)
         self.assertIn("ext_d2_id", registry.extensions)
@@ -291,7 +293,7 @@ class TestExtensionRegistryFlow(unittest.TestCase):
           /root
             /extensions/ext1
             /project
-              exiv_config.json -> points to "../extensions"
+              exiv_config.json -> points to "../extensions/ext1"
               /subdir  <- we run from here
         """
         # create directory structure
@@ -306,9 +308,9 @@ class TestExtensionRegistryFlow(unittest.TestCase):
         # create the extension
         self.create_dummy_extension(ext_base, "ext1", "ExtOne")
         
-        # config in /project, pointing to ../extensions
+        # config in /project, pointing to ../extensions/ext1
         config_path = os.path.join(project_dir, "exiv_config.json")
-        encoded_rel_path = os.path.join("..", "extensions") 
+        encoded_rel_path = os.path.join("..", "extensions", "ext1") 
         with open(config_path, "w") as f:
             json.dump({"extensions": [encoded_rel_path]}, f)
             
@@ -317,9 +319,8 @@ class TestExtensionRegistryFlow(unittest.TestCase):
         
         # initialize registry
         # it should find config in ../exiv_config.json
-        # and resolve ../extensions relative to ../
+        # and resolve ../extensions/ext1 relative to ../
         registry = ExtensionRegistry.get_instance()
-        registry.initialize(run_patches=False)
         self.assertIn("ext1_id", registry.extensions)
 
 if __name__ == '__main__':

@@ -1,5 +1,6 @@
 import argparse
 import os
+import traceback
 from pydantic import BaseModel
 from typing import Any, Optional, List
 
@@ -83,9 +84,10 @@ class App(BaseModel):
     def run_standalone(self):
         try:
             from ..components.extension_registry import ExtensionRegistry
-            ExtensionRegistry.get_instance().initialize()
+            ExtensionRegistry.get_instance()
         except Exception as e:
             print(f"[Warning] Failed to load extensions in standalone mode: {e}")
+            traceback.print_exc()
 
         def mock_progress(p, msg):
             print(f"[{p:.0%}] {msg}")
