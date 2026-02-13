@@ -200,6 +200,8 @@ class AuxCondType:
     VISUAL_EMBEDDING = "visual_embedding"   # ipa / vision embeds
     CONTROLNET = "controlnet"               # controlnet signal
     VACE_CTX = "vace_ctx"                   # wan vace context
+    KEYFRAMES = "keyframes"                 # keyframe inputs, respective mask will be generated through 
+                                            # model specific logic
 
 @dataclass
 class AuxConditioning:

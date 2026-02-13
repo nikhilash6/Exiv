@@ -1,17 +1,18 @@
-import subprocess
-import torch
-import torchvision
-import numpy as np
-
+from __future__ import annotations
 import os
 import re
-import av
 import glob
 import urllib.parse
 import requests
-import json
-from typing import List, Dict
-from tqdm import tqdm
+from typing import List, Dict, Tuple, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:   # mainly for IDE suggestions
+    import torch
+    import numpy as np
+    import av
+
+
+CONFIG_FILENAME = "exiv_config.json"
 
 from .file_path import FilePaths
 from ..utils.common import is_ffmpeg_present
@@ -50,7 +51,35 @@ def get_numbered_filename(folder: str, filename: str) -> str:
         
     return full_path
 
+def find_file_path(filename: str, start_path: str = None, recursive: bool = True) -> Tuple[Optional[str], Optional[str]]:
+    """
+    - Searches for a file starting from start_path (or cwd)
+    - If recursive is True, it walks up the directory tree until it finds the file or hits root
+    Returns (abs_path_to_file, directory_containing_file)
+    """
+    if start_path is None:
+        start_path = os.getcwd()
+        
+    current = os.path.abspath(start_path)
+    
+    while True:
+        check_path = os.path.join(current, filename)
+        if os.path.exists(check_path):
+            return check_path, current
+        
+        if not recursive:
+            break
+
+        parent = os.path.dirname(current)
+        if parent == current:  # reached root
+            break
+        current = parent
+        
+    return None, None
+
 def _interactive_download_check(model_path: str, download_url: str) -> bool:
+    from .logging import app_logger
+    from ..config import global_config
     from .logging import app_logger
     from ..config import global_config
     import requests
@@ -113,6 +142,7 @@ def ensure_model_availability(model_path: str, download_url: str = None, force_d
         total_size = int(response.headers.get('content-length', 0))
         block_size = 8192
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
+        from tqdm import tqdm
         with tqdm(total=total_size, unit='B', unit_scale=True, desc=os.path.basename(model_path)) as pbar:
             with open(model_path, "wb") as f:
                 for chunk in response.iter_content(chunk_size=block_size):
@@ -130,7 +160,10 @@ class MediaProcessor:
     @staticmethod
     def load_image_list(image_path_list: List[str] | str):
         from PIL import Image
+        from PIL import Image
         from .logging import app_logger
+        import torch
+        import numpy as np
         
         if isinstance(image_path_list, str):
             image_path_list = [image_path_list]
@@ -166,6 +199,10 @@ class MediaProcessor:
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"Video file not found: {video_path}")
 
+        import av
+        import numpy as np
+        import torch
+
         container = av.open(video_path)
         stream = container.streams.video[0]
         
@@ -200,9 +237,9 @@ class MediaProcessor:
         return video_tensor, metadata
     
     @staticmethod
-    def save_latents_to_media(out, metadata: Dict | None = None, subfolder: str | None = None, start_frame = 0, end_frame = -1):
+    def save_latents_to_media(out, metadata: Dict | None = None, subfolder: str | None = None, start_frame = 0, end_frame = None, media_type = "video"):
         # TODO: make this a generic method, allowing saving images/audio/3d as well
-        # rn it is only for video
+        import torch
         video_tensor = out.sample if hasattr(out, "sample") else out
 
         # IMPORTANT: VAE outputs should always be in [0, 1]
@@ -213,21 +250,35 @@ class MediaProcessor:
         for i, video in enumerate(video_tensor):
             # (C, T, H, W) -> (T, H, W, C), for torchvision
             video_formatted = video.permute(1, 2, 3, 0).cpu()
-            video_formatted = video_formatted[start_frame:end_frame]
+            if end_frame is None or end_frame == -1:
+                video_formatted = video_formatted[start_frame:]
+            else:
+                video_formatted = video_formatted[start_frame:end_frame]
+
             save_dir = FilePaths.OUTPUT_DIRECTORY
             if subfolder:
                 save_dir = os.path.join(save_dir, subfolder)
                 if not os.path.exists(save_dir):
                     os.makedirs(save_dir)
             
-            save_path = f"output_video_{i}.mp4"
-            save_path = get_numbered_filename(save_dir, save_path)
-            torchvision.io.write_video(
-                save_path,
-                video_formatted,
-                fps=24,
-                options={"crf": "25"}  # 'Constant Rate Factor' for quality (lower is better)
-            )
+            if media_type == "image":
+                save_path = f"output_image_{i}.png"
+                save_path = get_numbered_filename(save_dir, save_path)
+                from PIL import Image
+                import numpy as np
+                # video_formatted is (T, H, W, C). For image, T should be 1 or we take the first frame.
+                img_np = video_formatted[0].numpy()
+                Image.fromarray(img_np).save(save_path)
+            else:
+                save_path = f"output_video_{i}.mp4"
+                save_path = get_numbered_filename(save_dir, save_path)
+                import torchvision
+                torchvision.io.write_video(
+                    save_path,
+                    video_formatted,
+                    fps=24,
+                    options={"crf": "25"}  # 'Constant Rate Factor' for quality (lower is better)
+                )
             
             try:
                 if metadata:
@@ -273,6 +324,7 @@ class MediaProcessor:
             options = {'movflags': 'use_metadata_tags'}
 
         try:
+            import av
             with av.open(file_path) as input_container:
                 with av.open(temp_path, mode='w', options=options) as output_container:
                     # update global metadata
@@ -333,6 +385,7 @@ class MediaProcessor:
                 pass
 
         try:
+            import av
             with av.open(file_path) as container:
                 return dict(container.metadata)
         except Exception:

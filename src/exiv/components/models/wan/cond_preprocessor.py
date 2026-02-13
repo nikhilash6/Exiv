@@ -12,7 +12,7 @@ from ....model_utils.model_mixin import ModelArchConfig
 from ....utils.device import VRAM_DEVICE
 from ....utils.tensor import common_upscale, get_tensor_weak_hash
 from ...enum import Model, VAEType
-from ...cond_registry import get_image_tensor, get_text_embeddings, get_vision_embeddings, register_preprocessor
+from ...cond_registry import fix_keyframe_indexing, get_image_tensor, get_text_embeddings, get_vision_embeddings, register_preprocessor
 from ...text_vision_encoder.common import TextEncoderOutput, VisionEncoderOutput
 from ...vae.base import VAEBase, get_vae
 from ....model_utils.common_classes import AuxCondType, AuxConditioning, BatchedConditioning, Conditioning, ExtraCond, Latent, ModelWrapper
@@ -71,6 +71,36 @@ class Wan22ModelArchConfig(Wan21ModelArchConfig):
             self.latent_format = Wan22VAELatentFormat()
             self.default_vae_type = VAEType.WAN22.value
 
+def _process_vace_keyframes(cond: Conditioning, height: int, width: int, frame_count: int):
+    found_idx = -1      # first keyframe aux conditioning index
+    for i, aux_c in enumerate(cond.aux):
+        if aux_c.type == AuxCondType.KEYFRAMES:
+            found_idx = i
+            break
+    
+    if found_idx == -1: return
+    aux_c = cond.aux[found_idx]
+    kf_data = fix_keyframe_indexing(aux_c.input_metadata, frame_count)
+    
+    # control_video with 0.5 (gray), mask with 1.0 (all masked)
+    control_video = torch.ones((3, frame_count, height, width), dtype=torch.float32) * 0.5
+    control_mask = torch.ones((frame_count, height, width), dtype=torch.float32)
+    for idx, img_path in kf_data.items():
+        if 0 <= idx < frame_count:
+            img_tensor = get_image_tensor(img_path, height, width) # (1, 3, H, W)
+            if img_tensor is not None:
+                img_tensor = img_tensor.squeeze(0) # (3, H, W)
+                control_video[:, idx] = img_tensor
+                control_mask[idx] = 0.0 # 0.0 means unmasked (use this content)
+    
+    aux_c.input_metadata = {
+        "control_video_tensor": control_video,
+        "control_mask_tensor": control_mask
+    }
+    aux_c.type = AuxCondType.VACE_CTX
+    # removing all OTHER keyframe or vace_ctx aux conds
+    cond.aux = [a for i, a in enumerate(cond.aux) if i == found_idx or (a.type != AuxCondType.KEYFRAMES and a.type != AuxCondType.VACE_CTX)]
+
 def _process_vace_context(cond_list: List[Conditioning], wrapper: ModelWrapper, vae: VAEBase, height: int, width: int, frame_count: int, progress_callback):
     _vace_cache = {}
     for c in cond_list:
@@ -79,10 +109,15 @@ def _process_vace_context(cond_list: List[Conditioning], wrapper: ModelWrapper, 
             if aux_c.type == AuxCondType.VACE_CTX:
                 latent_length = ((frame_count - 1) // vae.temporal_compression_ratio) + 1
                 reference_image, control_masks, control_video = None, None, None
-                control_video_path = aux_c.input_metadata.get("control_video_path", None)
-                reference_image_path = aux_c.input_metadata.get("reference_image_path", None)   # TODO: extend to a list of ref images
-                if control_video_path: control_video, _ = MediaProcessor.load_video(control_video_path, output_frames=False)    # (C, T, H, W)
-                if reference_image_path: reference_image = get_image_tensor(reference_image_path, height, width)    # (B, C, W, H)
+                
+                # check for direct tensor inputs (e.g. from _process_vace_keyframes)
+                control_video = aux_c.input_metadata.get("control_video_tensor", None)
+                control_masks = aux_c.input_metadata.get("control_mask_tensor", None)
+                if not control_video:
+                    control_video_path = aux_c.input_metadata.get("control_video_path", None)
+                    reference_image_path = aux_c.input_metadata.get("reference_image_path", None)   # TODO: extend to a list of ref images
+                    if control_video_path: control_video, _ = MediaProcessor.load_video(control_video_path, output_frames=False)    # (C, T, H, W)
+                    if reference_image_path: reference_image = get_image_tensor(reference_image_path, height, width)    # (B, C, W, H)
                 
                 key_video = get_tensor_weak_hash(control_video)
                 key_mask = get_tensor_weak_hash(control_masks)
@@ -113,7 +148,7 @@ def _process_vace_context(cond_list: List[Conditioning], wrapper: ModelWrapper, 
                     else:
                         mask = control_masks
                         if mask.ndim == 3: mask = mask.unsqueeze(1)     # (T, 1, H, W)
-                        mask = common_upscale(mask[:frame_count], width, height, "bilinear", "center").movedim(1, -1)
+                        mask = common_upscale(mask[:frame_count], width, height, "bilinear", "center")[0]
                         mask = mask.permute(0, 2, 3, 1) # (T, H, W, 1)
                         if mask.shape[0] < frame_count:
                             mask = torch.nn.functional.pad(mask, (0, 0, 0, 0, 0, 0, 0, frame_count - mask.shape[0]), value=1.0)
@@ -190,6 +225,7 @@ def _process_ref_latents(cond_list, model_wrapper, wan_vae, height, width, frame
 
 def process_auxiliaries(cond_list: List[Conditioning], wrapper: ModelWrapper, wan_vae, height, width, frame_count, progress_callback):
     if wrapper.model.model_type in [Model.WAN21_VACE_14B_R2V.value, Model.WAN21_VACE_1_3B_R2V.value]:
+        for cond in cond_list: _process_vace_keyframes(cond, height, width, frame_count)
         _process_vace_context(cond_list, wrapper, wan_vae, height, width, frame_count, progress_callback)
     else:
         _process_visual_embeddings(cond_list, wrapper, height, width, progress_callback)
@@ -228,7 +264,7 @@ def preprocess_wan_conditionals(
     te_embeds: List[TextEncoderOutput] = get_text_embeddings(
         prompts, te_model_filename=model_wrapper.model.model_arch_config.default_text_encoder)
     for i, te_embed in enumerate(te_embeds): cond_list[i].data = te_embed.last_hidden_state
-    
+
     process_auxiliaries(cond_list, model_wrapper, wan_vae, height, width, frame_count, progress_callback)
     batched_cond = BatchedConditioning(
         execution_order=["positive", "negative"]    # TODO: generalize this order based on index rather than group_name

@@ -9,7 +9,7 @@ from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 
 from .app_core import App, TaskContext
-
+from ..components.extension_registry import ExtensionRegistry
 from .task_manager import RunRequest, ScriptResponse, ScriptStatus, TaskDetails, task_manager
 from ..utils.logging import app_logger
 from ..utils.file_path import FilePaths
@@ -50,8 +50,13 @@ def load_apps_from_directory(directory: str = "apps"):
             except Exception as e:
                 app_logger.error(f"Error loading {module_name}: {e}")
 
+# Initialize Systems
+# 1. Apps
 load_apps_from_directory()
-app_logger.info(f"apps found: {[a for a, _ in APP_REGISTRY.items()]}")
+app_logger.info(f"Apps found: {[a for a, _ in APP_REGISTRY.items()]}")
+
+# 2. Extensions
+ExtensionRegistry.get_instance().initialize()
 
 def process_task(task_id: str):
     def _update_task(status, progress, msg, output=None, data=None):
@@ -133,6 +138,14 @@ def start_worker(sync_mode=False):
 
 
 app = FastAPI()
+
+@app.get("/api/extensions")
+def get_extensions():
+    """
+    Returns the metadata for ALL registered extensions.
+    Includes ID, Name, Version, Capabilities, Inputs (Schema), Slot.
+    """
+    return ExtensionRegistry.get_instance().get_all_extensions_metadata()
 
 @app.get("/api/apps")
 def get_apps():

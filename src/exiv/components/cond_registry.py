@@ -51,6 +51,10 @@ def get_image_tensor(img: Tensor | str, height: int, width: int):
     img = common_upscale(img.unsqueeze(0), height, width)[0]
     return img
 
+def fix_keyframe_indexing(keyframes: Dict, total_frames=None):
+    assert total_frames is not None, "total frames are needed to process indexing data"
+    return dict(sorted({k % total_frames: v for k, v in keyframes.items()}.items()))    # normalize -> sort -> remove duplicates
+
 def get_text_embeddings(
     input_data: List[TextEncoderOutput] | List[str] | str,      # if encoder output is not provided, it is calculated based on the str
     te_model_filename = None,                                   # can be overriden to a custom model
