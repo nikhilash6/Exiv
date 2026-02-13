@@ -125,7 +125,7 @@ def ensure_model_availability(model_path: str, download_url: str = None, force_d
     """
     from .logging import app_logger
     
-    assert model_path != None or model_path != "", "model_path provided can't be None"
+    assert model_path is not None and model_path != "", "model_path provided can't be None or empty"
     
     if download_url:  # It's a URL
         parsed = urllib.parse.urlparse(download_url)

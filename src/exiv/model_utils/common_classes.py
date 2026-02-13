@@ -189,6 +189,8 @@ class ModelForwardInput:
     time_hint: Optional[Any] = None             # time_dim_concat
     reference_latent: Optional[Any] = None      # vae encoded latent as a hint
     vace_context: Optional[Any] = None          # vace ctx
+    pose_latents: Optional[Any] = None          # wan animate pose
+    face_pixel_values: Optional[Any] = None     # wan animate face
 
     def to_dict(self):
         return {k: v for k, v in self.__dict__.items() if v is not None}
@@ -202,6 +204,8 @@ class AuxCondType:
     VACE_CTX = "vace_ctx"                   # wan vace context
     KEYFRAMES = "keyframes"                 # keyframe inputs, respective mask will be generated through 
                                             # model specific logic
+    POSE_LATENTS = "pose_latents"
+    FACE_PIXEL_VALUES = "face_pixel_values"
 
 @dataclass
 class AuxConditioning:

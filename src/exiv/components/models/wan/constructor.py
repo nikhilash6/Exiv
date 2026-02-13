@@ -1,4 +1,6 @@
 from .main import Wan21Model, Wan21ModelArchConfig, Wan22Model, Wan22ModelArchConfig, Wan21VaceModel
+from .animate import WanAnimateModel
+from .cond_preprocessor import WanAnimateModelArchConfig
 from ...enum import Model
 from ....config import LOADING_MODE
 from ....model_utils.helper_methods import get_state_dict
@@ -38,6 +40,8 @@ def detect_wan_params(state_dict):
         try:
             config["vace_dim"] = state_dict["vace_patch_embedding.weight"].shape[1]
         except: pass
+    elif "pose_patch_embedding.weight" in state_dict:
+        cls = WanAnimateModel
     
     # 3. Model Version Detection
     if cls is None:
@@ -76,6 +80,11 @@ def detect_wan_params(state_dict):
         elif config["dim"] == 5120:
             config["model_type"] = Model.WAN21_VACE_14B_R2V.value
             model_arch_config = Wan21ModelArchConfig(model_type=Model.WAN21_VACE_14B_R2V.value)
+    elif cls == WanAnimateModel:
+        config["model_type"] = Model.WAN22_14B_ANIMATE.value
+        model_arch_config = WanAnimateModelArchConfig(model_type=Model.WAN22_14B_ANIMATE.value)
+        if "face_encoder.conv1_local.weight" in state_dict:
+             config["motion_encoder_dim"] = state_dict["face_encoder.conv1_local.weight"].shape[1]
     
     config["in_dim"] = input_channels
     if "ref_conv.weight" in state_dict:

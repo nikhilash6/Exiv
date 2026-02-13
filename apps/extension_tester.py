@@ -17,16 +17,16 @@ def main(**params):
     # 1. Initialize the extension registry
     # This will load extensions defined in exiv_config.json
     registry = ExtensionRegistry.get_instance()
-    registry.initialize()
     
     # 2. Access the extensions by their IDs
-    dwpose_ext = registry.extensions.get("dwpose")
-    matanyone_ext = registry.extensions.get("matanyone")
+    dwpose_ext = registry.extensions.get("dwpose")()
+    matanyone_ext = registry.extensions.get("matanyone")()
     status_report = []
 
     # Inputs from UI/CLI
-    image_path = "./tests/test_utils/assets/media/boy_anime.jpg"
-    video_path = "input.mp4"
+    # image_path = "./tests/test_utils/assets/media/boy_anime.jpg"
+    image_path = "./ref_image.png"
+    video_path = "dialogue.mp4"
     run_dwpose = params.get("run_dwpose", False)
     run_matanyone = params.get("run_matanyone", False)
 
@@ -37,7 +37,25 @@ def main(**params):
 
     # Example of how DWPose would be called
     if run_dwpose and dwpose_ext:
-        if image_path and os.path.exists(image_path):
+        if video_path and os.path.exists(video_path):
+            app_logger.info(f"Running DWPose on video: {video_path}")
+            # 1. Load video frames
+            frames, metadata = MediaProcessor.load_video(video_path, output_frames=True)
+            
+            # 2. Process each frame
+            out_frames = []
+            for i, frame in enumerate(frames):
+                app_logger.info(f"Processing DWPose frame {i+1}/{len(frames)}")
+                out_tensor = dwpose_ext.process(image=frame, detect_hand=True, detect_face=True)
+                out_frames.append(out_tensor)
+            
+            # 3. Stack and save results (T, C, H, W) -> (C, T, H, W) -> (1, C, T, H, W)
+            out_video = torch.stack(out_frames).permute(1, 0, 2, 3).unsqueeze(0)
+            output_paths = MediaProcessor.save_latents_to_media(out_video, media_type="video", subfolder="dwpose")
+            
+            results["actions_simulated"].append(f"DWPose video saved to: {output_paths[0]}")
+            app_logger.info(f"Pose video saved to {output_paths[0]}")
+        elif image_path and os.path.exists(image_path):
             app_logger.info(f"[SIMULATION] Would run DWPose on: {image_path}")
             image = MediaProcessor.load_image_list(image_path)[0]
             out_tensor = dwpose_ext.process(image=image, detect_hand=True, detect_face=True)
@@ -46,11 +64,11 @@ def main(**params):
             results["actions_simulated"].append(f"DWPose saved to: {output_paths[0]}")
             app_logger.info(f"Pose map saved to {output_paths[0]}") 
         else:
-            app_logger.info("[SIMULATION] DWPose selected but no valid image_path provided.")
+            app_logger.info("[SIMULATION] DWPose selected but no valid input provided.")
 
     # Actual MatAnyone execution
     if run_matanyone and matanyone_ext:
-        video_path = "extensions/exiv_matanyone/sample_videos/sample_input.mp4"
+        # video_path = "extensions/exiv_matanyone/sample_videos/sample_input.mp4"
         if os.path.exists(video_path):
             app_logger.info(f"Running MatAnyone on: {video_path}")
             
@@ -80,9 +98,9 @@ def main(**params):
             preview_paths = MediaProcessor.save_latents_to_media(preview_tensor, media_type="image")
             app_logger.info(f"Segmentation preview saved to: {preview_paths[0]}")
 
-            # 3. Video Matting (limit to 10 frames for speed)
-            app_logger.info("Step 2: Running Video Matting (10 frames)...")
-            short_video = video_tensor[:, :10, :, :]
+            # 3. Video Matting
+            app_logger.info("Step 2: Running Video Matting (Full Video)...")
+            short_video = video_tensor
             matte_res = matanyone_ext.process(
                 mode="matte_video", 
                 video=short_video, 

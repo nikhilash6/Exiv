@@ -38,6 +38,13 @@ class ConditioningMixin:
                 elif c_aux.type == AuxCondType.VACE_CTX and (vace_ctx:=c_aux.data) is not None:
                     output.vace_context = vace_ctx[0]
                     output.vace_strength = vace_ctx[1]
+                
+                # wan animate
+                elif c_aux.type == AuxCondType.POSE_LATENTS and (pose_latents:=c_aux.data) is not None:
+                    output.pose_latents = pose_latents
+                
+                elif c_aux.type == AuxCondType.FACE_PIXEL_VALUES and (face_pixel_values:=c_aux.data) is not None:
+                    output.face_pixel_values = face_pixel_values
 
         return output
     

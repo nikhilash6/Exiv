@@ -56,7 +56,7 @@ load_apps_from_directory()
 app_logger.info(f"Apps found: {[a for a, _ in APP_REGISTRY.items()]}")
 
 # 2. Extensions
-ExtensionRegistry.get_instance().initialize()
+ExtensionRegistry.get_instance()
 
 def process_task(task_id: str):
     def _update_task(status, progress, msg, output=None, data=None):
