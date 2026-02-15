@@ -186,11 +186,63 @@ class MediaProcessor:
         return res
     
     @staticmethod
-    def load_video(video_path: str, output_frames: bool = True, limit_frame_count: int | None = None):
+    def _frame_to_tensor(frame) -> torch.Tensor:
+        import numpy as np
+        import torch
+        np_frame = frame.to_ndarray(format='rgb24')
+        np_frame = np_frame.astype(np.float32) / 255.0
+        return torch.from_numpy(np_frame.transpose(2, 0, 1))
+
+    @staticmethod
+    def _resample_frames(container, fps: float | None, limit_frame_count: int | None, orig_fps: float) -> List[torch.Tensor]:
+        frames = []
+        if fps is None:
+            for i, frame in enumerate(container.decode(video=0)):
+                if limit_frame_count is not None and len(frames) >= limit_frame_count:
+                    break
+                frames.append(MediaProcessor._frame_to_tensor(frame))
+            return frames
+
+        target_frame_time = 1.0 / fps
+        next_target_time = None
+        start_time = None
+        last_frame_tensor = None
+
+        for i, frame in enumerate(container.decode(video=0)):
+            # Use PTS or fallback to index-based timing
+            current_time = frame.time if frame.time is not None else i / orig_fps 
+
+            if start_time is None:
+                start_time = current_time
+                next_target_time = start_time
+
+            current_tensor = MediaProcessor._frame_to_tensor(frame)
+
+            # Fill frames for target times before current frame (Sample and Hold)
+            while next_target_time < current_time - 1e-5:
+                if last_frame_tensor is not None:
+                    frames.append(last_frame_tensor)
+                    if limit_frame_count is not None and len(frames) >= limit_frame_count:
+                        return frames
+                
+                next_target_time += target_frame_time
+
+            last_frame_tensor = current_tensor
+            
+        # Emit last frame if needed to catch up
+        if last_frame_tensor is not None and next_target_time is not None:
+             frames.append(last_frame_tensor)
+        
+        return frames
+
+    @staticmethod
+    def load_video(video_path: str, output_frames: bool = True, limit_frame_count: int | None = None, fps: float | None = None):
         """
         Loads a video and returns (frames, metadata)
         output_frames: return frame list if True, the video tensor otherwise
         limit_frame_count: Optional integer to stop loading after N frames
+        fps: Optional float to specify the target frames per second.
+             If provided, frames will be sampled (or duplicated) to match this FPS.
         
         Returns: 
             video_tensor: (C, T, H, W) float32 tensor in [0, 1] range, or None
@@ -206,23 +258,18 @@ class MediaProcessor:
         container = av.open(video_path)
         stream = container.streams.video[0]
         
+        orig_fps = float(stream.average_rate)
         metadata = {
-            "fps": float(stream.average_rate),
+            "fps": fps if fps is not None else orig_fps,
+            "original_fps": orig_fps,
             "resolution": (stream.width, stream.height),
             "duration": float(stream.duration * stream.time_base) if stream.duration else 0.0,
             "total_frames_in_file": stream.frames
         }
 
-        video_tensor = None
-        frames = []
-        for i, frame in enumerate(container.decode(video=0)):
-            if limit_frame_count is not None and i >= limit_frame_count:
-                break
-            np_frame = frame.to_ndarray(format='rgb24')
-            np_frame = np_frame.astype(np.float32) / 255.0              # H x W x C (0-255) to H x W x C (0.0-1.0)
-            pt_frame = torch.from_numpy(np_frame.transpose(2, 0, 1))    # H x W x C -> C x H x W
-            frames.append(pt_frame)
+        frames = MediaProcessor._resample_frames(container, fps, limit_frame_count, orig_fps)
 
+        video_tensor = None
         if frames:
             metadata["loaded_frames"] = len(frames)
             if not output_frames:
