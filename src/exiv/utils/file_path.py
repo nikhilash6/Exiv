@@ -77,6 +77,10 @@ DOWNLOAD_MAP = {
         "type": "checkpoint",
         "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_animate_14B_bf16.safetensors?download=true"
     },
+    "wan22_animate_14b_fp8_e4m3_scaled.safetensors": {
+        "type": "checkpoint",
+        "url": "https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/resolve/main/Wan22Animate/Wan2_2-Animate-14B_fp8_e4m3fn_scaled_KJ.safetensors?download=true"
+    },
     "wan22_t2v_lightx2v_4steps_lora_v11_high_noise.safetensors": {
         "type": "lora",
         "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors"

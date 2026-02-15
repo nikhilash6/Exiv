@@ -127,17 +127,34 @@ def install_requirements(directory: str, show_logs: bool = True) -> bool:
     import os
     import subprocess
     import sys
+    from pathlib import Path
     from .logging import app_logger
 
     req_path = os.path.join(directory, "requirements.txt")
     if os.path.exists(req_path):
-        app_logger.info(f"Installing requirements for extension in {directory}...")
+        # prioritize local virtual environment if present
+        python_exe = sys.executable
+        cwd = Path.cwd()
+        possible_venvs = ["venv", ".venv"]
+        for vname in possible_venvs:
+            vpath = cwd / vname
+            if vpath.is_dir():
+                if sys.platform == "win32":
+                    cand = vpath / "Scripts" / "python.exe"
+                else:
+                    cand = vpath / "bin" / "python"
+                
+                if cand.exists():
+                    python_exe = str(cand)
+                    break
+
+        app_logger.info(f"Installing requirements for extension in {directory} using {python_exe}...")
         stdout_dest = None if show_logs else subprocess.DEVNULL
         stderr_dest = None if show_logs else subprocess.DEVNULL
 
         try:
             subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", "-r", req_path], 
+                [python_exe, "-m", "pip", "install", "-r", req_path], 
                 stdout=stdout_dest, 
                 stderr=stderr_dest
             )

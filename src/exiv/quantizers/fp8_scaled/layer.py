@@ -43,7 +43,7 @@ class FP8ScaledLinear(nn.Module):
                 input_fp8,
                 self.weight.t(),
                 scale_a=self.scale_input.float(),   # NOTE: make more robust 
-                scale_b=self.scale_weight,
+                scale_b=self.scale_weight.float(),
                 bias=self.bias,
                 out_dtype=input.dtype
             )

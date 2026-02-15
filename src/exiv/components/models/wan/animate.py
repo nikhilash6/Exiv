@@ -170,7 +170,7 @@ class Blur(nn.Module):
         self.pad = pad
 
     def forward(self, input):
-        return upfirdn2d(input, self.kernel, pad=self.pad)
+        return upfirdn2d(input, self.kernel.to(dtype=input.dtype, device=input.device), pad=self.pad)
 
 class ScaledLeakyReLU(nn.Module):
     def __init__(self, negative_slope=0.2):

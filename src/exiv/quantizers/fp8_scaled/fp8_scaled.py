@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from typing import Dict, Any, List, Optional
 
-from exiv.utils.device import VRAM_DEVICE
+from ...utils.device import VRAM_DEVICE
 from ...utils.common import get_module_from_name
 from ...utils.logging import app_logger
 from ..base import Quantizer
@@ -24,7 +24,22 @@ class FP8ScaledQuantizer(Quantizer):
         module, tensor_name = get_module_from_name(model, param_name)
         return isinstance(module, FP8ScaledLinear)
 
-    def process_model_before_weight_loading(self, model, keep_in_fp32_modules: List[str] = ["ffn"], **kwargs):
+    def check_quantized_param_shape(self, param_name, current_param, loaded_param):
+        if current_param.shape == loaded_param.shape:
+            return
+
+        # NOTE: this is a workaround for the scalar vs 1D tensor mismatch
+        # e.g. model expecting () and checkpoint having (1)
+        if param_name.endswith("scale_weight"):
+            if current_param.numel() == 1 and loaded_param.numel() == 1:
+                return
+
+        raise ValueError(
+            f"Cannot load because {param_name} expected shape {current_param.shape}, but got {loaded_param.shape}."
+        )
+
+    # TODO: some wan model ckpts don't have all the layers quantized, check and fix, like "ffn"
+    def process_model_before_weight_loading(self, model, keep_in_fp32_modules: List[str] = [], **kwargs):
         for name, module in model.named_modules():
             if isinstance(module, nn.Linear):
                 if any(k in name for k in keep_in_fp32_modules):
@@ -110,6 +125,11 @@ class FP8ScaledQuantizer(Quantizer):
         if tensor_name in ["scale_weight", "scale_input", "bias"] and param_value is not None:
             target_attr = getattr(module, tensor_name)
             new_param = param_value.to(device=target_device, dtype=target_attr.dtype)
+            
+            # ensuring scalar shape for scales
+            if tensor_name in ["scale_weight", "scale_input"] and new_param.numel() == 1:
+                new_param = new_param.view(())
+                
             setattr(module, tensor_name, torch.nn.Parameter(new_param, requires_grad=False))
                 
 def convert_e5m2_to_e4m3(t_e5m2, old_scale_fp32):

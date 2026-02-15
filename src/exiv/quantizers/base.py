@@ -254,6 +254,9 @@ class Quantizer(ABC):
     def is_state_dict_quantized(self, state_dict):
         pass
     
+    def check_quantized_param_shape(self, param_name, current_param, loaded_param):
+        pass
+    
     def validate_environment(self, *args, **kwargs):
         pass
 

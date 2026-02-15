@@ -57,11 +57,12 @@ def main(**params):
     
     if context: context.start_anchor("Preprocessing", steps=6)
     
-    model_name = "wan22_animate_14b_bf16"
+    # model_name = "wan22_animate_14b_bf16"
+    model_name = "wan22_animate_14b_fp8_e4m3_scaled"
     model_path_data = FilePaths.get_path(filename=model_name, file_type="checkpoint")
     wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
     model_wrapper = ModelWrapper(model=wan_dit_model)
-    enable_step_caching(wan_dit_model)
+    # enable_step_caching(wan_dit_model)
     
     def create_cond(group_name, prompt):
         cond = Conditioning(
@@ -69,8 +70,8 @@ def main(**params):
             input_metadata=prompt,
             extra={
                 "animate_mode": mode,
-                "background_video": bg_video_path,
-                "mask_video": mask_video_path
+                "background_video_path": bg_video_path,
+                "character_mask_path": mask_video_path
             }
         )
         cond.aux = [
@@ -136,8 +137,8 @@ def main(**params):
 app = App(
     name="Wan Animate",
     inputs={
-        'positive': Input(label="Positive Prompt", type="str", default="a character animating", resizable=True),
-        'negative': Input(label="Negative Prompt", type="str", default="bad quality", resizable=True),
+        'positive': Input(label="Positive Prompt", type="str", default="a girl talking", resizable=True),
+        'negative': Input(label="Negative Prompt", type="str", default="色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走", resizable=True),
         'seed': Input(label="Seed", type="number", default=-1),
         'steps': Input(label="Steps", type="number", default=20),
         'cfg': Input(label="CFG", type="number", default=6.0, increment_step=0.1),
@@ -145,14 +146,14 @@ app = App(
         'scheduler_name': Input(label="Scheduler", type="select", options=SchedulerType.value_list(), default=SchedulerType.SIMPLE.value),
         
         # Media
-        'reference_image': Input(label="Reference Image", type="media_upload", default="ref_image.png"),
-        'pose_video': Input(label="Pose Video", type="media_upload", default="pose1.mp4"),
-        'face_video': Input(label="Face Video", type="media_upload", default="face1.mp4"),
+        'reference_image': Input(label="Reference Image", type="str", default="ref_image.png"),
+        'pose_video': Input(label="Pose Video", type="str", default="pose.mp4"),
+        'face_video': Input(label="Face Video", type="str", default="face.mp4"),
         
         # Mode
-        'mode': Input(label="Mode", type="select", options=[WanAnimateMode.ANIMATION, WanAnimateMode.REPLACEMENT], default=WanAnimateMode.ANIMATION),
-        'background_video': Input(label="Background Video (Replacement)", type="media_upload"),
-        'mask_video': Input(label="Mask Video (Replacement)", type="media_upload"),
+        'mode': Input(label="Mode", type="select", options=[WanAnimateMode.ANIMATION, WanAnimateMode.REPLACEMENT], default=WanAnimateMode.REPLACEMENT),
+        'background_video': Input(label="Background Video (Replacement)", type="str", default="background_video.mp4"),
+        'mask_video': Input(label="Mask Video (Replacement)", type="str", default="character_mask.mp4"),
     },
     outputs=[Output(id=1, type=AppOutputType.VIDEO.value)],
     handler=main

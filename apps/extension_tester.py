@@ -45,7 +45,7 @@ def main(**params):
     video_path = "dialogue.mp4"
     run_dwpose = params.get("run_dwpose", False)
     run_matanyone = params.get("run_matanyone", False)
-
+    matanyone_output_type = params.get("matanyone_output_type", "black_background")
     results = {
         "extension_status": status_report,
         "actions_simulated": []
@@ -56,7 +56,7 @@ def main(**params):
         if video_path and os.path.exists(video_path):
             app_logger.info(f"Running DWPose on video: {video_path}")
             # 1. Load video frames
-            frames, metadata = MediaProcessor.load_video(video_path, output_frames=True)
+            frames, metadata = MediaProcessor.load_video(video_path, output_frames=True, fps=16)
             create_dwpose_video(results, frames, dwpose_ext, detect_body=True, detect_hands=True, detect_face=False)
             create_dwpose_video(results, frames, dwpose_ext, detect_body=False, detect_hands=False, detect_face=True)
             
@@ -109,7 +109,8 @@ def main(**params):
             matte_res = matanyone_ext.process(
                 mode="matte_video", 
                 video=short_video, 
-                mask=mask
+                mask=mask,
+                output_type=matanyone_output_type,
             )
             
             # 4. Save results (tensors already in correct format)
@@ -140,6 +141,12 @@ app = App(
             label="Run MatAnyone", 
             type="boolean", 
             default=True
+        ),
+        'matanyone_output_type': Input(
+            label="MatAnyone Output Type",
+            type="select",
+            options=["green_screen", "black_background"],
+            default="black_background"
         ),
     },
     outputs=[Output(id=1, type=AppOutputType.JSON.value)],
