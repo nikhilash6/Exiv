@@ -337,6 +337,7 @@ def _process_wan_animate_aux(cond_list, model_wrapper, wan_vae, height, width, f
             elif aux_c.type == AuxCondType.FACE_PIXEL_VALUES:
                 video_path = aux_c.input_metadata
                 face_video, _ = MediaProcessor.load_video(video_path, output_frames=False)
+                if face_video.shape[1] > frame_count: face_video = face_video[:, :frame_count]
                 face_video = common_upscale(face_video.permute(1, 0, 2, 3), 512, 512, "area", "center")[0].permute(1, 0, 2, 3)
                 face_video = face_video.unsqueeze(0).to(VRAM_DEVICE, dtype=torch.float16)
                 face_video = face_video * 2.0 - 1.0 # Normalize to [-1, 1]

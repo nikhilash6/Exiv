@@ -8,6 +8,22 @@ from exiv.server.app_core import App, AppOutputType, Input, Output
 from exiv.utils.logging import app_logger
 from exiv.utils.file import MediaProcessor
 
+
+def create_dwpose_video(results, frames, dwpose_ext, detect_body, detect_hands, detect_face):
+    # 2. Process each frame
+    out_frames = []
+    for i, frame in enumerate(frames):
+        app_logger.info(f"Processing DWPose frame {i+1}/{len(frames)}")
+        out_tensor = dwpose_ext.process(image=frame, detect_body=detect_body, detect_hand=detect_hands, detect_face=detect_face)
+        out_frames.append(out_tensor)
+    
+    # 3. Stack and save results (T, C, H, W) -> (C, T, H, W) -> (1, C, T, H, W)
+    out_video = torch.stack(out_frames).permute(1, 0, 2, 3).unsqueeze(0)
+    output_paths = MediaProcessor.save_latents_to_media(out_video, media_type="video", subfolder="dwpose")
+    
+    results["actions_simulated"].append(f"DWPose video saved to: {output_paths[0]}")
+    app_logger.info(f"Pose video saved to {output_paths[0]}")
+
 def main(**params):
     """
     Main handler for the Extension Tester App.
@@ -41,30 +57,19 @@ def main(**params):
             app_logger.info(f"Running DWPose on video: {video_path}")
             # 1. Load video frames
             frames, metadata = MediaProcessor.load_video(video_path, output_frames=True)
+            create_dwpose_video(results, frames, dwpose_ext, detect_body=True, detect_hands=True, detect_face=False)
+            create_dwpose_video(results, frames, dwpose_ext, detect_body=False, detect_hands=False, detect_face=True)
             
-            # 2. Process each frame
-            out_frames = []
-            for i, frame in enumerate(frames):
-                app_logger.info(f"Processing DWPose frame {i+1}/{len(frames)}")
-                out_tensor = dwpose_ext.process(image=frame, detect_hand=True, detect_face=True)
-                out_frames.append(out_tensor)
-            
-            # 3. Stack and save results (T, C, H, W) -> (C, T, H, W) -> (1, C, T, H, W)
-            out_video = torch.stack(out_frames).permute(1, 0, 2, 3).unsqueeze(0)
-            output_paths = MediaProcessor.save_latents_to_media(out_video, media_type="video", subfolder="dwpose")
-            
-            results["actions_simulated"].append(f"DWPose video saved to: {output_paths[0]}")
-            app_logger.info(f"Pose video saved to {output_paths[0]}")
-        elif image_path and os.path.exists(image_path):
-            app_logger.info(f"[SIMULATION] Would run DWPose on: {image_path}")
-            image = MediaProcessor.load_image_list(image_path)[0]
-            out_tensor = dwpose_ext.process(image=image, detect_hand=True, detect_face=True)
-            out_tensor = out_tensor.unsqueeze(0).unsqueeze(2)
-            output_paths = MediaProcessor.save_latents_to_media(out_tensor, media_type="image")
-            results["actions_simulated"].append(f"DWPose saved to: {output_paths[0]}")
-            app_logger.info(f"Pose map saved to {output_paths[0]}") 
-        else:
-            app_logger.info("[SIMULATION] DWPose selected but no valid input provided.")
+        # elif image_path and os.path.exists(image_path):
+        #     app_logger.info(f"[SIMULATION] Would run DWPose on: {image_path}")
+        #     image = MediaProcessor.load_image_list(image_path)[0]
+        #     out_tensor = dwpose_ext.process(image=image, detect_hand=True, detect_face=True)
+        #     out_tensor = out_tensor.unsqueeze(0).unsqueeze(2)
+        #     output_paths = MediaProcessor.save_latents_to_media(out_tensor, media_type="image")
+        #     results["actions_simulated"].append(f"DWPose saved to: {output_paths[0]}")
+        #     app_logger.info(f"Pose map saved to {output_paths[0]}") 
+        # else:
+        #     app_logger.info("[SIMULATION] DWPose selected but no valid input provided.")
 
     # Actual MatAnyone execution
     if run_matanyone and matanyone_ext:

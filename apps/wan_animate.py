@@ -52,7 +52,7 @@ def main(**params):
     if mode == WanAnimateMode.REPLACEMENT and (not bg_video_path or not mask_video_path):
         raise ValueError("Replacement mode requires Background Video and Mask Video.")
     
-    height, width, frame_count = 512, 512, 81
+    height, width, frame_count = 640, 640, 81
     frame_count = fix_frame_count(frame_count, 4)
     
     if context: context.start_anchor("Preprocessing", steps=6)
@@ -146,8 +146,8 @@ app = App(
         
         # Media
         'reference_image': Input(label="Reference Image", type="media_upload", default="ref_image.png"),
-        'pose_video': Input(label="Pose Video", type="media_upload", default="pose.mp4"),
-        'face_video': Input(label="Face Video", type="media_upload", default="face.mp4"),
+        'pose_video': Input(label="Pose Video", type="media_upload", default="pose1.mp4"),
+        'face_video': Input(label="Face Video", type="media_upload", default="face1.mp4"),
         
         # Mode
         'mode': Input(label="Mode", type="select", options=[WanAnimateMode.ANIMATION, WanAnimateMode.REPLACEMENT], default=WanAnimateMode.ANIMATION),
