@@ -245,6 +245,26 @@ def print_model_params(model: torch.nn.Module, break_dtype=None):
 import numpy as np
 from PIL import Image, ImageDraw
 import math
+
+def generate_spark_lines(t, bins=20):
+    # Flatten and take a meaningful sample (e.g., the first 1000 values)
+    data = t.flatten()[:1000].cpu().float().numpy()
+
+    # Normalize to 0-7 for Unicode bars
+    d_min, d_max = data.min(), data.max()
+    if d_max - d_min < 1e-7:
+        print("Tensor is uniform.")
+        return
+
+    normalized = ((data - d_min) / (d_max - d_min) * 7).astype(int)
+    chars = " ▂▃▄▅▆▇█"
+    sparkline = "".join([chars[i] for i in normalized])
+
+    # Print in chunks of 100
+    print("Visual Pattern (First 1000 elements):")
+    for i in range(0, 1000, 100):
+        print(sparkline[i:i+100])
+
 def visualize_latents_pca(tensor):
     if tensor.ndim == 3: tensor = tensor.unsqueeze(0)
     elif tensor.ndim == 4: pass 

@@ -126,6 +126,8 @@ def main(**params):
     out = out.to(dtype=VAE_DTYPE)
     vae = get_vae(VAEType.WAN21.value, VAE_DTYPE, USE_VAE_TILING)
     out = vae.decode(out, (width, height, frame_count))
+    # hardcoding rn will change later
+    if out.shape[2] > 4: out = out[:, :, 4:]
     
     metadata = {
         "positive": pos_prompt, "seed": seed, "mode": mode,
@@ -152,8 +154,8 @@ app = App(
         
         # Mode
         'mode': Input(label="Mode", type="select", options=[WanAnimateMode.ANIMATION, WanAnimateMode.REPLACEMENT], default=WanAnimateMode.REPLACEMENT),
-        'background_video': Input(label="Background Video (Replacement)", type="str", default="background_video.mp4"),
-        'mask_video': Input(label="Mask Video (Replacement)", type="str", default="character_mask.mp4"),
+        'background_video': Input(label="Background Video (Replacement)", type="str", default="background.mp4"),
+        'mask_video': Input(label="Mask Video (Replacement)", type="str", default="character.mp4"),
     },
     outputs=[Output(id=1, type=AppOutputType.VIDEO.value)],
     handler=main

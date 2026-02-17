@@ -111,6 +111,9 @@ def main(**params):
                 video=short_video, 
                 mask=mask,
                 output_type=matanyone_output_type,
+                mask_padding=params.get("mask_padding", 10),
+                blocky_mask=params.get("blocky_mask", True),
+                binary_mask=True,
             )
             
             # 4. Save results (tensors already in correct format)
@@ -147,6 +150,16 @@ app = App(
             type="select",
             options=["green_screen", "black_background"],
             default="black_background"
+        ),
+        'mask_padding': Input(
+            label="MatAnyone Mask Padding",
+            type="integer",
+            default=10
+        ),
+        'blocky_mask': Input(
+            label="MatAnyone Blocky Mask",
+            type="boolean",
+            default=True
         ),
     },
     outputs=[Output(id=1, type=AppOutputType.JSON.value)],

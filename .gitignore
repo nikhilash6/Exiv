@@ -39,7 +39,8 @@ venv/
 input/
 output/
 /models/
-/extensions
+/extensions/*
+!/extensions/ext_list.txt
 note.md
 temp.py
 apps/dummy_test.py
