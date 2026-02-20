@@ -242,9 +242,37 @@ def print_model_params(model: torch.nn.Module, break_dtype=None):
         if param.dtype == break_dtype:
             break
 
+import torch
 import numpy as np
 from PIL import Image, ImageDraw
 import math
+
+def get_covariance_matrix(tensor, channel_dim):
+    dims = list(range(tensor.ndim))
+    dims.remove(channel_dim)
+    dims.append(channel_dim)
+    
+    t_permuted = tensor.permute(*dims)
+    t_flat = t_permuted.reshape(-1, tensor.shape[channel_dim]).float()
+    
+    t_centered = t_flat - t_flat.mean(dim=0)
+    cov_matrix = (t_centered.T @ t_centered) / (t_centered.shape[0] - 1)
+    
+    return cov_matrix
+
+def calc_norm(cov1, cov2):
+    dist = torch.linalg.matrix_norm(cov1 - cov2, ord='fro').item()    # frobenius norm
+    status = "Good (Matches)" if dist / cov1.shape[0] < 0.01 else "Bad (Mismatch)"
+    print(status)
+    return dist
+
+def get_spatial_mse(tensor_a, tensor_b, threshold=0.01):
+    import torch
+    import torch.nn.functional as F
+    mse = F.mse_loss(tensor_a.float(), tensor_b.float()).item()
+    status = "Good (Spatial layout matches)" if mse < threshold else "Bad (Spatial layout mismatch)"
+    print(f"Spatial MSE: {mse:.4f} -> {status}")
+    return mse
 
 def generate_spark_lines(t, bins=20):
     # Flatten and take a meaningful sample (e.g., the first 1000 values)

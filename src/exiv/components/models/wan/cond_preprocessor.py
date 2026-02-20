@@ -307,7 +307,7 @@ def _process_ref_latents(cond_list, model_wrapper, wan_vae, height, width, frame
                 )
                 aux_c.data = data
 
-def _process_wan_animate_aux(cond_list, model_wrapper, wan_vae, height, width, frame_count, progress_callback):
+def _process_wan_animate_aux(cond_list: List[Conditioning], model_wrapper, wan_vae, height, width, frame_count, progress_callback):
     for c in cond_list:
         current_frame_offset = c.extra.get("frame_offset", 0)       # 0, 10, 20 ...
         temporal_latent = c.extra.get("temporal_latent", None)
@@ -321,10 +321,20 @@ def _process_wan_animate_aux(cond_list, model_wrapper, wan_vae, height, width, f
             if aux_c.data is not None: continue
             if aux_c.type == AuxCondType.POSE_LATENTS:
                 video_path = aux_c.input_metadata
-                pose_video, _ = MediaProcessor.load_video(video_path, output_frames=False)
-                if pose_video.shape[0] <= current_frame_offset: pose_video = None
-                else:
-                    pose_video = pose_video[:, current_frame_offset:frame_count]
+                pose_video, _ = MediaProcessor.load_video(video_path, output_frames=False, fps=16)
+                pose_latents = None
+                
+                # pose_video is [C, T, H, W]
+                if pose_video.shape[1] > current_frame_offset:
+                    pose_video = pose_video[:, current_frame_offset:]
+                    
+                    if pose_video.shape[1] < frame_count:
+                         last_frame = pose_video[:, -1:, :, :]
+                         repeats = frame_count - pose_video.shape[1]
+                         padding = last_frame.repeat(1, repeats, 1, 1)
+                         pose_video = torch.cat([pose_video, padding], dim=1)
+                    
+                    pose_video = pose_video[:, :frame_count]
                     pose_video = common_upscale(pose_video.permute(1, 0, 2, 3), width, height, "area", "center")[0].permute(1, 0, 2, 3)
                     pose_video_b = pose_video.unsqueeze(0).to(VRAM_DEVICE, dtype=torch.float16) # TODO: dynamic dtype
                     pose_latents = wan_vae.encode(pose_video_b)
@@ -335,13 +345,25 @@ def _process_wan_animate_aux(cond_list, model_wrapper, wan_vae, height, width, f
             elif aux_c.type == AuxCondType.FACE_PIXEL_VALUES:
                 if aux_c.data is not None: continue
                 video_path = aux_c.input_metadata
-                face_video, _ = MediaProcessor.load_video(video_path, output_frames=False)
-                if face_video.shape[0] <= current_frame_offset: face_video = None
-                else: 
-                    face_video = face_video[:, current_frame_offset:frame_count]
+                face_video, _ = MediaProcessor.load_video(video_path, output_frames=False, fps=16)
+                
+                if face_video.shape[1] > current_frame_offset:
+                    face_video = face_video[:, current_frame_offset:]
+                    
+                    if face_video.shape[1] < frame_count:
+                         last_frame = face_video[:, -1:, :, :]
+                         repeats = frame_count - face_video.shape[1]
+                         padding = last_frame.repeat(1, repeats, 1, 1)
+                         face_video = torch.cat([face_video, padding], dim=1)
+                         
+                    face_video = face_video[:, :frame_count]
                     face_video = common_upscale(face_video.permute(1, 0, 2, 3), 512, 512, "area", "center")[0].permute(1, 0, 2, 3)
                     face_video = face_video.unsqueeze(0).to(VRAM_DEVICE, dtype=torch.float16)
-                    face_video = face_video * 2.0 - 1.0 # Normalize to [-1, 1]
+                    scale = 2.0 if c.group_name == "positive" else 0.0      # NOTE: hardcoding group name, 0 for negative
+                    face_video = face_video * scale - 1.0 # Normalize to [-1, 1]
+                else:
+                    face_video = None
+                    
                 aux_c.data = face_video
 
 def process_auxiliaries(cond_list: List[Conditioning], wrapper: ModelWrapper, wan_vae, height, width, frame_count, progress_callback):

@@ -127,7 +127,7 @@ def main(**params):
     vae = get_vae(VAEType.WAN21.value, VAE_DTYPE, USE_VAE_TILING)
     out = vae.decode(out, (width, height, frame_count))
     # hardcoding rn will change later
-    if out.shape[2] > 4: out = out[:, :, 4:]
+    if out.shape[2] > 8: out = out[:, :, 8:]
     
     metadata = {
         "positive": pos_prompt, "seed": seed, "mode": mode,

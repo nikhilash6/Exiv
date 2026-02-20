@@ -351,6 +351,39 @@ class WanAnimateModel(Wan21Model):
             heads_num=self.num_heads,
             num_adapter_layers=self.num_layers // 5
         )
+        
+    def after_patch_embedding(self, x: List[torch.Tensor], pose_latents, face_pixel_values):
+        if pose_latents is not None:
+            with torch.autocast(device_type=VRAM_DEVICE, dtype=torch.float32):
+                pose_latents = self.pose_patch_embedding(pose_latents.float()).to(x.dtype)
+            # - assuming the first frame to be a ref image 
+            # - 'injecting' pose info in the respective frames (indices should match !)
+            x[:, :, 1:pose_latents.shape[2] + 1] += pose_latents[:, :, :x.shape[2] - 1]
+        
+        if face_pixel_values is None: return x, None
+        
+        b,c,T,h,w = face_pixel_values.shape
+        face_pixel_values = rearrange(face_pixel_values, "b c t h w -> (b t) c h w")
+        encode_bs = 8   # TODO: standardize these hyperparms for efficient memory management
+        face_pixel_values_tmp = []
+        for i in range(math.ceil(face_pixel_values.shape[0]/encode_bs)):
+            face_pixel_values_tmp.append(self.motion_encoder.get_motion(face_pixel_values[i*encode_bs:(i+1)*encode_bs]))
+
+        motion_vec = torch.cat(face_pixel_values_tmp)
+        motion_vec = rearrange(motion_vec, "(b t) c -> b t c", t=T)
+        motion_vec = self.face_encoder(motion_vec)
+
+        B, L, H, C = motion_vec.shape
+        pad_face = torch.zeros(B, 1, H, C).type_as(motion_vec)  # padding for the first ref frame
+        motion_vec = torch.cat([pad_face, motion_vec], dim=1)
+        
+        # padding length mismatch b/w video length and the provided face context
+        target_len = x.shape[2]
+        motion_vec = motion_vec[:, :target_len]
+        if motion_vec.shape[1] < target_len: 
+            motion_vec = F.pad(motion_vec, (0, 0, 0, 0, 0, target_len - motion_vec.shape[1]))
+        
+        return x, motion_vec
 
     def forward_orig(
         self,
@@ -382,44 +415,13 @@ class WanAnimateModel(Wan21Model):
                 Used for motion and face identity conditioning via motion_encoder and face_adapter.
         """
         with torch.autocast(device_type=VRAM_DEVICE, dtype=torch.float32):
-            x_emb = self.patch_embedding(x.float()).to(x.dtype)
-
-        if pose_latents is not None:
-            # pose_latents is assumed to be encoded latents of pose frames [B, 16, T, H, W]
-            with torch.autocast(device_type=VRAM_DEVICE, dtype=torch.float32):
-                p_emb = self.pose_patch_embedding(pose_latents.float()).to(x.dtype)
-            
-            # if reference image was prepended, skip the first frame in x_emb for pose addition
-            if x_emb.shape[2] > p_emb.shape[2]: x_emb[:, :, 1:] += p_emb
-            else: x_emb += p_emb
-
-        grid_sizes = x_emb.shape[2:]
-        x_flat = x_emb.flatten(2).transpose(1, 2)
-
-        # face motion conditioning
-        motion_vec = None
-        if face_pixel_values is not None:
-            # face_pixel_values: [B, C, T, H, W]
-            B, C, T, H, W = face_pixel_values.shape
-            face_flat = rearrange(face_pixel_values, "b c t h w -> (b t) c h w")
-            
-            # process in batches to save memory
-            encode_bs = 8
-            motion_list = []
-            for i in range(0, face_flat.shape[0], encode_bs):
-                motion_list.append(self.motion_encoder.get_motion(face_flat[i : i + encode_bs]))
-            
-            motion_vec = torch.cat(motion_list)
-            motion_vec = rearrange(motion_vec, "(b t) c -> b t c", t=T)
-            motion_vec = self.face_encoder(motion_vec) # [B, T, num_heads, head_dim]
-            
-            # pad for reference frame if necessary
-            if x_emb.shape[2] > T:
-                pad_face = torch.zeros(B, 1, motion_vec.shape[2], motion_vec.shape[3]).to(motion_vec)
-                motion_vec = torch.cat([pad_face, motion_vec], dim=1)
-
+            x = self.patch_embedding(x.float()).to(x.dtype)
+        x, motion_vec = self.after_patch_embedding(x, pose_latents, face_pixel_values)
+        grid_sizes = x.shape[2:]    # (time/frame, height_emb, width_emb)
+        x = x.flatten(2).transpose(1, 2)
+        
         # time embeddings
-        e = self.time_embedding(sinusoidal_embedding_1d(self.freq_dim, t.flatten()).to(dtype=x_flat.dtype))
+        e = self.time_embedding(sinusoidal_embedding_1d(self.freq_dim, t.flatten()).to(dtype=x.dtype))
         e = e.reshape(t.shape[0], -1, e.shape[-1])
         e0 = self.time_projection(e).unflatten(2, (6, self.dim))
 
@@ -433,12 +435,10 @@ class WanAnimateModel(Wan21Model):
 
         # transformer blocks with face adapter
         for i, block in enumerate(self.blocks):
-            x_flat = block(x_flat, e=e0, freqs=freqs, context=context, context_img_len=context_img_len)
+            x = block(x, e=e0, freqs=freqs, context=context, context_img_len=context_img_len)
             if motion_vec is not None and i % 5 == 0:   # face adapter every 5 blocks
-                adapter_idx = i // 5
-                if adapter_idx < len(self.face_adapter.fuser_blocks):
-                    x_flat = x_flat + self.face_adapter.fuser_blocks[adapter_idx](x_flat, motion_vec)
+                x = x + self.face_adapter.fuser_blocks[i // 5](x, motion_vec)
         
-        x_out = self.head(x_flat, e)
-        
+        x_out = self.head(x, e)
+        # de-concat of ref is not needed as head absorbs it
         return self.unpatchify(x_out, grid_sizes)
