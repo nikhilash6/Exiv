@@ -112,7 +112,7 @@ class WanAnimateModelArchConfig(Wan21ModelArchConfig):
         
         background_video_path, character_mask_path = kwargs.get("background_video_path", None), kwargs.get("character_mask_path", None)
         start_idx = t_len
-        global_start_frame = start_idx + image.shape[2]  # image.shape[2] is 1 (ref frame)
+        global_start_frame = kwargs.get("frame_offset", 0) + image.shape[2]  # image.shape[2] is 1 (ref frame)
         if background_video_path:
             bg_video, _ = MediaProcessor.load_video(background_video_path, output_frames=False) # [C, T, H, W]
             bg_video = common_upscale(bg_video.permute(1, 0, 2, 3), width, height, "area", "center")[0].permute(1, 0, 2, 3)

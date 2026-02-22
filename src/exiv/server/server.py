@@ -34,17 +34,49 @@ def load_apps_from_directory(directory: str = "apps"):
 
     sys.path.append(apps_path)
     app_logger.debug(f"Scanning for apps in: {apps_path}")
+    
+    # scan for:
+    # 1. apps/*.py
+    # 2. apps/*/app.py
+    # 3. apps/*/__init__.py
+    
     py_files = glob(os.path.join(apps_path, "*.py"))
+    py_files.extend(glob(os.path.join(apps_path, "*", "app.py")))
+    py_files.extend(glob(os.path.join(apps_path, "*", "__init__.py")))
 
     for file_path in py_files:
-        module_name = os.path.basename(file_path).replace(".py", "")
+        filename = os.path.basename(file_path)
+        app_dir = os.path.dirname(file_path)
+        
+        if filename in ["app.py", "__init__.py"]:
+            # apps/my_app/app.py -> module name: my_app
+            module_name = os.path.basename(app_dir)
+        else:
+            # apps/my_app.py -> module name: my_app
+            module_name = filename.replace(".py", "")
+
         spec = importlib.util.spec_from_file_location(module_name, file_path)
         if spec and spec.loader:
             module = importlib.util.module_from_spec(spec)
             sys.modules[module_name] = module
             try:
                 spec.loader.exec_module(module)
-                if hasattr(module, "app") and isinstance(module.app, App):
+                if hasattr(module, "app") and (isinstance(module.app, App) or type(module.app).__name__ == "App"):
+                    # frontend assets (dist/index.js, dist/style.css)
+                    dist_path = os.path.join(app_dir, "dist")
+                    if os.path.exists(dist_path):
+                        js_path = os.path.join(dist_path, "index.js")
+                        if os.path.exists(js_path):
+                            # absolute path to dist folder
+                            module.app.asset_root = dist_path
+                            assets = {"js": "index.js"}
+                            css_path = os.path.join(dist_path, "style.css")
+                            if os.path.exists(css_path):
+                                assets["css"] = "style.css"
+                            
+                            module.app.frontend_assets = assets
+                            app_logger.debug(f"  -> Found frontend for {module.app.name}")
+
                     APP_REGISTRY[module.app.name] = module.app
                     app_logger.debug(f"Loaded: {module.app.name}")
             except Exception as e:
@@ -183,6 +215,30 @@ async def get_script_progress(task_id: str):
         return status
     else:
         raise HTTPException(status_code=404, detail="Task not found")
+
+@app.get("/api/apps/{app_name}/assets/{filename:path}")
+async def get_app_asset(app_name: str, filename: str):
+    if app_name not in APP_REGISTRY:
+        raise HTTPException(status_code=404, detail="App not found")
+    
+    app = APP_REGISTRY[app_name]
+    if not app.frontend_assets:
+        raise HTTPException(status_code=404, detail="App has no frontend assets")
+
+    # security check: filename must be allowed
+    allowed_files = app.frontend_assets.values()
+    if filename not in allowed_files:
+        raise HTTPException(status_code=403, detail="Access denied to this file")
+
+    if not app.asset_root:
+         raise HTTPException(status_code=500, detail="App asset root not configured")
+         
+    file_path = os.path.join(app.asset_root, filename)
+    
+    if not os.path.exists(file_path) or not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail="Asset not found")
+        
+    return FileResponse(file_path)
 
 @app.get("/api/outputs/{filename:path}")
 async def get_output_file(filename: str):

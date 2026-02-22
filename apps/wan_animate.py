@@ -8,11 +8,13 @@ from exiv.components.models.wan.constructor import get_wan_instance
 from exiv.components.samplers.model_sampling import KSampler
 from exiv.components.vae.base import get_vae
 from exiv.model_patching.cache_hook import enable_step_caching
+from exiv.model_patching.lora_hook import enable_lora_hook
 from exiv.model_utils.common_classes import AuxConditioning, AuxCondType, Conditioning, BatchedConditioning, ConditioningType, Latent, ModelWrapper
+from exiv.model_utils.lora_mixin import LoraDefinition
 from exiv.server.app_core import App, AppOutputType, Input, Output
 from exiv.utils.device import MemoryManager
-from exiv.utils.file import MediaProcessor
-from exiv.utils.file_path import FilePaths
+from exiv.utils.file import MediaProcessor, ensure_model_availability
+from exiv.utils.file_path import FilePathData, FilePaths
 from exiv.utils.logging import app_logger
 from exiv.utils.common import fix_frame_count
 
@@ -61,6 +63,11 @@ def main(**params):
     model_name = "wan22_animate_14b_fp8_e4m3_scaled"
     model_path_data = FilePaths.get_path(filename=model_name, file_type="checkpoint")
     wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
+    
+    model_path_data: FilePathData = FilePaths.get_path(filename="wan_animate_lightx_cfg_step_distill_lora.safetensors", file_type="lora")
+    lora_path = ensure_model_availability(model_path=model_path_data.path, download_url=model_path_data.url)
+    lora_def = LoraDefinition(path=lora_path)
+    enable_lora_hook(model=wan_dit_model, lora_def=lora_def)
     model_wrapper = ModelWrapper(model=wan_dit_model)
     # enable_step_caching(wan_dit_model)
     
@@ -142,8 +149,8 @@ app = App(
         'positive': Input(label="Positive Prompt", type="str", default="a girl talking", resizable=True),
         'negative': Input(label="Negative Prompt", type="str", default="色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走", resizable=True),
         'seed': Input(label="Seed", type="number", default=-1),
-        'steps': Input(label="Steps", type="number", default=20),
-        'cfg': Input(label="CFG", type="number", default=6.0, increment_step=0.1),
+        'steps': Input(label="Steps", type="number", default=4),
+        'cfg': Input(label="CFG", type="number", default=1.0, increment_step=0.1),
         'sampler_name': Input(label="Sampler", type="select", options=KSamplerType.value_list(), default=KSamplerType.EULER.value),
         'scheduler_name': Input(label="Scheduler", type="select", options=SchedulerType.value_list(), default=SchedulerType.SIMPLE.value),
         

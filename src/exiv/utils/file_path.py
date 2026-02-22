@@ -97,9 +97,13 @@ DOWNLOAD_MAP = {
         "type": "lora",
         "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Wan21_CausVid_14B_T2V_lora_rank32.safetensors"
     },
-    "wan_animate_relight_lora": {
+    "wan_animate_relight_lora.safetensors": {
         "type": "lora",
         "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/LoRAs/Wan22_relight/WanAnimate_relight_lora_fp16.safetensors"
+    },
+    "wan_animate_lightx_cfg_step_distill_lora.safetensors": {
+        "type": "lora",
+        "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Lightx2v/lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors"
     },
     "wan_2_1_vae.safetensors": {
         "type": "vae",

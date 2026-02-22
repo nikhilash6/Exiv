@@ -80,6 +80,8 @@ class App(BaseModel):
     inputs: dict[str, Input]
     outputs: List[Output]     
     handler: Any
+    frontend_assets: Optional[dict] = None
+    asset_root: Optional[str] = None
     
     def run_standalone(self):
         try:
