@@ -1,6 +1,6 @@
 # Overview
 
-Extensions are one of the most powerful ways to customize or enhance Exiv. At the moement it allows you to completely modify any method or inject new functionality in the core engine. 
+Extensions are one of the most powerful ways to customize or enhance Exiv. At the moment it allows you to completely modify any method or inject new functionality in the core engine. 
 
 ## What is an Extension?
 While an **App** uses the core engine to fulfill a high-level task (like text-to-video), an **Extension** adds new low-level features to the engine itself. You can check some examples below to get a better idea of the difference between an App and an Extension.

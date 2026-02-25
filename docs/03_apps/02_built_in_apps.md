@@ -12,5 +12,4 @@ To run any of the built-in applications natively:
 ```bash
 python apps/wan_video.py
 ```
-[complete this]
 Check the specific app files for their required CLI arguments or environment variables.

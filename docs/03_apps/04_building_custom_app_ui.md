@@ -4,7 +4,7 @@ Exiv Apps can define complex inputs that are automatically parsed into User Inte
 
 ## Standard Input Types
 
-When defining an `App` class, you define `Input` objects. These dictacte how a generic frontend UI will be rendered.
+When defining an `App` class, you define `Input` objects. These dictate how a generic frontend UI will be rendered.
 
 Example UI Inputs:
 
