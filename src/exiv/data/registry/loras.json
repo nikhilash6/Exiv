@@ -1,0 +1,56 @@
+{
+    "wan22_t2v_lightx2v_4steps_lora_v11_high_noise.safetensors": {
+        "type": "lora",
+        "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors",
+        "family":"Wan 2.2 TI2V",
+        "variant": "Lightx2v 4-steps High Noise",
+        "commercial_use": true,
+        "license": "Apache 2.0",
+        "repo": "https://github.com/Wan-Video/Wan2.2"
+    },
+    "wan22_t2v_lightx2v_4steps_lora_v11_low_noise.safetensors": {
+        "type": "lora",
+        "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors",
+        "family": "Wan 2.2 TI2V",
+        "variant": "Lightx2v 4-steps Low Noise",
+        "commercial_use": true,
+        "license": "Apache 2.0",
+        "repo": "https://github.com/Wan-Video/Wan2.2"
+    },
+    "wan21_causvid_bidirect2_T2V_1_3B_lora_rank32.safetensors": {
+        "type": "lora",
+        "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Wan21_CausVid_bidirect2_T2V_1_3B_lora_rank32.safetensors",
+        "family": "Wan 2.1 T2V",
+        "variant": "CausVid Bidirect Rank 32",
+        "commercial_use": true,
+        "license": "Apache 2.0",
+        "repo": "https://github.com/Wan-Video/Wan2.1"
+    },
+    "wan21_causvid_14B_T2V_lora_rank32.safetensors": {
+        "type": "lora",
+        "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Wan21_CausVid_14B_T2V_lora_rank32.safetensors",
+        "family": "Wan 2.1 T2V",
+        "variant": "CausVid 14B Rank 32",
+        "commercial_use": true,
+        "license": "Apache 2.0",
+        "repo": "https://github.com/Wan-Video/Wan2.1"
+    },
+    "wan_animate_relight_lora.safetensors": {
+        "type": "lora",
+        "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/LoRAs/Wan22_relight/WanAnimate_relight_lora_fp16.safetensors",
+        "family": "Wan 2.2 Animate",
+        "variant": "Relight fp16",
+        "commercial_use": true,
+        "license": "Apache 2.0",
+        "repo": "https://github.com/Wan-Video/Wan2.2"
+    },
+    "wan_animate_lightx_cfg_step_distill_lora.safetensors": {
+        "type": "lora",
+        "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Lightx2v/lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors",
+        "family": "Wan 2.2 Animate",
+        "variant": "Lightx2v CFG Distill Rank 64",
+        "commercial_use": true,
+        "license": "Apache 2.0",
+        "repo": "https://github.com/Wan-Video/Wan2.2"
+    }
+}

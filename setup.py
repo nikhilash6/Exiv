@@ -29,7 +29,9 @@ setup(
     extras_require={
         'dev': dev_deps,
     },
-    include_package_data=True,
+    package_data={
+        "exiv": ["data/registry/*.json"],
+    },
     entry_points={
         "console_scripts": [
             "exiv = exiv.main:cli"

@@ -50,6 +50,9 @@ copyparty-sfx.py
 /*.png
 /*.mp4
 
+# Docs
+/docs/manifest.json
+
 # Test files
 profile_data/*
 .pytest_cache

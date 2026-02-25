@@ -1,0 +1,110 @@
+{
+    "wan21_1_3B.safetensors": {
+        "type": "checkpoint",
+        "url": "https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B/resolve/main/diffusion_pytorch_model.safetensors?download=true",
+        "family": "Wan 2.1 T2V",
+        "variant": "1.3B fp16",
+        "commercial_use": true,
+        "license": "Apache 2.0",
+        "repo": "https://github.com/Wan-Video/Wan2.1"
+    },
+    "wan21_480p_i2v_fp16_14B.safetensors": {
+        "type": "checkpoint",
+        "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_i2v_480p_14B_fp16.safetensors",
+        "family": "Wan 2.1 I2V",
+        "variant": "14B 480p fp16",
+        "commercial_use": true,
+        "license": "Apache 2.0",
+        "repo": "https://github.com/Wan-Video/Wan2.1"
+    },
+    "wan21_480p_i2v_fp8_scaled_14B.safetensors": {
+        "type": "checkpoint",
+        "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_i2v_480p_14B_fp8_scaled.safetensors",
+        "family": "Wan 2.1 I2V",
+        "variant": "14B 480p fp8_scaled",
+        "commercial_use": true,
+        "license": "Apache 2.0",
+        "repo": "https://github.com/Wan-Video/Wan2.1"
+    },
+    "wan21_vace_1_3B_fp16.safetensors": {
+        "type": "checkpoint",
+        "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_vace_1.3B_fp16.safetensors",
+        "family": "Wan 2.1 VACE",
+        "variant": "1.3B fp16",
+        "commercial_use": true,
+        "license": "Apache 2.0",
+        "repo": "https://github.com/Wan-Video/Wan2.1"
+    },
+    "wan21_vace_14B_fp16.safetensors": {
+        "type": "checkpoint",
+        "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_vace_14B_fp16.safetensors",
+        "family": "Wan 2.1 VACE",
+        "variant": "14B fp16",
+        "commercial_use": true,
+        "license": "Apache 2.0",
+        "repo": "https://github.com/Wan-Video/Wan2.1"
+    },
+    "wan22_5B_ti2v_fp16.safetensors": {
+        "type": "checkpoint",
+        "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors?download=true",
+        "family": "Wan 2.2 TI2V",
+        "variant": "5B fp16",
+        "commercial_use": true,
+        "license": "Apache 2.0",
+        "repo": "https://github.com/Wan-Video/Wan2.2"
+    },
+    "wan22_i2v_high_noise_14B_fp16.safetensors": {
+        "type": "checkpoint",
+        "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp16.safetensors?download=true",
+        "family": "Wan 2.2 I2V",
+        "variant": "14B High Noise fp16",
+        "commercial_use": true,
+        "license": "Apache 2.0",
+        "repo": "https://github.com/Wan-Video/Wan2.2"
+    },
+    "wan22_i2v_high_noise_14B_fp8_scaled.safetensors": {
+        "type": "checkpoint",
+        "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors?download=true",
+        "family": "Wan 2.2 I2V",
+        "variant": "14B High Noise fp8_scaled",
+        "commercial_use": true,
+        "license": "Apache 2.0",
+        "repo": "https://github.com/Wan-Video/Wan2.2"
+    },
+    "wan22_i2v_low_noise_14B_fp16.safetensors": {
+        "type": "checkpoint",
+        "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp16.safetensors?download=true",
+        "family": "Wan 2.2 I2V",
+        "variant": "14B Low Noise fp16",
+        "commercial_use": true,
+        "license": "Apache 2.0",
+        "repo": "https://github.com/Wan-Video/Wan2.2"
+    },
+    "wan22_i2v_low_noise_14B_fp8_scaled.safetensors": {
+        "type": "checkpoint",
+        "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors?download=true",
+        "family": "Wan 2.2 I2V",
+        "variant": "14B Low Noise fp8_scaled",
+        "commercial_use": true,
+        "license": "Apache 2.0",
+        "repo": "https://github.com/Wan-Video/Wan2.2"
+    },
+    "wan22_animate_14b_bf16.safetensors": {
+        "type": "checkpoint",
+        "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_animate_14B_bf16.safetensors?download=true",
+        "family": "Wan 2.2 Animate",
+        "variant": "14B bf16",
+        "commercial_use": true,
+        "license": "Apache 2.0",
+        "repo": "https://github.com/Wan-Video/Wan2.2"
+    },
+    "wan22_animate_14b_fp8_e4m3_scaled.safetensors": {
+        "type": "checkpoint",
+        "url": "https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/resolve/main/Wan22Animate/Wan2_2-Animate-14B_fp8_e4m3fn_scaled_KJ.safetensors?download=true",
+        "family": "Wan 2.2 Animate",
+        "variant": "14B fp8_e4m3_scaled",
+        "commercial_use": true,
+        "license": "Apache 2.0",
+        "repo": "https://github.com/Wan-Video/Wan2.2"
+    }
+}

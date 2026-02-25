@@ -1,0 +1,11 @@
+{
+    "CLIP-ViT-H-fp16.safetensors": {
+        "type": "vision_encoder",
+        "url": "https://huggingface.co/Kijai/CLIPVisionModelWithProjection_fp16/resolve/main/CLIP-ViT-H-fp16.safetensors?download=true",
+        "family": "CLIP",
+        "variant": "ViT-H fp16",
+        "commercial_use": true,
+        "license": "MIT",
+        "repo": "https://github.com/openai/CLIP"
+    }
+}
