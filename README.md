@@ -72,3 +72,24 @@ pip install exiv
 
 **Q: Why contribute to Exiv?**  
 **A:** Since Exiv is still in its early stages, it's incredibly easy to grasp the core concepts of the codebase and make meaningful contributions right away. Because the project has a strong research focus, implementing novel methods or experimental optimizations here is a fantastic way to learn. Furthermore, your PRs are highly likely to be merged—I am very responsive, actively maintaining the project, and always excited to welcome new contributors!
+
+## 🙌 Acknowledgements
+
+A huge thank you to the open-source projects and developers whose incredible work laid the foundation for the AI image/video generation space. Exiv draws inspiration (and occasionally some math/logic adaptations) from:
+- [k-diffusion](https://github.com/crowsonkb/k-diffusion)
+- [Automatic1111 (A1111)](https://github.com/AUTOMATIC1111/stable-diffusion-webui)
+- [Forge WebUI](https://github.com/lllyasviel/stable-diffusion-webui-forge)
+- [Hugging Face Diffusers](https://github.com/huggingface/diffusers)
+- [ComfyUI](https://github.com/comfyanonymous/ComfyUI)
+
+And a special thanks to the broader **OSS AI community** for continuously pushing the boundaries of what is possible.
+
+## 📜 License
+
+This project is licensed under the **GNU General Public License v3.0 (GPLv3)**. 
+
+### What this means:
+- **Open Source Derivatives:** Any modifications or derivative works based on this project must also be distributed under the GPLv3 license and made open source.
+- **Attribution and Credit:** You must preserve all original copyright notices. Derivative works and distributions must prominently reference and give credit to **Exiv**. 
+
+For the full license text, please see the [LICENSE](./LICENSE) file in the root of this repository.
