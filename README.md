@@ -1,6 +1,11 @@
 <div align="center">
   <h1>
-    <img src="https://raw.githubusercontent.com/piyushK52/Exiv/main/public/favicon.svg" alt="" width="45" style="vertical-align: middle; margin-right: 10px;" /> Exiv
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/e1c60da9-d953-43b6-b353-ce0c8f12c68c">
+      <source media="(prefers-color-scheme: light)" srcset="https://github.com/user-attachments/assets/64a8424d-8a7a-4873-8840-35666bdff415">
+      <img src="https://github.com/user-attachments/assets/64a8424d-8a7a-4873-8840-35666bdff415" alt="" width="20" style="vertical-align: text-bottom; margin-right: 10px;" />
+    </picture>
+    <span style="vertical-align: middle;">Exiv</span>
   </h1>
 </div>
 
