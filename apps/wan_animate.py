@@ -55,7 +55,7 @@ def main(**params):
     if mode == WanAnimateMode.REPLACEMENT and (not bg_video_path or not mask_video_path):
         raise ValueError("Replacement mode requires Background Video and Mask Video.")
     
-    height, width, frame_count = 640, 640, 81
+    height, width, frame_count = 640, 640, 162
     frame_count = fix_frame_count(frame_count, 4)
     
     if context: context.start_anchor("Preprocessing", steps=6)
@@ -105,7 +105,7 @@ def main(**params):
     
     while generated_frames < frame_count:
         chunk_frames = bs if generated_frames == 0 else min(bs, frame_count - generated_frames + max_overlap)
-        current_offset = generated_frames - max_overlap if generated_frames > 0 else 0
+        current_offset = generated_frames
         current_overlap = max_overlap if generated_frames > 0 else 0
 
         cond_list = [
@@ -167,13 +167,13 @@ def main(**params):
     vae = get_vae(VAEType.WAN21.value, VAE_DTYPE, USE_VAE_TILING)
     out = vae.decode(out, (width, height, frame_count))
     # hardcoding rn will change later
-    if out.shape[2] > 8: out = out[:, :, 8:]
+    if out.shape[2] > 4: out = out[:, :, 4:]
     
     metadata = {
         "positive": pos_prompt, "seed": seed, "mode": mode,
         "model": "Wan2.2 Animate"
     }
-    out_paths = MediaProcessor.save_latents_to_media(out, metadata=metadata)
+    out_paths = MediaProcessor.save_latents_to_media(out, metadata=metadata, debug=True)
     return {"1": out_paths[0]}
 
 app = App(

@@ -284,7 +284,43 @@ class MediaProcessor:
         return video_tensor, metadata
     
     @staticmethod
-    def save_latents_to_media(out, metadata: Dict | None = None, subfolder: str | None = None, start_frame = 0, end_frame = None, media_type = "video"):
+    def _draw_debug_frame_numbers(video_formatted, start_frame: int):
+        import torch
+        from PIL import Image, ImageDraw, ImageFont
+        import numpy as np
+        
+        # font size = 5% of height or min 16
+        frame_height = video_formatted.shape[1]
+        font_size = max(16, int(frame_height * 0.05))
+        try:
+            font = ImageFont.load_default(size=font_size)
+        except TypeError:
+            # for older PIL versions
+            font = ImageFont.load_default()
+            
+        stroke_width = max(1, font_size // 15)
+        text_color = (0, 0, 0)
+        border_color = (255, 255, 255)
+
+        for f_idx in range(len(video_formatted)):
+            frame_np = video_formatted[f_idx].numpy()
+            img = Image.fromarray(frame_np)
+            draw = ImageDraw.Draw(img)
+            text = str(f_idx + start_frame)
+            
+            draw.text(
+                (10, 10), 
+                text, 
+                fill=text_color, 
+                font=font, 
+                stroke_width=stroke_width, 
+                stroke_fill=border_color
+            )
+            video_formatted[f_idx] = torch.from_numpy(np.array(img))
+        return video_formatted
+
+    @staticmethod
+    def save_latents_to_media(out, metadata: Dict | None = None, subfolder: str | None = None, start_frame = 0, end_frame = None, media_type = "video", fps=16, debug: bool = False):
         # TODO: make this a generic method, allowing saving images/audio/3d as well
         import torch
         video_tensor = out.sample if hasattr(out, "sample") else out
@@ -320,10 +356,14 @@ class MediaProcessor:
                 save_path = f"output_video_{i}.mp4"
                 save_path = get_numbered_filename(save_dir, save_path)
                 import torchvision
+
+                if debug:
+                    video_formatted = MediaProcessor._draw_debug_frame_numbers(video_formatted, start_frame)
+
                 torchvision.io.write_video(
                     save_path,
                     video_formatted,
-                    fps=24,
+                    fps=fps,
                     options={"crf": "25"}  # 'Constant Rate Factor' for quality (lower is better)
                 )
             
