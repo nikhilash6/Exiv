@@ -1,6 +1,7 @@
 import torch
 from torch import Tensor
 import torch.nn.functional as F
+from websocket import frame_buffer
 
 from exiv.components.enum import KSamplerType, SchedulerType, VAEType
 from exiv.components.cond_registry import preprocess_conds
@@ -102,28 +103,41 @@ def main(**params):
     
     wan_vae = get_vae(VAEType.WAN21.value, VAE_DTYPE, USE_VAE_TILING)
     latent_format = model_wrapper.model.model_arch_config.latent_format
-    latent = Latent() 
-    latent.encode_keyframe_condition( 
-        width, 
-        height,
-        frame_count, 
-        latent_format, 
-        wan_vae,
-    )
     
     if context: context.start_anchor("Sampling", steps=12)
-    sampler = KSampler(
-        wrapped_model=model_wrapper,
-        seed=seed,
-        total_steps=steps,
-        cfg=cfg,
-        sampler_name=sampler_name,
-        scheduler_name=scheduler_name,
-        batched_conditioning=batched_cond,
-        latent_image=latent
-    )
-    
-    out = sampler.run_sampling(callback=lambda i, s: progress_callback(i, s))
+    bs = 81
+    prev_latent_out = None
+    for i in range(0, frame_count, bs):
+        start, end = i, min(i+bs, frame_count)
+        latent = Latent() 
+        latent.encode_keyframe_condition( 
+            width, 
+            height,
+            end - start, 
+            latent_format, 
+            wan_vae,
+        )
+        # add temporal latent to continue the inbuilt 'sliding' logic
+        if prev_latent_out is not None:
+            new_list = []
+            for c in batched_cond.conds: 
+                c.extra["temporal_latent"] = prev_latent_out
+                c.extra["max_overlap"] = 5
+                new_list.append(c)
+            batched_cond.set_cond(new_list, reset=True)
+        
+        sampler = KSampler(
+            wrapped_model=model_wrapper,
+            seed=seed,
+            total_steps=steps,
+            cfg=cfg,
+            sampler_name=sampler_name,
+            scheduler_name=scheduler_name,
+            batched_conditioning=batched_cond,
+            latent_image=latent
+        )
+        out = sampler.run_sampling(callback=lambda i, s: progress_callback(i, s))
+        prev_latent_out = out
     
     wan_dit_model.to("cpu")
     del wan_dit_model, model_wrapper
