@@ -98,13 +98,13 @@ def main(**params):
     
     if context: context.start_anchor("Sampling", steps=12)
     bs = 81
-    max_overlap = 5
+    max_overlap = 8
     generated_frames = 0
-    all_latents = []
+    all_pixels = []
     temporal_latent_pixel = None
-    
     while generated_frames < frame_count:
         chunk_frames = bs if generated_frames == 0 else min(bs, frame_count - generated_frames + max_overlap)
+        chunk_frames = fix_frame_count(chunk_frames, 4)
         current_offset = generated_frames
         current_overlap = max_overlap if generated_frames > 0 else 0
 
@@ -144,30 +144,19 @@ def main(**params):
         )
         out = sampler.run_sampling(callback=lambda i, s: progress_callback(i, s))
         
-        overlap_latents = ((current_overlap - 1) // 4) + 1 if generated_frames > 0 else 0
-        if generated_frames > 0:
-            all_latents.append(out[:, :, overlap_latents:])
-        else:
-            all_latents.append(out)
-            
+        decoded_chunk = wan_vae.decode(out.to(dtype=VAE_DTYPE), (width, height, chunk_frames))
+        frames_to_clip = 8
+        all_pixels.append(decoded_chunk[:, :, frames_to_clip:])
         if generated_frames + chunk_frames - current_overlap < frame_count:
-            decoded_chunk = wan_vae.decode(out.to(dtype=VAE_DTYPE), (width, height, chunk_frames))
             temporal_latent_pixel = decoded_chunk[0, :, -max_overlap:].permute(1, 0, 2, 3) # [T, 3, H, W]
 
         generated_frames += chunk_frames if generated_frames == 0 else chunk_frames - max_overlap
 
-    out = torch.cat(all_latents, dim=2)
+    out = torch.cat(all_pixels, dim=2)
     
     wan_dit_model.to("cpu")
     del wan_dit_model, model_wrapper
     MemoryManager.clear_memory()
-    
-    if context: context.start_anchor("Decoding", steps=1)
-    out = out.to(dtype=VAE_DTYPE)
-    vae = get_vae(VAEType.WAN21.value, VAE_DTYPE, USE_VAE_TILING)
-    out = vae.decode(out, (width, height, frame_count))
-    # hardcoding rn will change later
-    if out.shape[2] > 4: out = out[:, :, 4:]
     
     metadata = {
         "positive": pos_prompt, "seed": seed, "mode": mode,

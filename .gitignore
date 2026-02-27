@@ -57,6 +57,7 @@ copyparty-sfx.py
 profile_data/*
 .pytest_cache
 .coverage
+.hist
 *.lprof
 *.safetensors
 *.ckpt

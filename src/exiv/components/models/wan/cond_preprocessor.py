@@ -321,7 +321,7 @@ def _process_wan_animate_aux(cond_list: List[Conditioning], model_wrapper, wan_v
             if aux_c.data is not None: continue
             if aux_c.type == AuxCondType.POSE_LATENTS:
                 video_path = aux_c.input_metadata
-                pose_video, _ = MediaProcessor.load_video(video_path, output_frames=False, fps=16)
+                pose_video, _ = MediaProcessor.load_video(video_path, output_frames=False)
                 pose_latents = None
                 
                 # pose_video is [C, T, H, W]
@@ -345,7 +345,7 @@ def _process_wan_animate_aux(cond_list: List[Conditioning], model_wrapper, wan_v
             elif aux_c.type == AuxCondType.FACE_PIXEL_VALUES:
                 if aux_c.data is not None: continue
                 video_path = aux_c.input_metadata
-                face_video, _ = MediaProcessor.load_video(video_path, output_frames=False, fps=16)
+                face_video, _ = MediaProcessor.load_video(video_path, output_frames=False)
                 
                 if face_video.shape[1] > current_frame_offset:
                     face_video = face_video[:, current_frame_offset:]
