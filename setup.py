@@ -19,7 +19,7 @@ dev_deps = read_requirements_file("requirements-dev")
 setup(
     name="exiv",
     version="0.1",
-    description="Fastest and lightest Gen AI backend!",
+    description="Modular & Extensible Gen AI backend!",
     long_description=open("README.md", "r", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
     author="Piyush Kumar",
