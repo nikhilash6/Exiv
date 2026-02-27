@@ -72,14 +72,17 @@ def main(**params):
     model_wrapper = ModelWrapper(model=wan_dit_model)
     # enable_step_caching(wan_dit_model)
     
-    def create_cond(group_name, prompt):
+    def create_cond(group_name, prompt, chunk_offset=0, temporal_latent_pixel=None, max_overlap=0):
         cond = Conditioning(
             group_name=group_name,
             input_metadata=prompt,
             extra={
                 "animate_mode": mode,
                 "background_video_path": bg_video_path,
-                "character_mask_path": mask_video_path
+                "character_mask_path": mask_video_path,
+                "frame_offset": chunk_offset,
+                "temporal_latent": temporal_latent_pixel,
+                "max_overlap": max_overlap
             }
         )
         cond.aux = [
@@ -90,41 +93,44 @@ def main(**params):
         ]
         return cond
 
-    cond_list = [create_cond("positive", pos_prompt), create_cond("negative", neg_prompt)]
-    batched_cond: BatchedConditioning = preprocess_conds(
-        model_wrapper=model_wrapper,
-        cond_list=cond_list,
-        height=height, 
-        width=width, 
-        frame_count=frame_count,
-        cfg=cfg,
-        progress_callback=lambda p, s: progress_callback(0.1 + p * 0.5, s)
-    )
-    
     wan_vae = get_vae(VAEType.WAN21.value, VAE_DTYPE, USE_VAE_TILING)
     latent_format = model_wrapper.model.model_arch_config.latent_format
     
     if context: context.start_anchor("Sampling", steps=12)
     bs = 81
-    prev_latent_out = None
-    for i in range(0, frame_count, bs):
-        start, end = i, min(i+bs, frame_count)
+    max_overlap = 5
+    generated_frames = 0
+    all_latents = []
+    temporal_latent_pixel = None
+    
+    while generated_frames < frame_count:
+        chunk_frames = bs if generated_frames == 0 else min(bs, frame_count - generated_frames + max_overlap)
+        current_offset = generated_frames - max_overlap if generated_frames > 0 else 0
+        current_overlap = max_overlap if generated_frames > 0 else 0
+
+        cond_list = [
+            create_cond("positive", pos_prompt, current_offset, temporal_latent_pixel, current_overlap),
+            create_cond("negative", neg_prompt, current_offset, temporal_latent_pixel, current_overlap)
+        ]
+        
+        batched_cond: BatchedConditioning = preprocess_conds(
+            model_wrapper=model_wrapper,
+            cond_list=cond_list,
+            height=height, 
+            width=width, 
+            frame_count=chunk_frames,
+            cfg=cfg,
+            progress_callback=lambda p, s: progress_callback(0.1 + p * 0.5, s)
+        )
+        
         latent = Latent() 
         latent.encode_keyframe_condition( 
             width, 
             height,
-            end - start, 
+            chunk_frames, 
             latent_format, 
             wan_vae,
         )
-        # add temporal latent to continue the inbuilt 'sliding' logic
-        if prev_latent_out is not None:
-            new_list = []
-            for c in batched_cond.conds: 
-                c.extra["temporal_latent"] = prev_latent_out
-                c.extra["max_overlap"] = 5
-                new_list.append(c)
-            batched_cond.set_cond(new_list, reset=True)
         
         sampler = KSampler(
             wrapped_model=model_wrapper,
@@ -137,7 +143,20 @@ def main(**params):
             latent_image=latent
         )
         out = sampler.run_sampling(callback=lambda i, s: progress_callback(i, s))
-        prev_latent_out = out
+        
+        overlap_latents = ((current_overlap - 1) // 4) + 1 if generated_frames > 0 else 0
+        if generated_frames > 0:
+            all_latents.append(out[:, :, overlap_latents:])
+        else:
+            all_latents.append(out)
+            
+        if generated_frames + chunk_frames - current_overlap < frame_count:
+            decoded_chunk = wan_vae.decode(out.to(dtype=VAE_DTYPE), (width, height, chunk_frames))
+            temporal_latent_pixel = decoded_chunk[0, :, -max_overlap:].permute(1, 0, 2, 3) # [T, 3, H, W]
+
+        generated_frames += chunk_frames if generated_frames == 0 else chunk_frames - max_overlap
+
+    out = torch.cat(all_latents, dim=2)
     
     wan_dit_model.to("cpu")
     del wan_dit_model, model_wrapper
