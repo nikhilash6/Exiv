@@ -8,6 +8,22 @@ from exiv.server.app_core import App, AppOutputType, Input, Output
 from exiv.utils.logging import app_logger
 from exiv.utils.file import MediaProcessor
 
+
+def create_dwpose_video(results, frames, dwpose_ext, detect_body, detect_hands, detect_face):
+    # 2. Process each frame
+    out_frames = []
+    for i, frame in enumerate(frames):
+        app_logger.info(f"Processing DWPose frame {i+1}/{len(frames)}")
+        out_tensor = dwpose_ext.process(image=frame, detect_body=detect_body, detect_hand=detect_hands, detect_face=detect_face)
+        out_frames.append(out_tensor)
+    
+    # 3. Stack and save results (T, C, H, W) -> (C, T, H, W) -> (1, C, T, H, W)
+    out_video = torch.stack(out_frames).permute(1, 0, 2, 3).unsqueeze(0)
+    output_paths = MediaProcessor.save_latents_to_media(out_video, media_type="video", subfolder="dwpose")
+    
+    results["actions_simulated"].append(f"DWPose video saved to: {output_paths[0]}")
+    app_logger.info(f"Pose video saved to {output_paths[0]}")
+
 def main(**params):
     """
     Main handler for the Extension Tester App.
@@ -17,19 +33,19 @@ def main(**params):
     # 1. Initialize the extension registry
     # This will load extensions defined in exiv_config.json
     registry = ExtensionRegistry.get_instance()
-    registry.initialize()
     
     # 2. Access the extensions by their IDs
-    dwpose_ext = registry.extensions.get("dwpose")
-    matanyone_ext = registry.extensions.get("matanyone")
+    dwpose_ext = registry.extensions.get("dwpose")()
+    matanyone_ext = registry.extensions.get("matanyone")()
     status_report = []
 
     # Inputs from UI/CLI
-    image_path = "./tests/test_utils/assets/media/boy_anime.jpg"
-    video_path = "input.mp4"
+    # image_path = "./tests/test_utils/assets/media/boy_anime.jpg"
+    image_path = "./ref_image.png"
+    video_path = "dialogue.mp4"
     run_dwpose = params.get("run_dwpose", False)
     run_matanyone = params.get("run_matanyone", False)
-
+    matanyone_output_type = params.get("matanyone_output_type", "black_background")
     results = {
         "extension_status": status_report,
         "actions_simulated": []
@@ -37,20 +53,27 @@ def main(**params):
 
     # Example of how DWPose would be called
     if run_dwpose and dwpose_ext:
-        if image_path and os.path.exists(image_path):
-            app_logger.info(f"[SIMULATION] Would run DWPose on: {image_path}")
-            image = MediaProcessor.load_image_list(image_path)[0]
-            out_tensor = dwpose_ext.process(image=image, detect_hand=True, detect_face=True)
-            out_tensor = out_tensor.unsqueeze(0).unsqueeze(2)
-            output_paths = MediaProcessor.save_latents_to_media(out_tensor, media_type="image")
-            results["actions_simulated"].append(f"DWPose saved to: {output_paths[0]}")
-            app_logger.info(f"Pose map saved to {output_paths[0]}") 
-        else:
-            app_logger.info("[SIMULATION] DWPose selected but no valid image_path provided.")
+        if video_path and os.path.exists(video_path):
+            app_logger.info(f"Running DWPose on video: {video_path}")
+            # 1. Load video frames
+            frames, metadata = MediaProcessor.load_video(video_path, output_frames=True, fps=16)
+            create_dwpose_video(results, frames, dwpose_ext, detect_body=True, detect_hands=True, detect_face=False)
+            create_dwpose_video(results, frames, dwpose_ext, detect_body=False, detect_hands=False, detect_face=True)
+            
+        # elif image_path and os.path.exists(image_path):
+        #     app_logger.info(f"[SIMULATION] Would run DWPose on: {image_path}")
+        #     image = MediaProcessor.load_image_list(image_path)[0]
+        #     out_tensor = dwpose_ext.process(image=image, detect_hand=True, detect_face=True)
+        #     out_tensor = out_tensor.unsqueeze(0).unsqueeze(2)
+        #     output_paths = MediaProcessor.save_latents_to_media(out_tensor, media_type="image")
+        #     results["actions_simulated"].append(f"DWPose saved to: {output_paths[0]}")
+        #     app_logger.info(f"Pose map saved to {output_paths[0]}") 
+        # else:
+        #     app_logger.info("[SIMULATION] DWPose selected but no valid input provided.")
 
     # Actual MatAnyone execution
     if run_matanyone and matanyone_ext:
-        video_path = "extensions/exiv_matanyone/sample_videos/sample_input.mp4"
+        # video_path = "extensions/exiv_matanyone/sample_videos/sample_input.mp4"
         if os.path.exists(video_path):
             app_logger.info(f"Running MatAnyone on: {video_path}")
             
@@ -80,13 +103,17 @@ def main(**params):
             preview_paths = MediaProcessor.save_latents_to_media(preview_tensor, media_type="image")
             app_logger.info(f"Segmentation preview saved to: {preview_paths[0]}")
 
-            # 3. Video Matting (limit to 10 frames for speed)
-            app_logger.info("Step 2: Running Video Matting (10 frames)...")
-            short_video = video_tensor[:, :10, :, :]
+            # 3. Video Matting
+            app_logger.info("Step 2: Running Video Matting (Full Video)...")
+            short_video = video_tensor
             matte_res = matanyone_ext.process(
                 mode="matte_video", 
                 video=short_video, 
-                mask=mask
+                mask=mask,
+                output_type=matanyone_output_type,
+                mask_padding=params.get("mask_padding", 10),
+                blocky_mask=params.get("blocky_mask", True),
+                binary_mask=True,
             )
             
             # 4. Save results (tensors already in correct format)
@@ -116,6 +143,22 @@ app = App(
         'run_matanyone': Input(
             label="Run MatAnyone", 
             type="boolean", 
+            default=True
+        ),
+        'matanyone_output_type': Input(
+            label="MatAnyone Output Type",
+            type="select",
+            options=["green_screen", "black_background"],
+            default="black_background"
+        ),
+        'mask_padding': Input(
+            label="MatAnyone Mask Padding",
+            type="integer",
+            default=10
+        ),
+        'blocky_mask': Input(
+            label="MatAnyone Blocky Mask",
+            type="boolean",
             default=True
         ),
     },

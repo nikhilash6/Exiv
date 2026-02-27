@@ -80,6 +80,8 @@ class App(BaseModel):
     inputs: dict[str, Input]
     outputs: List[Output]     
     handler: Any
+    frontend_assets: Optional[dict] = None
+    asset_root: Optional[str] = None
     
     def run_standalone(self):
         try:
@@ -92,10 +94,22 @@ class App(BaseModel):
         def mock_progress(p, msg):
             print(f"[{p:.0%}] {msg}")
 
+        def str2bool(v):
+            if isinstance(v, bool): return v
+            if v.lower() in ('yes', 'true', 't', 'y', '1'): return True
+            elif v.lower() in ('no', 'false', 'f', 'n', '0'): return False
+            else: raise argparse.ArgumentTypeError('Boolean value expected.')
+
         parser = argparse.ArgumentParser(description=self.name)
         
         for name, inp in self.inputs.items():
-            dtype = float if inp.type == "slider" else str
+            if inp.type == "slider" or inp.type == "number":
+                dtype = float
+            elif inp.type == "boolean":
+                dtype = str2bool
+            else:
+                dtype = str
+            
             parser.add_argument(f"--{name}", default=inp.default, type=dtype, help=inp.label)
 
         args = vars(parser.parse_args())

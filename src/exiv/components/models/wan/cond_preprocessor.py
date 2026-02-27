@@ -18,6 +18,8 @@ from ...vae.base import VAEBase, get_vae
 from ....model_utils.common_classes import AuxCondType, AuxConditioning, BatchedConditioning, Conditioning, ExtraCond, Latent, ModelWrapper
 from ....utils.common import fix_frame_count, null_func
 
+VAE_DTYPE = torch.float16
+
 is_vace_model = lambda model_type: model_type in [Model.WAN21_VACE_1_3B_R2V.value, Model.WAN21_VACE_14B_R2V.value]
 is_text_model = lambda model_type: model_type in [Model.WAN21_1_3B_T2V.value, Model.WAN22_5B_T2V.value, Model.WAN22_14B_TI2V.value] or is_vace_model(model_type)
 is_img_model = lambda model_type: not is_text_model(model_type)
@@ -32,11 +34,12 @@ class Wan21ModelArchConfig(ModelArchConfig):
         self.default_text_encoder = "umt5_xxl_fp16.safetensors"
         self.default_vision_encoder = "CLIP-ViT-H-fp16.safetensors"
         
-    def get_ref_latent(self, start_image, vae, length, width, height):
+    def get_ref_latent(self, image, vae, length, width, height):
+        # 16 ch VAE latent + 4 ch mask
         if is_text_model(self.model_type) and self.model_type != Model.WAN22_14B_TI2V.value: return None
-        start_image = common_upscale(start_image, width, height, "bilinear", "center")[0]
-        video = torch.ones((1, 3, length, height, width), device=start_image.device, dtype=start_image.dtype) * 0.5
-        video[:, :, 0, :, :] = start_image
+        image = common_upscale(image, width, height, "bilinear", "center")[0]
+        video = torch.ones((1, 3, length, height, width), device=image.device, dtype=image.dtype) * 0.5
+        video[:, :, 0, :, :] = image
         video = video.to(dtype=vae.dtype)
         concat_latent_image = vae.encode(video)
         concat_latent_image = self.latent_format.process_in(concat_latent_image)
@@ -48,11 +51,10 @@ class Wan21ModelArchConfig(ModelArchConfig):
                 concat_latent_image.shape[-2], 
                 concat_latent_image.shape[-1]
             ), 
-            device=start_image.device,
-            dtype=start_image.dtype
+            device=image.device,
+            dtype=image.dtype
         )
-        mask[:, :, :((start_image.shape[0] - 1) // vae.temporal_compression_ratio) + 1] = 1.0
-        
+        mask[:, :, :((image.shape[0] - 1) // vae.temporal_compression_ratio) + 1] = 1.0
         mask = mask.to(VRAM_DEVICE)
         concat_latent_image = concat_latent_image.to(VRAM_DEVICE)
         conditioning = torch.cat([mask, concat_latent_image], dim=1)
@@ -71,6 +73,88 @@ class Wan22ModelArchConfig(Wan21ModelArchConfig):
             self.latent_format = Wan22VAELatentFormat()
             self.default_vae_type = VAEType.WAN22.value
 
+class WanAnimateModelArchConfig(Wan21ModelArchConfig):
+    def __init__(self, model_type=Model.WAN22_14B_ANIMATE.value):
+        super().__init__(model_type)
+        self.model_type = model_type
+        self.latent_format = Wan21VAELatentFormat()
+        self.default_vae_type = VAEType.WAN21.value
+        self.default_text_encoder = "umt5_xxl_fp16.safetensors"
+        self.default_vision_encoder = "CLIP-ViT-H-fp16.safetensors"
+        
+    def get_ref_latent(self, image, vae, length, width, height, **kwargs):
+        # processing reference image input
+        # mask -- 1.0 = keep, 0.0 = generate
+        if image is None: image = torch.zeros(1, 3, 1, height, width)     # ref ch can't be left out
+        image = common_upscale(image[:length, :, :], width, height, "bilinear", "center")[0]
+        image = image.unsqueeze(2).to(VRAM_DEVICE)      # [B, C, T, H, W], T=1
+        ref_latent = vae.encode(image)
+        ref_latent = self.latent_format.process_in(ref_latent)
+        _, lat_ch, lat_t, lat_h, lat_w = ref_latent.shape  # [B, 16, t, h, w], t=1
+        ref_mask = torch.ones(1, 4, lat_t, lat_h, lat_w, device=image.device, dtype=image.dtype)   # [B, 4, t, h, w]; lat_t = length // 4 
+        # NOTE: mixing the ref_img with the pixel_video and jointly encoding can lead to the img
+        # bleeding into the subsequent frames (although wan vae handles this pretty well)
+        
+        # main video tensor (initialized to gray 0.5)
+        length -= image.shape[2]
+        pixel_video = torch.ones((length, 3, height, width), device=VRAM_DEVICE, dtype=VAE_DTYPE) * 0.5
+        pixel_mask = torch.zeros((length, 1, height, width), device=VRAM_DEVICE, dtype=VAE_DTYPE)  # [T, 1, H, W]
+        
+        # ----- temporal latents from the previous run
+        # NOTE: normal sliding ctx is a not applicable here, as the model requires
+        # pure temporal latents from the previous run
+        temporal_latent = kwargs.get("temporal_latent", None)   # [T1, C, H, W]
+        t_len = 0
+        if temporal_latent is not None:
+            t_len = min(length, temporal_latent.shape[0])
+            pixel_video[:t_len] = temporal_latent[:t_len]
+            pixel_mask[:t_len] = 1.0
+        
+        background_video_path, character_mask_path = kwargs.get("background_video_path", None), kwargs.get("character_mask_path", None)
+        start_idx = t_len
+        global_start_frame = kwargs.get("frame_offset", 0) + image.shape[2]  # image.shape[2] is 1 (ref frame)
+        if background_video_path:
+            bg_video, _ = MediaProcessor.load_video(background_video_path, output_frames=False) # [C, T, H, W]
+            bg_video = common_upscale(bg_video.permute(1, 0, 2, 3), width, height, "area", "center")[0].permute(1, 0, 2, 3)
+            
+            if bg_video.shape[1] > global_start_frame:
+                frames_to_copy = min(length - start_idx, bg_video.shape[1] - global_start_frame)
+                if frames_to_copy > 0:
+                    pixel_video[start_idx:start_idx + frames_to_copy] = \
+                        bg_video[:, global_start_frame:global_start_frame + frames_to_copy].permute(1, 0, 2, 3).to(VRAM_DEVICE, dtype=VAE_DTYPE)
+
+        if character_mask_path:
+            mask_video, _ = MediaProcessor.load_video(character_mask_path, output_frames=False) # [C, T, H, W]
+            mask_video = common_upscale(mask_video.permute(1, 0, 2, 3), width, height, "nearest", "center")[0].permute(1, 0, 2, 3)
+            
+            if mask_video.shape[1] > global_start_frame:
+                frames_to_copy = min(length - start_idx, mask_video.shape[1] - global_start_frame)
+                if frames_to_copy > 0:
+                    m = mask_video[0:1, global_start_frame:global_start_frame + frames_to_copy].permute(1, 0, 2, 3)
+                    # invert mask: input 1.0 (character) -> 0.0 (generate), input 0.0 (bg) -> 1.0 (keep)
+                    pixel_mask[start_idx:start_idx + frames_to_copy] = 1.0 - m.to(VRAM_DEVICE, dtype=VAE_DTYPE)
+        
+        # encode latent
+        pixel_video_b = pixel_video.permute(1, 0, 2, 3).unsqueeze(0) # [1, 3, T, H, W]
+        latents = vae.encode(pixel_video_b) # [1, 16, t, h, w]
+        latents = self.latent_format.process_in(latents)
+        
+        # reshape mask, [1, 1, T*4, H, W] -> [1, 4, T, H, W]
+        mask_resized = common_upscale(pixel_mask, lat_w, lat_h, upscale_method="nearest-exact", crop="center")[0]   # [T, 1, h, w]
+        target_frames = latents.shape[2] * 4
+        current_frames = mask_resized.shape[0]
+        if current_frames < target_frames:
+            padding_needed = target_frames - current_frames
+            last_frame = mask_resized[-1:].repeat(padding_needed, 1, 1, 1)
+            mask_resized = torch.cat([mask_resized, last_frame], dim=0)
+        mask_final = mask_resized.view(1, 1, latents.shape[2], 4, lat_h, lat_w)   # [1, 1, t, 4, h, w]
+        mask_final = mask_final.permute(0, 1, 3, 2, 4, 5).squeeze(1)            # [1, 1, 4, t, h, w] -> [1, 4, t, h, w]
+        
+        full_mask = torch.cat([ref_mask, mask_final], dim=2)
+        full_latent = torch.cat([ref_latent, latents], dim=2)
+        concat = torch.cat([full_mask, full_latent], dim=1)
+        return concat
+                
 def _process_vace_keyframes(cond: Conditioning, height: int, width: int, frame_count: int):
     found_idx = -1      # first keyframe aux conditioning index
     for i, aux_c in enumerate(cond.aux):
@@ -190,7 +274,6 @@ def _process_vace_context(cond_list: List[Conditioning], wrapper: ModelWrapper, 
                 aux_c.data = final
         c.extra[ExtraCond.EXTRA_LATENT_FRAMES] = extra_frames       
     
-
 def _process_visual_embeddings(cond_list, model_wrapper, height, width, progress_callback):
     pending_embeds = []
     for c in cond_list:
@@ -213,26 +296,91 @@ def _process_ref_latents(cond_list, model_wrapper, wan_vae, height, width, frame
     for c in cond_list:
         for aux_c in c.aux:
             if aux_c.type == AuxCondType.REF_LATENT and aux_c.data is None:
-                if (img:=get_image_tensor(aux_c.input_metadata, height, width)) is not None:
-                    data = model_wrapper.model.model_arch_config.get_ref_latent(
-                        start_image=img,
-                        vae=wan_vae,
-                        length=frame_count,
-                        height=height,
-                        width=width,
-                    )
-                    aux_c.data = data
+                img = get_image_tensor(img_path, height, width) if (img_path:=aux_c.input_metadata) is not None else None
+                data = model_wrapper.model.model_arch_config.get_ref_latent(
+                    image=img,
+                    vae=wan_vae,
+                    length=frame_count,
+                    height=height,
+                    width=width,
+                    **c.extra
+                )
+                aux_c.data = data
+
+def _process_wan_animate_aux(cond_list: List[Conditioning], model_wrapper, wan_vae, height, width, frame_count, progress_callback):
+    for c in cond_list:
+        current_frame_offset = c.extra.get("frame_offset", 0)       # 0, 10, 20 ...
+        temporal_latent = c.extra.get("temporal_latent", None)
+        max_overlap = c.extra.get("max_overlap", 10)
+        if temporal_latent is not None:
+            temporal_latent = temporal_latent[-max_overlap:]
+            current_frame_offset -= temporal_latent.shape[0]
+            current_frame_offset = max(0, current_frame_offset)
+        
+        for aux_c in c.aux:
+            if aux_c.data is not None: continue
+            if aux_c.type == AuxCondType.POSE_LATENTS:
+                video_path = aux_c.input_metadata
+                pose_video, _ = MediaProcessor.load_video(video_path, output_frames=False)
+                pose_latents = None
+                
+                # pose_video is [C, T, H, W]
+                if pose_video.shape[1] > current_frame_offset:
+                    pose_video = pose_video[:, current_frame_offset:]
+                    
+                    if pose_video.shape[1] < frame_count:
+                         last_frame = pose_video[:, -1:, :, :]
+                         repeats = frame_count - pose_video.shape[1]
+                         padding = last_frame.repeat(1, repeats, 1, 1)
+                         pose_video = torch.cat([pose_video, padding], dim=1)
+                    
+                    pose_video = pose_video[:, :frame_count]
+                    pose_video = common_upscale(pose_video.permute(1, 0, 2, 3), width, height, "area", "center")[0].permute(1, 0, 2, 3)
+                    pose_video_b = pose_video.unsqueeze(0).to(VRAM_DEVICE, dtype=torch.float16) # TODO: dynamic dtype
+                    pose_latents = wan_vae.encode(pose_video_b)
+                    if model_wrapper.model.model_arch_config.latent_format:
+                        pose_latents = model_wrapper.model.model_arch_config.latent_format.process_in(pose_latents)
+                aux_c.data = pose_latents
+
+            elif aux_c.type == AuxCondType.FACE_PIXEL_VALUES:
+                if aux_c.data is not None: continue
+                video_path = aux_c.input_metadata
+                face_video, _ = MediaProcessor.load_video(video_path, output_frames=False)
+                
+                if face_video.shape[1] > current_frame_offset:
+                    face_video = face_video[:, current_frame_offset:]
+                    
+                    if face_video.shape[1] < frame_count:
+                         last_frame = face_video[:, -1:, :, :]
+                         repeats = frame_count - face_video.shape[1]
+                         padding = last_frame.repeat(1, repeats, 1, 1)
+                         face_video = torch.cat([face_video, padding], dim=1)
+                         
+                    face_video = face_video[:, :frame_count]
+                    face_video = common_upscale(face_video.permute(1, 0, 2, 3), 512, 512, "area", "center")[0].permute(1, 0, 2, 3)
+                    face_video = face_video.unsqueeze(0).to(VRAM_DEVICE, dtype=torch.float16)
+                    scale = 2.0 if c.group_name == "positive" else 0.0      # NOTE: hardcoding group name, 0 for negative
+                    face_video = face_video * scale - 1.0 # Normalize to [-1, 1]
+                else:
+                    face_video = None
+                    
+                aux_c.data = face_video
 
 def process_auxiliaries(cond_list: List[Conditioning], wrapper: ModelWrapper, wan_vae, height, width, frame_count, progress_callback):
     if wrapper.model.model_type in [Model.WAN21_VACE_14B_R2V.value, Model.WAN21_VACE_1_3B_R2V.value]:
         for cond in cond_list: _process_vace_keyframes(cond, height, width, frame_count)
         _process_vace_context(cond_list, wrapper, wan_vae, height, width, frame_count, progress_callback)
+    elif wrapper.model.model_type == Model.WAN22_14B_ANIMATE.value:
+        _process_visual_embeddings(cond_list, wrapper, height, width, progress_callback)
+        _process_ref_latents(cond_list, wrapper, wan_vae, height, width, frame_count, progress_callback)
+        _process_wan_animate_aux(cond_list, wrapper, wan_vae, height, width, frame_count, progress_callback)
     else:
         _process_visual_embeddings(cond_list, wrapper, height, width, progress_callback)
         _process_ref_latents(cond_list, wrapper, wan_vae, height, width, frame_count, progress_callback)
 
 @register_preprocessor(Model.WAN21_VACE_14B_R2V.value)
 @register_preprocessor(Model.WAN21_VACE_1_3B_R2V.value)
+@register_preprocessor(Model.WAN22_14B_ANIMATE.value)
 @register_preprocessor(Model.WAN22_14B_TI2V.value)
 @register_preprocessor(Model.WAN22_5B_T2V.value)
 @register_preprocessor(Model.WAN21_14B_TI2V.value)

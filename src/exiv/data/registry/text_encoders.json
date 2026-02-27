@@ -1,0 +1,11 @@
+{
+    "umt5_xxl_fp16.safetensors": {
+        "type": "text_encoder",
+        "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp16.safetensors?download=true",
+        "family": "T5",
+        "variant": "UMT5 XXL fp16",
+        "commercial_use": true,
+        "license": "Apache 2.0",
+        "repo": "https://github.com/google-research/text-to-text-transfer-transformer"
+    }
+}

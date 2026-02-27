@@ -113,6 +113,8 @@ class Model(ExtendedEnum):
     # supports multiple ref types
     WAN21_VACE_1_3B_R2V = "wan21_1_3b_vace_r2v"
     WAN21_VACE_14B_R2V = "wan21_14b_vace_r2v"
+    
+    WAN22_14B_ANIMATE = "wan22_14b_animate"
 
     # ------------- QWEN Models -------------
     QWEN_IMAGE = "qwen_image"

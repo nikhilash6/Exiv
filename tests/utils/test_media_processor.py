@@ -1,14 +1,76 @@
-import torch
-
 import unittest
 import os
 import shutil
 import tempfile
+import torch
 import av
 from PIL import Image
 from fractions import Fraction
-
 from exiv.utils.file import MediaProcessor, FilePaths
+
+class TestMediaProcessorFPS(unittest.TestCase):
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+        self.video_path = os.path.join(self.test_dir, "test_fps.mp4")
+        self._create_dummy_video(self.video_path, fps=24, duration_sec=2)
+
+    def tearDown(self):
+        if os.path.exists(self.test_dir):
+            shutil.rmtree(self.test_dir)
+
+    def _create_dummy_video(self, path, fps, duration_sec):
+        # Create a video with distinct frames (color changing) to verify sampling if needed
+        # For now, just ensuring frame counts is enough
+        total_frames = int(fps * duration_sec)
+        with av.open(path, mode='w') as container:
+            stream = container.add_stream('libx264', rate=fps)
+            stream.width = 64
+            stream.height = 64
+            stream.pix_fmt = 'yuv420p'
+            stream.time_base = Fraction(1, fps)
+            
+            for i in range(total_frames):
+                frame = av.VideoFrame(64, 64, 'rgb24')
+                frame.pts = i
+                # frame.time_base = stream.time_base # PyAV handles this usually
+                for packet in stream.encode(frame):
+                    container.mux(packet)
+            
+            for packet in stream.encode():
+                container.mux(packet)
+
+    def test_load_video_original_fps(self):
+        """Test loading video without specifying FPS (should keep original)"""
+        frames, meta = MediaProcessor.load_video(self.video_path)
+        self.assertAlmostEqual(meta['fps'], 24.0, delta=0.1)
+        # 2 seconds @ 24fps = 48 frames
+        self.assertEqual(len(frames), 48)
+        self.assertEqual(meta['loaded_frames'], 48)
+
+    def test_load_video_downsample(self):
+        """Test downsampling video to half FPS"""
+        target_fps = 12.0
+        frames, meta = MediaProcessor.load_video(self.video_path, fps=target_fps)
+        self.assertEqual(meta['fps'], target_fps)
+        # 2 seconds @ 12fps = 24 frames
+        # Allowing +/- 1 frame tolerance due to rounding/alignment
+        self.assertTrue(23 <= len(frames) <= 25, f"Expected ~24 frames, got {len(frames)}")
+
+    def test_load_video_upsample(self):
+        """Test upsampling video to double FPS"""
+        target_fps = 48.0
+        frames, meta = MediaProcessor.load_video(self.video_path, fps=target_fps)
+        self.assertEqual(meta['fps'], target_fps)
+        # 2 seconds @ 48fps = 96 frames
+        self.assertTrue(95 <= len(frames) <= 97, f"Expected ~96 frames, got {len(frames)}")
+
+    def test_load_video_limit_frames(self):
+        """Test limiting frame count with FPS resampling"""
+        target_fps = 12.0
+        limit = 10
+        frames, meta = MediaProcessor.load_video(self.video_path, fps=target_fps, limit_frame_count=limit)
+        self.assertEqual(len(frames), limit)
+        self.assertEqual(meta['loaded_frames'], limit)
 
 class TestMediaProcessorIntegration(unittest.TestCase):
     def setUp(self):

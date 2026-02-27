@@ -39,7 +39,8 @@ venv/
 input/
 output/
 /models/
-/extensions
+/extensions/*
+!/extensions/ext_list.txt
 note.md
 temp.py
 apps/dummy_test.py
@@ -49,10 +50,14 @@ copyparty-sfx.py
 /*.png
 /*.mp4
 
+# Docs
+/docs/manifest.json
+
 # Test files
 profile_data/*
 .pytest_cache
 .coverage
+.hist
 *.lprof
 *.safetensors
 *.ckpt

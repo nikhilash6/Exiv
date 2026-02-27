@@ -1,7 +1,11 @@
-from dataclasses import dataclass
 import os
+import json
+import glob
+from dataclasses import dataclass
 from typing import List, Dict, Union, Optional
+import logging
 
+logger = logging.getLogger(__name__)
 
 # TODO: not properly tested in a multi root paths scenario
 
@@ -23,81 +27,34 @@ DEFAULT_MAPPING = {
         "output":          ["output"]
 }
 
-# TODO: separate this in a file if the list becomes large
-DOWNLOAD_MAP = {
-    "umt5_xxl_fp16.safetensors": {
-        "type": "text_encoder",
-        "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp16.safetensors?download=true"
-    },
-    "CLIP-ViT-H-fp16.safetensors": {
-        "type": "vision_encoder",
-        "url": "https://huggingface.co/Kijai/CLIPVisionModelWithProjection_fp16/resolve/main/CLIP-ViT-H-fp16.safetensors?download=true"
-    },
-    "wan21_1_3B.safetensors": {
-        "type": "checkpoint",
-        "url": "https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B/resolve/main/diffusion_pytorch_model.safetensors?download=true"
-    },
-    "wan21_480p_i2v_fp16_14B.safetensors": {
-        "type": "checkpoint",
-        "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_i2v_480p_14B_fp16.safetensors"
-    },
-    "wan21_480p_i2v_fp8_scaled_14B.safetensors": {
-        "type": "checkpoint",
-        "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_i2v_480p_14B_fp8_scaled.safetensors"
-    },
-    "wan21_vace_1_3B_fp16.safetensors": {
-        "type": "checkpoint",
-        "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_vace_1.3B_fp16.safetensors",
-    },
-    "wan21_vace_14B_fp16.safetensors": {
-        "type": "checkpoint",
-        "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_vace_14B_fp16.safetensors",
-    },
-    "wan22_5B_ti2v_fp16.safetensors": {
-        "type": "checkpoint",
-        "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors?download=true"
-    },
-    "wan22_i2v_high_noise_14B_fp16.safetensors": {
-        "type": "checkpoint",
-        "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp16.safetensors?download=true"
-    },
-    "wan22_i2v_high_noise_14B_fp8_scaled.safetensors": {
-        "type": "checkpoint",
-        "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors?download=true"
-    },
-    "wan22_i2v_low_noise_14B_fp16.safetensors": {
-        "type": "checkpoint",
-        "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp16.safetensors?download=true"
-    },
-    "wan22_i2v_low_noise_14B_fp8_scaled.safetensors": {
-        "type": "checkpoint",
-        "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors?download=true"
-    },
-    "wan22_t2v_lightx2v_4steps_lora_v11_high_noise.safetensors": {
-        "type": "lora",
-        "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors"
-    },
-    "wan22_t2v_lightx2v_4steps_lora_v11_low_noise.safetensors": {
-        "type": "lora",
-        "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors"
-    },
-    "wan21_causvid_bidirect2_T2V_1_3B_lora_rank32.safetensors": {
-        "type": "lora",
-        "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Wan21_CausVid_bidirect2_T2V_1_3B_lora_rank32.safetensors"
-    },
-    "wan21_causvid_14B_T2V_lora_rank32.safetensors": {
-        "type": "lora",
-        "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Wan21_CausVid_14B_T2V_lora_rank32.safetensors"
-    },
-    "wan_2_1_vae.safetensors": {
-        "type": "vae",
-        "url": "https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-720P-Diffusers/resolve/main/vae/diffusion_pytorch_model.safetensors?download=true"
-    },
-    "wan_2_2_vae.safetensors": {
-        "type": "vae",
-        "url": "https://huggingface.co/wangkanai/wan22-vae/resolve/main/vae/wan/wan22-vae.safetensors?download=true"
-    }
-}
+def load_download_map() -> Dict[str, Dict[str, str]]:
+    """
+    Loads model download metadata from JSON files in the src/exiv/data/registry/ directory.
+    """
+    # Registry is in the src/exiv/data/registry/ folder
+    # file_path.py is in src/exiv/utils/, so we go up 1 level to reach src/exiv/
+    pkg_root = os.path.dirname(os.path.dirname(__file__))
+    registry_dir = os.path.join(pkg_root, "data", "registry")
+    
+    # Fallback: check if it's in the current working directory (useful for dev/hub)
+    if not os.path.exists(registry_dir):
+        registry_dir = os.path.join(os.getcwd(), "data", "registry")
+
+    download_map = {}
+    if os.path.exists(registry_dir):
+        json_files = glob.glob(os.path.join(registry_dir, "*.json"))
+        for json_file in sorted(json_files):
+            try:
+                with open(json_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    download_map.update(data)
+            except Exception as e:
+                # Using print as fallback if logger is not yet configured or causes issues
+                print(f"Error loading registry file {json_file}: {e}")
+                
+    return download_map
+
+DOWNLOAD_MAP = load_download_map()
 
 @dataclass
 class FilePathData:

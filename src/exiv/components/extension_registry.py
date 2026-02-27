@@ -18,6 +18,7 @@ class ExtensionRegistry:
     def __init__(self):
         # maps ID -> extension manifest instance
         self.extensions: Dict[str, Extension] = {}
+        self._initialized = False
         
     @classmethod
     def get_instance(cls):
@@ -26,7 +27,29 @@ class ExtensionRegistry:
             cls._instance.initialize()
             cls._instance.execute_all_extensions()
         return cls._instance
-    
+
+    def _setup_extension_namespace(self, full_module_name: str, path: str):
+        """
+        Ensures the parent namespaces exist as packages and returns a module spec.
+        """
+        import types
+        # ensure parent packages exist so the dotted name is valid (e.g., 'exiv.ext.inspect')
+        parts = full_module_name.split('.')[:-1]
+        for i in range(len(parts)):
+            part_name = ".".join(parts[:i+1])
+            if part_name not in sys.modules:
+                sys.modules[part_name] = types.ModuleType(part_name)
+                sys.modules[part_name].__path__ = []
+            elif not hasattr(sys.modules[part_name], "__path__"):
+                # ensure it's treated as a package even if it already exists
+                sys.modules[part_name].__path__ = []
+
+        entry_path = os.path.join(path, EXTENSION_ENTRYPOINT)
+        spec = importlib.util.spec_from_file_location(full_module_name, entry_path)
+        if spec:
+            spec.submodule_search_locations = [path]
+        return spec, entry_path
+
     @classmethod
     def load_config(cls, config_file: Path) -> dict:
         if not config_file.exists():
@@ -70,20 +93,8 @@ class ExtensionRegistry:
         try:
             # consistent namespace: exiv.ext.<module_name>
             full_module_name = f"exiv.ext.{module_name}"
+            spec, _ = self._setup_extension_namespace(full_module_name, path)
             
-            # Ensure parent packages exist so the dotted name is valid
-            import types
-            if "exiv" not in sys.modules:
-                sys.modules["exiv"] = types.ModuleType("exiv")
-            if "exiv.ext" not in sys.modules:
-                sys.modules["exiv.ext"] = types.ModuleType("exiv.ext")
-
-            # using spec_from_file_location is safer for arbitrary paths
-            entry_path = os.path.join(path, EXTENSION_ENTRYPOINT)
-            spec = importlib.util.spec_from_file_location(full_module_name, entry_path)
-            
-            # mark as a package to allow relative imports
-            if spec: spec.submodule_search_locations = [path]
             if spec and spec.loader:
                 module = importlib.util.module_from_spec(spec)
                 # registering so imports like 'import exiv.ext.foo' work
@@ -94,7 +105,7 @@ class ExtensionRegistry:
                         attr = getattr(module, attr_name)
                         if isinstance(attr, type) and issubclass(attr, Extension) and attr is not Extension:
                             if attr.ID in self.extensions:
-                                app_logger.warning(f"Extension {attr.ID} already registered. Skipping reload from {path}")
+                                app_logger.debug(f"Extension {attr.ID} already registered. Skipping reload from {path}")
                                 return
                             self.extensions[attr.ID] = attr
                             app_logger.debug(f"Registered extension: {attr.ID}")
@@ -133,6 +144,9 @@ class ExtensionRegistry:
         """
         Loads built-in extensions and user-registered extensions.
         """
+        if self._initialized:
+            return
+            
         # loading built-in extensions
         current_dir = os.path.dirname(os.path.abspath(__file__))
         builtin_dir = os.path.abspath(os.path.join(current_dir, "..", "extensions"))
@@ -142,6 +156,7 @@ class ExtensionRegistry:
         abs_paths = self.get_all_registered_paths(absolute_path=True)
         for p in abs_paths: self.load_single_extension(p)
         
+        self._initialized = True
     def get_all_registered_paths(self, absolute_path=False) -> List[str]:
         """
         Returns the paths to all the extensions registered / installed.
@@ -172,7 +187,7 @@ class ExtensionRegistry:
 
         try:
             module_name = f"exiv.ext.inspect.{os.path.basename(path)}"
-            spec = importlib.util.spec_from_file_location(module_name, entry_path)
+            spec, _ = self._setup_extension_namespace(module_name, path)
 
             if spec and spec.loader:
                 module = importlib.util.module_from_spec(spec)

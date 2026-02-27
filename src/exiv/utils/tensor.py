@@ -41,9 +41,9 @@ def prepare_noise(latent_image: torch.Tensor, seed: int | None = None, noise_ind
             shape=latent_image.size(),
             generator=generator,
             device=latent_image.device,
-            dtype=latent_image.dtype,
+            dtype=torch.float32,
             layout=latent_image.layout,
-        )
+        ).to(dtype=latent_image.dtype)
 
     unique_inds, inverse = np.unique(noise_inds, return_inverse=True)
     noises = []
@@ -53,9 +53,9 @@ def prepare_noise(latent_image: torch.Tensor, seed: int | None = None, noise_ind
             shape=(1,) + tuple(latent_image.shape[1:]),
             generator=generator,
             device=latent_image.device,
-            dtype=latent_image.dtype,
+            dtype=torch.float32,
             layout=latent_image.layout,
-        )
+        ).to(dtype=latent_image.dtype)
         if i in unique_inds:
             noises.append(noise)
 
@@ -191,7 +191,7 @@ def lanczos(samples, width, height):
     result = torch.stack(images)
     return result.to(samples.device, samples.dtype)
 
-def common_upscale(samples: List[Tensor] | Tensor, width, height, upscale_method = "lanczos", crop = "center") -> List[Tensor]:
+def common_upscale(samples: List[Tensor] | Tensor, width, height, upscale_method = "lanczos", crop = "center", padding_color = 0) -> List[Tensor]:
     if not isinstance(samples, list): samples = [samples]
     output = []
     for sample in samples:
@@ -201,6 +201,8 @@ def common_upscale(samples: List[Tensor] | Tensor, width, height, upscale_method
             sample = sample.reshape(sample.shape[0], sample.shape[1], -1, sample.shape[-2], sample.shape[-1])
             sample = sample.movedim(2, 1)
             sample = sample.reshape(-1, orig_shape[1], orig_shape[-2], orig_shape[-1])
+        
+        target_w, target_h = width, height
         if crop == "center":
             old_width = sample.shape[-1]
             old_height = sample.shape[-2]
@@ -213,15 +215,40 @@ def common_upscale(samples: List[Tensor] | Tensor, width, height, upscale_method
             elif old_aspect < new_aspect:
                 y = round((old_height - old_height * (old_aspect / new_aspect)) / 2)
             s = sample.narrow(-2, y, old_height - y * 2).narrow(-1, x, old_width - x * 2)
+        elif crop == "pad":
+            old_width = sample.shape[-1]
+            old_height = sample.shape[-2]
+            scale = min(width / old_width, height / old_height)
+            target_w = round(old_width * scale)
+            target_h = round(old_height * scale)
+            s = sample
         else:
             s = sample
 
         if upscale_method == "bislerp":
-            out = bislerp(s, width, height)
+            out = bislerp(s, target_w, target_h)
         elif upscale_method == "lanczos":
-            out = lanczos(s, width, height)
+            out = lanczos(s, target_w, target_h)
         else:
-            out = torch.nn.functional.interpolate(s, size=(height, width), mode=upscale_method)
+            out = torch.nn.functional.interpolate(s, size=(target_h, target_w), mode=upscale_method)
+
+        if crop == "pad":
+            pad_h = height - target_h
+            pad_w = width - target_w
+            pad_top = pad_h // 2
+            pad_bottom = pad_h - pad_top
+            pad_left = pad_w // 2
+            pad_right = pad_w - pad_left
+
+            if isinstance(padding_color, (list, tuple)) and len(padding_color) == out.shape[1]:
+                canvas = torch.zeros((out.shape[0], out.shape[1], height, width), dtype=out.dtype, device=out.device)
+                for i, c in enumerate(padding_color):
+                    canvas[:, i, :, :] = c
+                canvas[:, :, pad_top:pad_top+target_h, pad_left:pad_left+target_w] = out
+                out = canvas
+            else:
+                val = padding_color if isinstance(padding_color, (int, float)) else 0
+                out = torch.nn.functional.pad(out, (pad_left, pad_right, pad_top, pad_bottom), value=val)
 
         if len(orig_shape) == 4:
             output.append(out)
