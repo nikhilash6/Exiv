@@ -1,6 +1,7 @@
 import unittest
 import subprocess
 import os
+import sys
 
 # Point to the assets folder
 TEST_APPS_DIR = "tests/test_utils/assets/apps"
@@ -11,7 +12,7 @@ class CLITest(unittest.TestCase):
         env["EXIV_APPS_DIR"] = TEST_APPS_DIR
         
         result = subprocess.run(
-            ["exiv", "run", "success_app"],
+            [sys.executable, "-m", "exiv.main", "run", "success_app"],
             capture_output=True,
             text=True,
             check=False,
@@ -27,7 +28,7 @@ class CLITest(unittest.TestCase):
         env["EXIV_APPS_DIR"] = TEST_APPS_DIR
         
         result = subprocess.run(
-            ["exiv", "run", "fail_app"],
+            [sys.executable, "-m", "exiv.main", "run", "fail_app"],
             capture_output=True,
             text=True,
             check=False,

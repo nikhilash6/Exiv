@@ -72,16 +72,18 @@ class TestMediaProcessorFPS(unittest.TestCase):
         self.assertEqual(len(frames), limit)
         self.assertEqual(meta['loaded_frames'], limit)
 
+import unittest.mock
+
 class TestMediaProcessorIntegration(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
-        self.original_output_dir = FilePaths.OUTPUT_DIRECTORY
-        FilePaths.OUTPUT_DIRECTORY = self.test_dir
+        self.patcher = unittest.mock.patch('exiv.utils.file.FilePaths.get_output_directory', return_value=self.test_dir)
+        self.patcher.start()
 
     def tearDown(self):
         if os.path.exists(self.test_dir):
             shutil.rmtree(self.test_dir)
-        FilePaths.OUTPUT_DIRECTORY = self.original_output_dir
+        self.patcher.stop()
 
     def _create_dummy_video(self, path):
         with av.open(path, mode='w') as container:
