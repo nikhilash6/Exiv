@@ -5,7 +5,9 @@ import threading
 from glob import glob
 import traceback
 from typing import Any, Dict
-from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+import shutil
+import uuid
+from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.responses import FileResponse
 
 from .app_core import App, TaskContext
@@ -182,6 +184,41 @@ def get_extensions():
 @app.get("/api/apps")
 def get_apps():
     return [app.model_dump(exclude={"handler"}) for app in APP_REGISTRY.values()]
+
+import hashlib
+
+@app.post("/api/upload")
+async def upload_file(file: UploadFile = File(...)):
+    """
+    Uploads a file to the server's temp directory and returns the absolute path.
+    Uses SHA256 hash of content to avoid redundant copies.
+    """
+    try:
+        # read content to hash it
+        content = await file.read()
+        file_hash = hashlib.sha256(content).hexdigest()
+        
+        # temp directory for upload
+        upload_dir = os.path.join(FilePaths.OUTPUT_DIRECTORY, "uploads")
+        os.makedirs(upload_dir, exist_ok=True)
+        
+        # use hash + original extension to keep it unique but identifiable
+        _, ext = os.path.splitext(file.filename)
+        filename = f"{file_hash}{ext}"
+        file_path = os.path.abspath(os.path.join(upload_dir, filename))
+        
+        if os.path.exists(file_path):
+            app_logger.info(f"File already exists (hash match): {file_path}")
+            return {"status": "success", "file_path": file_path}
+
+        with open(file_path, "wb") as buffer:
+            buffer.write(content)
+            
+        app_logger.info(f"File uploaded successfully to: {file_path}")
+        return {"status": "success", "file_path": file_path}
+    except Exception as e:
+        app_logger.error(f"Upload failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 @app.post("/api/apps/run")
 async def run_app_endpoint(request: RunRequest):

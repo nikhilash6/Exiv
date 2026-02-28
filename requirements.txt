@@ -17,6 +17,7 @@ fastapi
 pydantic
 uvicorn[standard]
 click
+python-multipart>=0.0.18
 # hf ecosystem
 hf_transfer
 transformers==4.56.1
