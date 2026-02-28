@@ -1,48 +1,76 @@
 import React, { useState, useEffect, useRef } from 'react';
+import './App.css';
 
-const AdvancedWanAnimateUI = ({ appName = "Advanced Wan Animate" }) => {
+const AdvancedWanAnimateUI = ({ appName = 'Character Replace' }) => {
   const [step, setStep] = useState(0);
   const [taskId, setTaskId] = useState(null);
-  const [taskStatus, setTaskStatus] = useState("");
-  const [error, setError] = useState("");
-  
-  // Data state
-  const [inputVideo, setInputVideo] = useState("dialogue.mp4");
-  const [sessionId, setSessionId] = useState("");
-  const [firstFrame, setFirstFrame] = useState("");
-  const [isRemote, setIsRemote] = useState(false);
+  const [taskStatus, setTaskStatus] = useState('');
+  const [error, setError] = useState('');
+  const [isAutoChaining, setIsAutoChaining] = useState(false);
+
+  const [inputVideo, setInputVideo] = useState('dialogue.mp4');
+  const [sessionId, setSessionId] = useState('');
+  const [firstFrame, setFirstFrame] = useState('');
   const [isUploading, setIsUploading] = useState(false);
 
-  // Segmentation state
   const [points, setPoints] = useState([]);
   const [labels, setLabels] = useState([]);
-  const [previewMask, setPreviewMask] = useState("");
-  
-  // Paths state
-  const [fgVideo, setFgVideo] = useState("");
-  const [maskVideo, setMaskVideo] = useState("");
-  const [poseVideo, setPoseVideo] = useState("");
-  const [faceVideo, setFaceVideo] = useState("");
-  const [finalVideo, setFinalVideo] = useState("");
-  
-  // Animation params
-  const [positive, setPositive] = useState("a girl talking");
-  const [negative, setNegative] = useState("bad quality");
-  const [referenceImage, setReferenceImage] = useState("ref_image.png");
-  
+  const [previewMask, setPreviewMask] = useState('');
+
+  const [fgVideo, setFgVideo] = useState('');
+  const [maskVideo, setMaskVideo] = useState('');
+  const [poseVideo, setPoseVideo] = useState('');
+  const [faceVideo, setFaceVideo] = useState('');
+  const [finalVideo, setFinalVideo] = useState('');
+
+  const [positive, setPositive] = useState('a girl talking');
+  const [negative, setNegative] = useState('bad quality');
+  const [referenceImage, setReferenceImage] = useState('ref_image.png');
+
+  const [height, setHeight] = useState(640);
+  const [width, setWidth] = useState(640);
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [videoLength, setVideoLength] = useState(5);
+
   const imgRef = useRef(null);
+  const videoInputRef = useRef(null);
+  const refImageInputRef = useRef(null);
 
   const actions = window.useTaskActions ? window.useTaskActions() : null;
   const addTask = actions ? actions.addTask : null;
+  
+  const { addToast } = window.useToast ? window.useToast() : { addToast: () => alert('Please create mask and upload the reference image') };
 
-  // Use a helper to resolve media URLs just in case
   const resolveMediaUrl = (path) => {
-    if (!path) return "";
-    if (path.startsWith("http")) return path;
-    if (path.startsWith("/api/outputs")) return path;
-    // Exiv backend returns paths relative to the output folder.
-    // The server exposes these at /api/outputs/{filename}
+    if (!path) return '';
+    if (path.startsWith('http')) return path;
+    if (path.startsWith('/api/outputs')) return path;
     return `/api/outputs/${path}`;
+  };
+
+  const runTask = async (mode, params) => {
+    setError('');
+    const res = await fetch('/api/apps/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        app_name: appName,
+        params: { app_mode: mode, ...params },
+      }),
+    });
+
+    const data = await res.json();
+    setTaskId(data.task_id);
+
+    if (addTask) {
+      addTask({
+        id: data.task_id,
+        name: `Character Replace - ${mode}`,
+        status: 'queued',
+        progress: 0,
+      });
+    }
+    return data.task_id;
   };
 
   useEffect(() => {
@@ -52,11 +80,14 @@ const AdvancedWanAnimateUI = ({ appName = "Advanced Wan Animate" }) => {
       try {
         const res = await fetch(`/status/${taskId}`);
         const data = await res.json();
-        
+
         setTaskStatus(data.status);
 
         if (data.status === 'completed') {
-          const output = data.output["1"];
+          const output = data.output['1'];
+          setTaskId(null); // Clear taskId first to prevent multiple triggers
+          setError('');
+
           if (step === 0) {
             setFirstFrame(output.first_frame);
             setSessionId(output.session_id);
@@ -66,291 +97,366 @@ const AdvancedWanAnimateUI = ({ appName = "Advanced Wan Animate" }) => {
           } else if (step === 2) {
             setFgVideo(output.fg_video);
             setMaskVideo(output.mask_video);
-            setStep(3);
+            if (isAutoChaining) {
+              setStep(3);
+              runTask('3_pose', { input_video: inputVideo });
+            }
           } else if (step === 3) {
             setPoseVideo(output.pose_video);
             setFaceVideo(output.face_video);
-            setStep(4);
+            if (isAutoChaining) {
+              setStep(4);
+              runTask('4_animate', {
+                bg_video: output.fg_video || fgVideo,
+                mask_video: output.mask_video || maskVideo,
+                pose_video: output.pose_video,
+                face_video: output.face_video,
+                reference_image: referenceImage,
+                positive,
+                negative: '',
+                seed: -1,
+                steps: 4,
+                cfg: 1.0,
+                width,
+                height,
+                frame_count: Math.ceil(videoLength * 16),
+              });
+            }
           } else if (step === 4) {
             setFinalVideo(output.final_video);
             setStep(5);
+            setIsAutoChaining(false);
           }
-          setTaskId(null);
-          setError("");
         } else if (data.status === 'failed') {
-          const errorMsg = data.data?.err_message || "Task Failed";
-          console.error("Task Failed:", errorMsg);
+          const errorMsg = data.data?.err_message || 'Task failed';
           setError(errorMsg);
           setTaskId(null);
+          setIsAutoChaining(false);
         }
-      } catch(e) {
+      } catch (e) {
         console.error(e);
-        setError("Error fetching task status");
+        setError('Error fetching task status');
         setTaskId(null);
+        setIsAutoChaining(false);
       }
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [taskId, step]);
+  }, [taskId, step, isAutoChaining, inputVideo, sessionId, positive, referenceImage, width, height, videoLength, fgVideo, maskVideo]);
 
-  const runTask = async (mode, params) => {
-    setError("");
-    const res = await fetch('/api/apps/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        app_name: appName,
-        params: { app_mode: mode, ...params }
-      })
-    });
-    const data = await res.json();
-    setTaskId(data.task_id);
-    if (addTask) {
-      addTask({ id: data.task_id, name: `Adv Wan Animate - ${mode}`, status: 'queued', progress: 0 });
+  const handleRenderFinal = () => {
+    if (!previewMask || !referenceImage || referenceImage === 'ref_image.png') {
+      if (window.useToast) {
+        addToast({ message: 'Please create mask and upload the reference image', type: 'error' });
+      } else {
+        alert('Please create mask and upload the reference image');
+      }
+      return;
     }
+    setIsAutoChaining(true);
+    setStep(2);
+    runTask('2_matte', { input_video: inputVideo, session_id: sessionId });
   };
 
-  const handleFileUpload = async (e, setPathCallback) => {
-    const file = e.target.files[0];
+  const handleFileUpload = async (file, setPathCallback, autoInit = false) => {
     if (!file) return;
 
-    // Web browsers do not expose absolute paths (file.path) for security reasons
-    // unless running inside Electron. Therefore, we must upload it to get a server path.
+    if (file.type.startsWith('video/')) {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.onloadedmetadata = () => {
+        window.URL.revokeObjectURL(video.src);
+        const duration = Math.floor(video.duration);
+        setVideoDuration(duration);
+        setVideoLength(Math.min(duration, 5));
+      };
+      video.src = URL.createObjectURL(file);
+    }
+
     setIsUploading(true);
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append('file', file);
 
     try {
-        const res = await fetch('/api/upload', {
-            method: 'POST',
-            body: formData,
-        });
-        const data = await res.json();
-        if (data.status === 'success') {
-            setPathCallback(data.file_path);
-        } else {
-            console.error("Upload failed", data);
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (data.status === 'success') {
+        setPathCallback(data.file_path);
+        if (autoInit) {
+          setStep(0);
+          runTask('0_init', { input_video: data.file_path });
         }
-    } catch(err) {
-        console.error("Upload error", err);
+      }
+    } catch (err) {
+      console.error('Upload error', err);
     } finally {
-        setIsUploading(false);
+      setIsUploading(false);
     }
   };
 
   const handleImageClick = (e) => {
     if (!imgRef.current) return;
     const rect = imgRef.current.getBoundingClientRect();
-    
+
     const scaleX = imgRef.current.naturalWidth / rect.width;
     const scaleY = imgRef.current.naturalHeight / rect.height;
-    
+
     const x = Math.round((e.clientX - rect.left) * scaleX);
     const y = Math.round((e.clientY - rect.top) * scaleY);
-    
+
     const isRightClick = e.type === 'contextmenu';
     if (isRightClick) e.preventDefault();
-    
-    setPoints([...points, [x, y]]);
-    setLabels([...labels, isRightClick ? 0 : 1]);
+
+    setPoints((prev) => [...prev, [x, y]]);
+    setLabels((prev) => [...prev, isRightClick ? 0 : 1]);
   };
 
   const clearPoints = () => {
     setPoints([]);
     setLabels([]);
-    setPreviewMask("");
+    setPreviewMask('');
   };
 
-  return (
-    <div style={{padding: '20px', fontFamily: 'sans-serif', background: '#0d0d0d', borderRadius: '8px', color: '#f0f0f0'}}>
-      <h2>Advanced Wan Animate</h2>
-      {taskId && <div style={{color: '#007bff', marginBottom: '10px'}}>Task running... ({taskStatus})</div>}
-      {error && <div style={{color: '#ff4d4f', marginBottom: '10px', padding: '10px', background: 'rgba(255, 77, 79, 0.1)', border: '1px solid #ff4d4f', borderRadius: '4px'}}>Error: {error}</div>}
-      
-      <div style={{display: 'flex', gap: '10px', marginBottom: '20px', alignItems: 'center', justifyContent: 'space-between'}}>
-        <div style={{display: 'flex', gap: '10px'}}>
-            {["0: Init", "1: Segment", "2: Matte", "3: Pose", "4: Animate", "5: Output"].map((label, s) => (
-            <button 
-                key={s} 
-                onClick={() => setStep(s)} 
-                disabled={s > step && s !== 0} 
-                style={{
-                padding: '8px 12px', 
-                cursor: (s > step && s !== 0) ? 'not-allowed' : 'pointer',
-                background: step === s ? '#007bff' : '#222',
-                color: step === s ? '#f0f0f0' : '#888',
-                border: '1px solid #1a1a1a',
-                borderRadius: '4px'
-                }}
-            >
-                {label}
-            </button>
-            ))}
-        </div>
-        <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
-            <label style={{fontSize: '14px', color: '#f0f0f0'}}>Upload files to server</label>
-            <input 
-                type="checkbox" 
-                checked={isRemote} 
-                onChange={(e) => setIsRemote(e.target.checked)} 
-                style={{cursor: 'pointer'}}
-            />
-        </div>
-      </div>
+  const statusClass =
+    taskStatus === 'failed' ? 'failed' : taskId ? 'running' : finalVideo ? 'done' : 'idle';
 
-      <div style={{background: '#121212', padding: '20px', borderRadius: '8px', border: '1px solid #1a1a1a'}}>
-        {step === 0 && (
+  if (isUploading) {
+    return (
+      <div className="awa-loading-screen">
+        <div className="awa-spinner" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="awa-page">
+      <div className="awa-bg" />
+      <div className="awa-shell">
+        <header className="awa-header">
           <div>
-            <h3>Step 0: Select Video</h3>
-            <div style={{marginBottom: '10px'}}>
-              <label style={{display: 'block', marginBottom: '5px'}}>{isRemote ? "Select Video to Upload:" : "Select Local Video:"}</label>
-              <input 
-                  type="file" 
-                  accept="video/*"
-                  onChange={e => handleFileUpload(e, setInputVideo)} 
-                  style={{width: '100%', padding: '8px', background: '#050505', color: '#f0f0f0', border: '1px solid #1a1a1a', borderRadius: '4px'}} 
-              />
-              {inputVideo && <div style={{marginTop: '5px', fontSize: '12px', color: '#888'}}>Selected/Uploaded Path: {inputVideo}</div>}
-              {isUploading && <div style={{marginTop: '5px', fontSize: '12px', color: '#007bff'}}>Uploading...</div>}
-            </div>
-            <button onClick={() => runTask("0_init", { input_video: inputVideo })} disabled={!!taskId || !inputVideo || isUploading} style={{padding: '10px 20px', background: '#007bff', color: '#f0f0f0', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>
-              Load Video
-            </button>
+            <h1>Character Replace</h1>
+          </div>
+          <div className={`awa-run-status ${statusClass}`}>
+            <span>{taskId ? 'Running' : 'Status'}</span>
+            <strong>{taskId ? taskStatus || 'queued' : finalVideo ? 'ready' : 'idle'}</strong>
+          </div>
+        </header>
+
+        {error && (
+          <div className="awa-alert" style={{ animationDelay: '120ms' }}>
+            {error}
           </div>
         )}
 
-        {step === 1 && (
-          <div>
-            <h3>Step 1: Segment Character</h3>
-            <p>Left click for foreground, right click for background.</p>
-            <div style={{display: 'flex', gap: '20px'}}>
-              <div>
-                <h4>Original Frame</h4>
-                {firstFrame && (
-                  <div style={{position: 'relative', display: 'inline-block'}}>
-                    <img 
-                      ref={imgRef}
-                      src={resolveMediaUrl(firstFrame)}
-                      onClick={handleImageClick}
-                      onContextMenu={handleImageClick}
-                      style={{maxWidth: '400px', cursor: 'crosshair', border: '2px solid #1a1a1a', borderRadius: '4px'}}
-                    />
-                    {points.map((p, i) => (
-                      <div key={i} style={{
-                        position: 'absolute',
-                        left: `${(p[0] / imgRef.current?.naturalWidth) * 100}%`,
-                        top: `${(p[1] / imgRef.current?.naturalHeight) * 100}%`,
-                        width: '8px', height: '8px', borderRadius: '50%',
-                        background: labels[i] === 1 ? 'green' : 'red',
-                        transform: 'translate(-50%, -50%)', pointerEvents: 'none'
-                      }}></div>
-                    ))}
+        <main className="awa-grid">
+          <section className="awa-card full-width">
+            <div className="awa-card-head">
+              <h2>1. Initialize & Segment</h2>
+              <span className={previewMask ? 'pill done' : 'pill'}>
+                {previewMask ? 'Mask Ready' : firstFrame ? 'Awaiting Mask' : 'Ready'}
+              </span>
+            </div>
+            
+            <div className="awa-init-layout" style={{ gap: '24px' }}>
+              {/* Left Column: Load Video & Mask Generation */}
+              <div className="awa-seg-main" style={{ flex: '1 1 50%', maxWidth: '50%', paddingRight: '12px', borderRight: '1px solid var(--awa-card-border)' }}>
+                <h3 style={{ fontSize: '14px', marginBottom: '8px' }}>Load Source Video</h3>
+                <p style={{ fontSize: '12px', color: 'var(--awa-muted)', marginBottom: '4px' }}>Pick source video and initialize session.</p>
+                <p style={{ fontSize: '12px', color: 'var(--awa-muted)', marginBottom: '16px' }}>* Videos greater than 5 secs are preferred.</p>
+                <input
+                  ref={videoInputRef}
+                  type="file"
+                  accept="video/*"
+                  style={{ display: 'none' }}
+                  onChange={(e) => handleFileUpload(e.target.files[0], setInputVideo, true)}
+                />
+                <button
+                  className="awa-btn primary"
+                  type="button"
+                  onClick={() => videoInputRef.current.click()}
+                  disabled={!!taskId || isUploading}
+                >
+                  Load Video
+                </button>
+                <p className="awa-path" style={{ marginTop: '12px', marginBottom: '40px' }}>{inputVideo && inputVideo !== 'dialogue.mp4' ? `Loaded: ${inputVideo}` : 'No video selected'}</p>
+
+                <h3 style={{ fontSize: '14px', marginBottom: '8px' }}>Mask Generation</h3>
+                <p style={{ fontSize: '12px', color: 'var(--awa-muted)', marginBottom: '16px' }}>Click to mark a point, mask will be generated for this marked segment</p>
+                <div className="awa-media-row" style={{ gridTemplateColumns: '1fr', margin: '0 0 20px 0' }}>
+                  <div className="awa-media-panel">
+                    <h3>{previewMask ? 'Mask Preview (Click to refine)' : 'Frame'}</h3>
+                    {firstFrame ? (
+                      <div className="awa-image-wrap">
+                        <img
+                          ref={imgRef}
+                          src={resolveMediaUrl(previewMask || firstFrame)}
+                          onClick={handleImageClick}
+                          onContextMenu={handleImageClick}
+                          alt="preview"
+                        />
+                        {points.map((p, i) => (
+                          <span
+                            key={`${p[0]}-${p[1]}-${i}`}
+                            className={`awa-point ${labels[i] === 1 ? 'fg' : 'bg'}`}
+                            style={{
+                              left: `${(p[0] / (imgRef.current?.naturalWidth || 1)) * 100}%`,
+                              top: `${(p[1] / (imgRef.current?.naturalHeight || 1)) * 100}%`,
+                            }}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="awa-placeholder" style={{ height: '300px' }}>Initialize video to see frame</div>
+                    )}
                   </div>
-                )}
-                <div style={{marginTop: '10px', display: 'flex', gap: '10px'}}>
-                  <button onClick={() => runTask("1_segment", { 
-                    input_video: inputVideo, session_id: sessionId, points: JSON.stringify(points), labels: JSON.stringify(labels) 
-                  })} disabled={!!taskId || points.length === 0} style={{padding: '8px 16px', background: '#007bff', color: '#f0f0f0', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Generate Mask</button>
-                  <button onClick={clearPoints} style={{padding: '8px 16px', background: '#222', color: '#f0f0f0', border: '1px solid #1a1a1a', borderRadius: '4px', cursor: 'pointer'}}>Clear Points</button>
+                </div>
+                <div className="awa-actions">
+                  <button
+                    className="awa-btn primary"
+                    type="button"
+                    onClick={() =>
+                      runTask('1_segment', {
+                        input_video: inputVideo,
+                        session_id: sessionId,
+                        points: JSON.stringify(points),
+                        labels: JSON.stringify(labels),
+                      })
+                    }
+                    disabled={!!taskId || points.length === 0 || !sessionId}
+                  >
+                    Generate Mask
+                  </button>
+                  <button className="awa-btn ghost" type="button" onClick={clearPoints}>
+                    Clear Mask
+                  </button>
                 </div>
               </div>
-              <div>
-                <h4>Mask Preview</h4>
-                {previewMask && <img src={resolveMediaUrl(previewMask)} style={{maxWidth: '400px', border: '1px solid #1a1a1a', borderRadius: '4px'}} />}
-              </div>
-            </div>
-            {previewMask && (
-              <button onClick={() => setStep(2)} disabled={!!taskId} style={{marginTop: '20px', padding: '10px 20px', background: '#007bff', color: '#f0f0f0', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>
-                Next Step (Matting)
-              </button>
-            )}
-          </div>
-        )}
 
-        {step === 2 && (
-          <div>
-            <h3>Step 2: Generate Character and Mask Videos</h3>
-            <p>This will use the mask from Step 1 to extract the character.</p>
-            <button onClick={() => runTask("2_matte", { input_video: inputVideo, session_id: sessionId })} disabled={!!taskId} style={{padding: '10px 20px', background: '#007bff', color: '#f0f0f0', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>
-              Run Matting
-            </button>
-            <div style={{marginTop: '20px'}}>
-              {fgVideo && <div><strong>Foreground Video:</strong> {fgVideo}</div>}
-              {maskVideo && <div><strong>Mask Video:</strong> {maskVideo}</div>}
-            </div>
-            {fgVideo && (
-              <button onClick={() => setStep(3)} disabled={!!taskId} style={{marginTop: '20px', padding: '10px 20px', background: '#007bff', color: '#f0f0f0', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>
-                Next Step (Pose)
-              </button>
-            )}
-          </div>
-        )}
-
-        {step === 3 && (
-          <div>
-            <h3>Step 3: Generate Pose and Face Videos</h3>
-            <button onClick={() => runTask("3_pose", { input_video: inputVideo })} disabled={!!taskId} style={{padding: '10px 20px', background: '#007bff', color: '#f0f0f0', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>
-              Run Pose Extraction
-            </button>
-            <div style={{marginTop: '20px'}}>
-              {poseVideo && <div><strong>Pose Video:</strong> {poseVideo}</div>}
-              {faceVideo && <div><strong>Face Video:</strong> {faceVideo}</div>}
-            </div>
-            {poseVideo && (
-              <button onClick={() => setStep(4)} disabled={!!taskId} style={{marginTop: '20px', padding: '10px 20px', background: '#007bff', color: '#f0f0f0', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>
-                Next Step (Animate)
-              </button>
-            )}
-          </div>
-        )}
-
-        {step === 4 && (
-          <div>
-            <h3>Step 4: Animate</h3>
-            <div style={{display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '500px'}}>
-              <div>
-                <label style={{display: 'block', fontSize: '12px', color: '#888'}}>Positive Prompt:</label>
-                <textarea value={positive} onChange={e => setPositive(e.target.value)} rows={3} style={{width: '100%', padding: '8px', background: '#050505', color: '#f0f0f0', border: '1px solid #1a1a1a', borderRadius: '4px'}} />
-              </div>
-              <div>
-                <label style={{display: 'block', fontSize: '12px', color: '#888'}}>Negative Prompt:</label>
-                <textarea value={negative} onChange={e => setNegative(e.target.value)} rows={3} style={{width: '100%', padding: '8px', background: '#050505', color: '#f0f0f0', border: '1px solid #1a1a1a', borderRadius: '4px'}} />
-              </div>
-              <div>
-                <label style={{display: 'block', fontSize: '12px', color: '#888'}}>{isRemote ? "Upload Reference Image:" : "Select Local Reference Image:"}</label>
-                <input 
-                    type="file" 
+              {/* Right Column: Select New Character */}
+              <div className="awa-init-sidebar" style={{ flex: '1 1 50%', maxWidth: '50%', paddingLeft: '12px' }}>
+                <div style={{ marginBottom: '40px' }}>
+                  <h3 style={{ fontSize: '14px', marginBottom: '8px' }}>Select the character to replace</h3>
+                  <p style={{ fontSize: '12px', color: 'var(--awa-muted)', marginBottom: '16px' }}>it should have a white background</p>
+                  <input
+                    ref={refImageInputRef}
+                    type="file"
                     accept="image/*"
-                    onChange={e => handleFileUpload(e, setReferenceImage)} 
-                    style={{width: '100%', padding: '8px', background: '#050505', color: '#f0f0f0', border: '1px solid #1a1a1a', borderRadius: '4px'}} 
-                />
-                {referenceImage && <div style={{marginTop: '5px', fontSize: '12px', color: '#888'}}>Selected/Uploaded Path: {referenceImage}</div>}
+                    style={{ display: 'none' }}
+                    onChange={(e) => handleFileUpload(e.target.files[0], setReferenceImage)}
+                  />
+                  <div 
+                    className="awa-placeholder" 
+                    style={{ width: '100%', height: '300px', cursor: 'pointer', overflow: 'hidden' }}
+                    onClick={() => refImageInputRef.current.click()}
+                  >
+                    {referenceImage && referenceImage !== 'ref_image.png' ? (
+                      <img src={resolveMediaUrl(referenceImage)} alt="reference" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                    ) : (
+                      <span>Click to select reference image</span>
+                    )}
+                  </div>
+                </div>
               </div>
-              
-              <button onClick={() => runTask("4_animate", { 
-                bg_video: inputVideo, mask_video: maskVideo, pose_video: poseVideo, face_video: faceVideo,
-                reference_image: referenceImage, positive: positive, negative: negative,
-                seed: 42, steps: 20, cfg: 6.0
-              })} disabled={!!taskId} style={{marginTop: '10px', padding: '10px 20px', background: '#007bff', color: '#f0f0f0', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>
-                Run Final Animation
-              </button>
             </div>
-          </div>
-        )}
+          </section>
 
-        {step === 5 && (
-          <div>
-            <h3>Final Output</h3>
-            {finalVideo ? (
-              <div>
-                <p>Final Video generated successfully:</p>
-                <video controls style={{maxWidth: '100%', border: '2px solid #1a1a1a', borderRadius: '8px'}} src={resolveMediaUrl(finalVideo)}></video>
+          <section className="awa-card full-width" style={{ animationDelay: '260ms' }}>
+            <div className="awa-card-head">
+              <h2>2. Animate</h2>
+              <span className={finalVideo ? 'pill done' : 'pill'}>{finalVideo ? 'Rendered' : taskId && isAutoChaining ? 'Generating...' : 'Ready to Run'}</span>
+            </div>
+            <div className="awa-init-layout">
+              <div className="awa-init-sidebar">
+                <p>Configure prompts and reference image, then render output.</p>
+                <label className="awa-label" htmlFor="positivePrompt">Prompt</label>
+                <textarea
+                  id="positivePrompt"
+                  className="awa-textarea"
+                  value={positive}
+                  onChange={(e) => setPositive(e.target.value)}
+                  rows={3}
+                />
+                
+                <div className="awa-row">
+                  <div className="awa-col">
+                    <label className="awa-label">Width</label>
+                    <input
+                      type="number"
+                      className="awa-input"
+                      value={width}
+                      onChange={(e) => setWidth(parseInt(e.target.value))}
+                    />
+                  </div>
+                  <div className="awa-col">
+                    <label className="awa-label">Height</label>
+                    <input
+                      type="number"
+                      className="awa-input"
+                      value={height}
+                      onChange={(e) => setHeight(parseInt(e.target.value))}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: '14px' }}>
+                  <label className="awa-label">
+                    Video Length: {videoLength} secs
+                  </label>
+                  <input
+                    type="range"
+                    className="awa-input"
+                    style={{ padding: 0 }}
+                    min={Math.min(videoDuration || 1, 5)}
+                    max={Math.max(videoDuration || 1, Math.min(videoDuration || 1, 5))}
+                    step={1}
+                    value={videoLength}
+                    onChange={(e) => setVideoLength(parseFloat(e.target.value))}
+                    disabled={videoDuration === 0}
+                  />
+                </div>
+
+                <button
+                  className="awa-btn primary"
+                  type="button"
+                  onClick={handleRenderFinal}
+                  disabled={!!taskId || isUploading}
+                >
+                  Render Final Animation
+                </button>
               </div>
-            ) : (
-              <p>No final video yet.</p>
-            )}
-          </div>
-        )}
+              <div className="awa-seg-main">
+                <div className="awa-media-panel">
+                  <h3>Final Output</h3>
+                  {finalVideo ? (
+                    <video className="awa-final-video" controls src={resolveMediaUrl(finalVideo)} />
+                  ) : (
+                    <div className="awa-placeholder">Final rendered video will appear here</div>
+                  )}
+                </div>
+
+                {/* Intermediate results shown below */}
+                {(fgVideo || poseVideo) && (
+                  <div className="awa-intermediate-results" style={{ marginTop: '32px', borderTop: '1px solid var(--awa-card-border)', paddingTop: '24px' }}>
+                    <h2 style={{ fontSize: '14px', marginBottom: '16px', color: 'var(--awa-muted)' }}>Intermediate Generation Steps</h2>
+                    <div className="awa-media-row">
+                      <div className="awa-media-panel">
+                        <h3>Foreground Matting</h3>
+                        {fgVideo ? <video controls src={resolveMediaUrl(fgVideo)} /> : <div className="awa-placeholder">Processing...</div>}
+                      </div>
+                      <div className="awa-media-panel">
+                        <h3>Pose Estimation</h3>
+                        {poseVideo ? <video controls src={resolveMediaUrl(poseVideo)} /> : <div className="awa-placeholder">Processing...</div>}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        </main>
       </div>
     </div>
   );

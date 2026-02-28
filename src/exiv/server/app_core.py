@@ -82,6 +82,7 @@ class App(BaseModel):
     handler: Any
     frontend_assets: Optional[dict] = None
     asset_root: Optional[str] = None
+    extra_metadata: Optional[dict] = None
     
     def run_standalone(self):
         try:

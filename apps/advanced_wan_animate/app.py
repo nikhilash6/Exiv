@@ -147,23 +147,31 @@ def main(**params):
         pos_prompt = params.get("positive", "a man dancing in a studio, high quality")
         neg_prompt = params.get("negative", "bad quality, blurry, distorted, disfigured")
         seed = params.get("seed", 42)
-        steps = params.get("steps", 20)
-        cfg = params.get("cfg", 6.0)
+        steps = params.get("steps", 4)
+        cfg = params.get("cfg", 1.0)
         sampler_name = params.get("sampler_name", KSamplerType.EULER.value)
         scheduler_name = params.get("scheduler_name", SchedulerType.SIMPLE.value)
         
+        height = params.get("height", 640)
+        width = params.get("width", 640)
+        frame_count = params.get("frame_count", 81)
+
         ref_img_path = params.get("reference_image", "")
         pose_video_path = params.get("pose_video", "")
         face_video_path = params.get("face_video", "")
-        bg_video_path = params.get("bg_video", input_video) # Use original video as default background
+        bg_video_path = params.get("bg_video", input_video)
         mask_video_path = params.get("mask_video", "")
+        print("------ ref_image_path: ", ref_img_path)
+        print("------ pose_video_path: ", pose_video_path)
+        print("------ face_video_path: ", face_video_path)
+        print("------ bg_video_path: ", bg_video_path)
+        print("------ mask_video_path: ", mask_video_path)
 
         mode = WanAnimateMode.REPLACEMENT
         
         if mode == WanAnimateMode.REPLACEMENT and (not bg_video_path or not mask_video_path):
             raise ValueError("Replacement mode requires Background Video and Mask Video.")
         
-        height, width, frame_count = 640, 640, 162
         frame_count = fix_frame_count(frame_count, 4)
         
         if context: context.start_anchor("Preprocessing", steps=6)
@@ -237,7 +245,7 @@ def main(**params):
                 latent_format, 
                 wan_vae,
             )
-            
+            print("------- steps found: ", steps)
             sampler = KSampler(
                 wrapped_model=model_wrapper,
                 seed=seed,
@@ -273,7 +281,7 @@ def main(**params):
 
 
 app = App(
-    name="Advanced Wan Animate",
+    name="Character Replace",
     inputs={
         'app_mode': Input(label="App Mode", type="select", options=["0_init", "1_segment", "2_matte", "3_pose", "4_animate"], default="0_init"),
         'input_video': Input(label="Input Video", type="str", default=""),
@@ -292,10 +300,14 @@ app = App(
         'seed': Input(label="Seed", type="number", default=-1),
         'steps': Input(label="Steps", type="number", default=4),
         'cfg': Input(label="CFG", type="number", default=1.0, increment_step=0.1),
+        'height': Input(label="Height", type="number", default=640),
+        'width': Input(label="Width", type="number", default=640),
+        'frame_count': Input(label="Frame Count", type="number", default=81),
         'sampler_name': Input(label="Sampler", type="select", options=KSamplerType.value_list(), default=KSamplerType.EULER.value),
         'scheduler_name': Input(label="Scheduler", type="select", options=SchedulerType.value_list(), default=SchedulerType.SIMPLE.value),
     },
     outputs=[Output(id=1, type=AppOutputType.JSON.value)],
+    extra_metadata={'preserve_state': True},
     handler=main
 )
 

@@ -114,7 +114,7 @@ Exiv exposes the following endpoints:
 - `POST /api/apps/run`: Submits a new task.
 - `GET /status/{task_id}`: Retrieves the status of a queued or running task.
 
-You have to hook into the host UI's task drawer by accessing `window.useTaskActions()`.
+You have to hook into the host UI's task drawer by accessing `window.useTaskActions()`. You can also trigger toast notifications using `window.useToast()`.
 
 Example `App.jsx` Component:
 
@@ -129,6 +129,9 @@ const MyAppUI = ({ appName = "calculator" }) => {
   const actions = window.useTaskActions ? window.useTaskActions() : null;
   const addTask = actions ? actions.addTask : null;
 
+  // Access Exiv's global toast API
+  const { addToast } = window.useToast ? window.useToast() : { addToast: (msg) => console.log(msg) };
+
   // Polling for task status
   useEffect(() => {
     if (!taskId) return;
@@ -141,8 +144,9 @@ const MyAppUI = ({ appName = "calculator" }) => {
         // Output format depends on your Python App's returned dictionary
         setResult(data.output["1"]);
         setTaskId(null);
+        addToast({ message: "Task Completed Successfully!", type: "success" });
       } else if (data.status === 'failed') {
-        alert("Task Failed");
+        addToast({ message: "Task Failed", type: "error" });
         setTaskId(null);
       }
     }, 1000);

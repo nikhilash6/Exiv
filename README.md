@@ -11,6 +11,9 @@
 
 Exiv is a fast, lightweight, and highly extensible AI backend engine designed for running, patching, and serving generative models and orchestrating workflows efficiently. Please check the [docs](https://exiv.pages.dev/) for detailed guides, API references, and examples.
 
+> [!IMPORTANT]
+> **Exiv is currently in early beta.** It's evolving fast—if you want to help shape the direction or contribute, check out the [Contribution Guide](CONTRIBUTING.md).
+
 If you want a GUI to interact with Exiv, check it out [here](https://github.com/piyushK52/Exiv-UI).
 
 <div align="center">
