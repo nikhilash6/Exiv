@@ -43,19 +43,6 @@ def main(**params):
     context = params.get("context")
     app_mode = params.get("app_mode", "0_init")
     input_video = params.get("input_video", "")
-
-    # Ensure all paths are absolute since they might be relative to OUTPUT_DIRECTORY
-    def ensure_absolute(path):
-        if not path: return ""
-        if os.path.isabs(path): return path
-        # Check if it exists as is (relative to CWD)
-        if os.path.exists(path): return os.path.abspath(path)
-        # Otherwise assume it's relative to output directory
-        out_path = os.path.join(FilePaths.OUTPUT_DIRECTORY, path)
-        return os.path.abspath(out_path)
-
-    input_video = ensure_absolute(input_video)
-    print(f"DEBUG: Executing Advanced Wan Animate with mode {app_mode}. Input video: {input_video}")
     
     registry = ExtensionRegistry.get_instance()
     
@@ -171,13 +158,6 @@ def main(**params):
         bg_video_path = params.get("bg_video", input_video) # Use original video as default background
         mask_video_path = params.get("mask_video", "")
 
-        ref_img_path = ensure_absolute(ref_img_path)
-        pose_video_path = ensure_absolute(pose_video_path)
-        face_video_path = ensure_absolute(face_video_path)
-        bg_video_path = ensure_absolute(bg_video_path)
-        mask_video_path = ensure_absolute(mask_video_path)
-        print(f"DEBUG: 4_animate Mask Path: {mask_video_path}")
-        
         mode = WanAnimateMode.REPLACEMENT
         
         if mode == WanAnimateMode.REPLACEMENT and (not bg_video_path or not mask_video_path):

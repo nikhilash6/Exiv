@@ -27,18 +27,21 @@ DEFAULT_MAPPING = {
         "output":          ["output"]
 }
 
+# package source root (where the code lives)
+PACKAGE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+# user workspace root (where models/outputs should go)
+USER_ROOT = os.getcwd()
+
 def load_download_map() -> Dict[str, Dict[str, str]]:
     """
     Loads model download metadata from JSON files in the src/exiv/data/registry/ directory.
     """
     # Registry is in the src/exiv/data/registry/ folder
-    # file_path.py is in src/exiv/utils/, so we go up 1 level to reach src/exiv/
-    pkg_root = os.path.dirname(os.path.dirname(__file__))
-    registry_dir = os.path.join(pkg_root, "data", "registry")
+    registry_dir = os.path.join(PACKAGE_ROOT, "src", "exiv", "data", "registry")
     
     # Fallback: check if it's in the current working directory (useful for dev/hub)
     if not os.path.exists(registry_dir):
-        registry_dir = os.path.join(os.getcwd(), "data", "registry")
+        registry_dir = os.path.join(USER_ROOT, "data", "registry")
 
     download_map = {}
     if os.path.exists(registry_dir):
@@ -71,8 +74,50 @@ class FilePaths:
     # cache: root_path -> [list of all absolute file paths found recursively]
     _file_cache = {}
     
-    OUTPUT_DIRECTORY = DEFAULT_MAPPING["output"][0]
-    
+    @classmethod
+    def get_output_directory(cls) -> str:
+        """Returns the absolute path to the output directory."""
+        return cls.get_save_folder("output")
+
+    @classmethod
+    def resolve_path(cls, path: str) -> str:
+        """
+        Attempts to resolve a path (possibly relative) to an absolute path
+        by checking registered search roots.
+        """
+        if not path:
+            return ""
+        
+        # 1. returning absolute
+        if os.path.isabs(path):
+            return path
+            
+        # 2. check relative to search roots (including subfolders like 'output', 'input', 'models')
+        # we check direct first, then subfolders
+        for entry in cls._search_roots:
+            root = entry["path"]
+            mapping = entry["map"]
+            
+            # 2a. check direct relative to root
+            potential = os.path.abspath(os.path.join(root, path))
+            if os.path.exists(potential):
+                return potential
+                
+            # 2b. check inside type-specific subfolders
+            for file_type, folders in mapping.items():
+                for folder in folders:
+                    potential = os.path.abspath(os.path.join(root, folder, path))
+                    if os.path.exists(potential):
+                        return potential
+        
+        # 3. check relative to USER_ROOT (fallback)
+        potential = os.path.abspath(os.path.join(USER_ROOT, path))
+        if os.path.exists(potential):
+            return potential
+            
+        # 4. if nothing found, return original (or could raise error, but let caller handle)
+        return path
+
     @classmethod
     def add_search_path(cls, path: str, mapping: Dict[str, Union[str, List[str]]] = None):
         """
@@ -312,21 +357,30 @@ class FilePaths:
         Creates the directory if it does not exist.
         """
         if not cls._search_roots:
-            root = os.path.abspath(".")
+            # fallback to USER_ROOT instead of CWD
+            root = USER_ROOT
             mapping = DEFAULT_MAPPING
         else:
             root = cls._search_roots[0]["path"]
             mapping = cls._search_roots[0]["map"]
-            
+
         folders = mapping.get(file_type)
         if not folders:
             raise ValueError(f"Unknown file type: '{file_type}'")
 
         save_dir = os.path.join(root, folders[0])
         os.makedirs(save_dir, exist_ok=True)
-        return save_dir
+        return os.path.abspath(save_dir)
 
 
 # NOTE: the first registered root is treated as the primary and 
 # will be used to save models and the outputs
-FilePaths.add_search_path(".")
+# adding USER_ROOT first so that it is the primary for outputs/downloads
+FilePaths.add_search_path(USER_ROOT)
+if PACKAGE_ROOT != USER_ROOT:
+    # NOTE: although search paths are primarily added for finding models, they could also contain
+    # other built-in assets
+    FilePaths.add_search_path(PACKAGE_ROOT)
+
+# TODO: for backward compatibility (remove this)
+FilePaths.OUTPUT_DIRECTORY = FilePaths.get_output_directory()

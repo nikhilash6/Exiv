@@ -170,6 +170,7 @@ class MediaProcessor:
 
         res = []
         for img_path in image_path_list:
+            img_path = FilePaths.resolve_path(img_path)
             try:
                 pil_img = Image.open(img_path).convert("RGB")
             except Exception as e:
@@ -248,6 +249,7 @@ class MediaProcessor:
             video_tensor: (C, T, H, W) float32 tensor in [0, 1] range, or None
             metadata: Dict containing fps, resolution, duration, etc
         """
+        video_path = FilePaths.resolve_path(video_path)
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"Video file not found: {video_path}")
 
@@ -338,7 +340,7 @@ class MediaProcessor:
             else:
                 video_formatted = video_formatted[start_frame:end_frame]
 
-            save_dir = FilePaths.OUTPUT_DIRECTORY
+            save_dir = FilePaths.get_output_directory()
             if subfolder:
                 save_dir = os.path.join(save_dir, subfolder)
                 if not os.path.exists(save_dir):
@@ -374,7 +376,7 @@ class MediaProcessor:
                 from ..utils.logging import app_logger
                 app_logger.warning(f"Unable to write metadata in {save_path}: {e}")
             
-            rel_path = os.path.relpath(save_path, FilePaths.OUTPUT_DIRECTORY)
+            rel_path = os.path.relpath(save_path, FilePaths.get_output_directory())
             output_paths.append(rel_path)
             
         return output_paths

@@ -5,7 +5,7 @@ from safetensors.torch import save_file
 
 from exiv.model_patching.lora_hook import enable_lora_hook
 from exiv.model_patching.efficient_loading_hook import enable_efficient_loading
-from exiv.model_utils.lora_mixin import CACHED_MODEL_LORA_KEY_MAP, LoraDefinition
+from exiv.model_utils.lora_mixin import LoraDefinition
 from exiv.model_utils.model_mixin import ModelMixin
 from exiv.quantizers.fp8_scaled.layer import FP8ScaledLinear
 from tests.test_utils.common import SimpleModel
@@ -21,19 +21,15 @@ class LoRASimpleModel(SimpleModel):
             self.output_layer.weight.fill_(0.0)
             self.output_layer.bias.fill_(0.0)
 
-    def create_model_lora_key_map(self, state_dict):
+    def create_model_lora_key_map(self, lora_state_dict_keys, **kwargs):
         key_map = {}
-        sd = state_dict.keys()
-        for k in sd:
-            if k.endswith(".weight"):
-                key_lora = f"lora.{k.replace('.', '_')}.down"
-                k_clean = k.replace(".weight", "")
-                key_map[key_lora] = k_clean
-                key_map[k_clean] = key_lora
-            else:
-                key_map["{}".format(k)] = k
-        
-        setattr(self, CACHED_MODEL_LORA_KEY_MAP, key_map)
+        for lora_key in lora_state_dict_keys:
+            if lora_key.endswith(".down"):
+                # e.g., "lora.input_layer_weight.down" -> "input_layer.weight"
+                model_key = lora_key.replace("lora.", "").replace("_weight.down", ".weight")
+                key_map[lora_key] = model_key
+                key_map[model_key] = lora_key
+        return key_map
 
 class TestMultiStepLora(unittest.TestCase):
     LORA_PATH = "tests/test_utils/assets/models/test_lora_multistep.safetensors"
@@ -99,7 +95,7 @@ class TestMultiStepLora(unittest.TestCase):
         model = LoRASimpleModel()
         model.load_model(self.DUMMY_MODEL_PATH)
         lora_def = LoraDefinition(path=self.LORA_PATH)
-        enable_lora_hook(model, lora_def, steps)
+        enable_lora_hook(model, lora_def)
         model.prepare_loras_for_inference(steps)
 
         dummy_input = torch.ones((1, 1024))
@@ -131,9 +127,9 @@ class TestMultiStepLora(unittest.TestCase):
         schedule_b = [1.0, 1.0, 0.0, 0.0, 1.0]
 
         lora_def = LoraDefinition(path=self.LORA_A_PATH, base_strength=schedule_a)
-        enable_lora_hook(model, lora_def, steps)
+        enable_lora_hook(model, lora_def)
         lora_def = LoraDefinition(path=self.LORA_B_PATH, base_strength=schedule_b)
-        enable_lora_hook(model, lora_def, steps)
+        enable_lora_hook(model, lora_def)
         model.prepare_loras_for_inference(steps)
 
         dummy_input = torch.ones((1, 1024))
@@ -175,19 +171,16 @@ class FP8SimpleModel(ModelMixin):
         
     def forward(self, x):
         return self.input_layer(x)
-        
-    def create_model_lora_key_map(self, state_dict):
+    
+    def create_model_lora_key_map(self, lora_state_dict_keys, **kwargs):
         key_map = {}
-        sd = state_dict.keys()
-        for k in sd:
-            if k.endswith(".weight"):
-                key_lora = f"lora.{k.replace('.', '_')}.down"
-                k_clean = k.replace(".weight", "")
-                key_map[key_lora] = k_clean
-                key_map[k_clean] = key_lora
-            else:
-                key_map["{}".format(k)] = k
-        setattr(self, CACHED_MODEL_LORA_KEY_MAP, key_map)
+        for lora_key in lora_state_dict_keys:
+            if lora_key.endswith(".down"):
+                # e.g., "lora.input_layer_weight.down" -> "input_layer.weight"
+                model_key = lora_key.replace("lora.", "").replace("_weight.down", ".weight")
+                key_map[lora_key] = model_key
+                key_map[model_key] = lora_key
+        return key_map
 
 class TestFP8ScaledLora(unittest.TestCase):
     LORA_PATH = "tests/test_utils/assets/models/test_fp8_lora.safetensors"
@@ -240,7 +233,7 @@ class TestFP8ScaledLora(unittest.TestCase):
             
         # 2. Enable LoRA
         lora_def = LoraDefinition(path=self.LORA_PATH)
-        enable_lora_hook(model, lora_def, steps)
+        enable_lora_hook(model, lora_def)
         model.prepare_loras_for_inference(steps, device="cpu")
         patched_output = model(dummy_input)
             
@@ -274,7 +267,7 @@ class TestFP8ScaledLora(unittest.TestCase):
         
         # Apply LoRA and run
         lora_def = LoraDefinition(path=self.LORA_PATH)
-        enable_lora_hook(model, lora_def, steps)
+        enable_lora_hook(model, lora_def)
         model.prepare_loras_for_inference(steps, device="cpu")
         model(torch.ones((1, 32)))
         

@@ -53,8 +53,9 @@ class LoraDefinition:
         strength = self.base_strength
         if isinstance(strength, list) and (strength:=self.base_strength[timestep]) == 0: return 0
         device = input.device
-        w_up_dev = w_up.to(device=device, non_blocking=True)
-        w_down_dev = w_down.to(device=device, non_blocking=True)
+        dtype = input.dtype
+        w_up_dev = w_up.to(device=device, dtype=dtype, non_blocking=True)
+        w_down_dev = w_down.to(device=device, dtype=dtype, non_blocking=True)
         # (Batch, Tokens, Dim) @ (Dim, Rank) -> (Batch, Tokens, Rank)
         down_weight = w_down_dev.flatten(start_dim=1).T  # Shape: [In, Rank]
         mid_step = input @ down_weight 
