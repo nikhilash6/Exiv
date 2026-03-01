@@ -197,7 +197,7 @@ def _process_vace_context(cond_list: List[Conditioning], wrapper: ModelWrapper, 
                 # check for direct tensor inputs (e.g. from _process_vace_keyframes)
                 control_video = aux_c.input_metadata.get("control_video_tensor", None)
                 control_masks = aux_c.input_metadata.get("control_mask_tensor", None)
-                if not control_video:
+                if control_video is None:
                     control_video_path = aux_c.input_metadata.get("control_video_path", None)
                     reference_image_path = aux_c.input_metadata.get("reference_image_path", None)   # TODO: extend to a list of ref images
                     if control_video_path: control_video, _ = MediaProcessor.load_video(control_video_path, output_frames=False)    # (C, T, H, W)
