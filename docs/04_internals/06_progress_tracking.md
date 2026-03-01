@@ -19,16 +19,30 @@ To define a new stage in your pipeline, use `start_anchor(name: str, steps: int 
 ### 3. Reporting Progress
 Within that stage, you call `progress(percent: float, status: str, stage: Optional[str] = None)`.
 - `percent`: The completion of the *current stage* (a float between 0.0 and 1.0).
-- `status`: A short message describing what is happening right now.
-- `stage`: (Optional) Overrides the name of the stage.
+- `status`: A short message describing the high-level action happening right now.
+- `stage`: (Optional) Overrides the name of the stage/anchor with a finer-grained step. If omitted, it defaults to the name of the current anchor.
 
 The `TaskContext` will automatically translate your `percent` (e.g., 0.5 for 50% through the current anchor) into the correct global progress value before sending it to the client.
+
+### Standard Progress Message Format
+
+When `context.progress()` is called, the `TaskContext` constructs a standardized dictionary payload to encapsulate the progress details. This dictionary is then passed down to the internal task manager. 
+
+The generated dictionary structure looks like this:
+```python
+{
+  "status": "Processing",  # The 'status' argument passed to context.progress()
+  "stage": "Sampling loop" # (Optional) The 'stage' argument, or the name of the current active anchor
+}
+```
+
+When writing custom apps, you do not need to construct this dictionary manually; simply pass the `status` and `stage` string arguments to `context.progress()` and the `TaskContext` will automatically package it into this format.
 
 ## Code Examples
 
 ### Example: Basic App with Progress
 
-Here is how you might track progress across a multi-step generation task:
+Here is how you might track progress across a multi-step generation task using explicit kwargs for clarity:
 
 ```python
 from exiv.server.app_core import TaskContext
@@ -36,11 +50,11 @@ from exiv.server.app_core import TaskContext
 def my_app_handler(prompt: str, context: TaskContext):
     # Step 1: Preprocessing (takes 1 step)
     context.start_anchor("Preprocessing", steps=1)
-    context.progress(0.0, "Tokenizing prompt...")
+    context.progress(percent=0.0, status="Processing", stage="Tokenizing prompt")
     # ... do some work ...
-    context.progress(0.5, "Loading embeddings...")
+    context.progress(percent=0.5, status="Processing", stage="Loading embeddings")
     # ... do more work ...
-    context.progress(1.0, "Preprocessing complete.")
+    context.progress(percent=1.0, status="Processing", stage="Preprocessing complete")
     
     # Step 2: Generation (takes 4 steps, i.e., it's a longer process)
     context.start_anchor("Generation", steps=4)
@@ -50,13 +64,13 @@ def my_app_handler(prompt: str, context: TaskContext):
         
         # Local percent goes from 0.0 to 1.0
         local_percent = (i + 1) / total_steps
-        context.progress(local_percent, f"Generating step {i+1}/{total_steps}")
+        context.progress(percent=local_percent, status="Generating", stage=f"Step {i+1}/{total_steps}")
         
     # Step 3: Postprocessing
     context.start_anchor("Postprocessing", steps=1)
-    context.progress(0.5, "Saving output...")
+    context.progress(percent=0.5, status="Saving", stage="Writing output to disk")
     # ... save ...
-    context.progress(1.0, "Done!")
+    context.progress(percent=1.0, status="Done")
     
     return "output.png"
 ```
@@ -71,7 +85,8 @@ def generate_image(prompt: str, context: TaskContext):
     
     # Define a callback that the sampler can call
     def my_callback(percent: float, message: str):
-        context.progress(percent, message)
+        # Map the sampler's local message to the 'stage' argument
+        context.progress(percent=percent, status="Sampling", stage=message)
         
     # Pass the callback to the component
     my_sampler.sample(prompt, progress_callback=my_callback)

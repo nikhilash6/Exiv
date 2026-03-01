@@ -79,6 +79,9 @@ def load_apps_from_directory(directory: str = "apps"):
                             module.app.frontend_assets = assets
                             app_logger.debug(f"  -> Found frontend for {module.app.name}")
 
+                    if module.app.name in APP_REGISTRY:
+                        app_logger.warning(f"Warning: Multiple apps found with the same name '{module.app.name}'. This can lead to unexpected behaviour.")
+
                     APP_REGISTRY[module.app.name] = module.app
                     app_logger.debug(f"Loaded: {module.app.name}")
             except Exception as e:
@@ -107,9 +110,10 @@ def process_task(task_id: str):
             )
         )    
     
-    def report_progress(progress: float, message: str = "Processing"):
+    def report_progress(progress: float, message = "Processing"):
         # to be used by the underlying script to report its progress
-        _update_task(ScriptStatus.PROCESSING.value, progress, {"status": message})
+        msg_dict = message if isinstance(message, dict) else {"status": message}
+        _update_task(ScriptStatus.PROCESSING.value, progress, msg_dict)
     
     try:
         task_details = task_manager.get_task(task_id)

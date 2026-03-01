@@ -313,7 +313,7 @@ const SimpleInterpolationUI = ({ appName = 'Simple Interpolation' }) => {
                   Generate Video Sequence
                 </button>
                 <p style={{ marginTop: '10px', fontSize: '12px', color: 'var(--awa-muted)', textAlign: 'center' }}>
-                  Note: This uses Wan VACE 14B, which can take up to 6 minutes to generate a 5-second video.
+                  Note: This uses Wan VACE 14B, which can take up to 6 minutes to generate a 5-second video on an RTX A5000
                 </p>
               </div>
               

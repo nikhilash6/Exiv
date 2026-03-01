@@ -4,6 +4,7 @@ from exiv.components.enum import KSamplerType, SchedulerType
 from exiv.components.cond_registry import preprocess_conds
 from exiv.components.models.wan.constructor import get_wan_instance
 from exiv.components.samplers.model_sampling import KSampler
+from exiv.components.samplers.utils import normalize_seed
 from exiv.components.vae.base import get_vae
 from exiv.model_utils.common_classes import Conditioning, ModelWrapper, Latent
 from exiv.server.app_core import App, AppOutputType, Input, Output
@@ -15,19 +16,23 @@ from exiv.utils.logging import app_logger
 def main(**params):
     # Extract parameters
     prompt = params.get("prompt")
-    negative_prompt = params.get("negative_prompt", "bad quality, blurry, low res")
-    seed = params.get("seed", -1)
-    steps = params.get("steps", 20)
-    cfg = params.get("cfg", 6.0)
-    width = params.get("width", 832)
-    height = params.get("height", 480)
-    frame_count = params.get("frame_count", 81)
+    width = params.get("width", 512)
+    height = params.get("height", 512)
+    
+    # Hardcoded/Default values
+    negative_prompt = "(worst quality, low quality, normal quality, lowres, low resolution, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, jpeg artifacts,\
+     signature, watermark, username, blurry, artist name, deformed, disfigured, poorly drawn face, mutation, mutated, extra limbs, extra legs, extra arms, fused fingers, too many fingers,\
+     long neck, cross-eyed, mutated hands, polar lowres, bad body, bad proportions, gross proportions, malformed limbs, missing arms, missing legs, extra foot, out of frame, body out of\
+     frame, canvas boundary, grainy, tiling, poorly drawn hands, poorly drawn feet, out of focus, duplicate, morbidity, mutilation, trite, logo, watermark, banner)"
+    seed = normalize_seed(-1)
+    steps = 20
+    cfg = 6.0
+    frame_count = 81
     
     app_logger.info(f"Starting T2V with prompt: {prompt}")
 
     # 1. Load Model (Wan2.1 1.3B)
-    # Using the vace version as it's the 1.3B model available
-    model_name = "wan21_vace_1_3B_fp16.safetensors"
+    model_name = "wan21_1_3B.safetensors"
     model_path_data = FilePaths.get_path(filename=model_name, file_type="checkpoint")
     
     app_logger.info(f"Loading model: {model_name}")
@@ -68,6 +73,7 @@ def main(**params):
 
     # 4. Sampling
     app_logger.info(f"Starting sampling for {steps} steps...")
+    context = params.get("context")
     sampler = KSampler(
         wrapped_model=model_wrapper,
         seed=seed,
@@ -80,8 +86,11 @@ def main(**params):
     )
     
     # Simple callback for progress
-    def progress_callback(i, s):
-        print(f"Sampling step {i}/{steps} - {s}")
+    def progress_callback(progress_fraction, stage):
+        if context:
+            context.progress(progress_fraction, "Processing", stage=stage)
+        else:
+            print(f"Sampling progress {progress_fraction*100:.1f}% - {stage}")
 
     out = sampler.run_sampling(callback=progress_callback)
     
@@ -101,24 +110,15 @@ def main(**params):
     return {"1": output_paths[0]}
 
 app = App(
-    name="Wan T2V",
+    name="Simple Text to Video",
     inputs={
         'prompt': Input(
             label="Prompt", 
             type="text", 
-            default="A stylish woman walking down a Tokyo street with neon lights, cinematic lighting, 4k"
+            default="A dog running in the park, cinematic lighting, 4k"
         ),
-        'negative_prompt': Input(
-            label="Negative Prompt", 
-            type="text", 
-            default="bad quality, blurry, low res, static, flickering"
-        ),
-        'seed': Input(label="Seed", type="number", default=-1),
-        'steps': Input(label="Steps", type="number", default=20),
-        'cfg': Input(label="CFG", type="number", default=6.0),
-        'width': Input(label="Width", type="number", default=832),
-        'height': Input(label="Height", type="number", default=480),
-        'frame_count': Input(label="Frame Count", type="number", default=81),
+        'width': Input(label="Width", type="number", default=512),
+        'height': Input(label="Height", type="number", default=512),
     },
     outputs=[Output(id=1, type=AppOutputType.VIDEO.value)],
     handler=main
