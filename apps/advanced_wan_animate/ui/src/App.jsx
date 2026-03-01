@@ -8,7 +8,7 @@ const AdvancedWanAnimateUI = ({ appName = 'Character Replace' }) => {
   const [error, setError] = useState('');
   const [isAutoChaining, setIsAutoChaining] = useState(false);
 
-  const [inputVideo, setInputVideo] = useState('dialogue.mp4');
+  const [inputVideo, setInputVideo] = useState('');
   const [sessionId, setSessionId] = useState('');
   const [firstFrame, setFirstFrame] = useState('');
   const [isUploading, setIsUploading] = useState(false);
@@ -25,7 +25,7 @@ const AdvancedWanAnimateUI = ({ appName = 'Character Replace' }) => {
 
   const [positive, setPositive] = useState('a girl talking');
   const [negative, setNegative] = useState('bad quality');
-  const [referenceImage, setReferenceImage] = useState('ref_image.png');
+  const [referenceImage, setReferenceImage] = useState('');
 
   const [height, setHeight] = useState(640);
   const [width, setWidth] = useState(640);
@@ -145,17 +145,36 @@ const AdvancedWanAnimateUI = ({ appName = 'Character Replace' }) => {
   }, [taskId, step, isAutoChaining, inputVideo, sessionId, positive, referenceImage, width, height, videoLength, fgVideo, maskVideo]);
 
   const handleRenderFinal = () => {
-    if (!previewMask || !referenceImage || referenceImage === 'ref_image.png') {
+    if (!referenceImage) {
       if (window.useToast) {
-        addToast({ message: 'Please create mask and upload the reference image', type: 'error' });
+        addToast({ message: 'Please upload the reference image', type: 'error' });
       } else {
-        alert('Please create mask and upload the reference image');
+        alert('Please upload the reference image');
       }
       return;
     }
     setIsAutoChaining(true);
-    setStep(2);
-    runTask('2_matte', { input_video: inputVideo, session_id: sessionId });
+    if (inputVideo && previewMask) {
+      setStep(2);
+      runTask('2_matte', { input_video: inputVideo, session_id: sessionId });
+    } else {
+      setStep(4);
+      runTask('4_animate', {
+        bg_video: '',
+        mask_video: '',
+        pose_video: '',
+        face_video: '',
+        reference_image: referenceImage,
+        positive,
+        negative: '',
+        seed: -1,
+        steps: 4,
+        cfg: 1.0,
+        width,
+        height,
+        frame_count: Math.ceil(videoLength * 16),
+      });
+    }
   };
 
   const handleFileUpload = async (file, setPathCallback, autoInit = false) => {
@@ -265,7 +284,8 @@ const AdvancedWanAnimateUI = ({ appName = 'Character Replace' }) => {
               <div className="awa-seg-main" style={{ flex: '1 1 50%', maxWidth: '50%', paddingRight: '12px', borderRight: '1px solid var(--awa-card-border)' }}>
                 <h3 style={{ fontSize: '14px', marginBottom: '8px' }}>Load Source Video</h3>
                 <p style={{ fontSize: '12px', color: 'var(--awa-muted)', marginBottom: '4px' }}>Pick source video and initialize session.</p>
-                <p style={{ fontSize: '12px', color: 'var(--awa-muted)', marginBottom: '16px' }}>* Videos greater than 5 secs are preferred.</p>
+                <p style={{ fontSize: '12px', color: 'var(--awa-muted)', marginBottom: '4px' }}>* Videos greater than 5 secs are preferred.</p>
+                <p style={{ fontSize: '12px', color: 'var(--awa-muted)', marginBottom: '16px' }}>* If input video is not provided, then the ref image will be animated.</p>
                 <input
                   ref={videoInputRef}
                   type="file"
@@ -281,7 +301,7 @@ const AdvancedWanAnimateUI = ({ appName = 'Character Replace' }) => {
                 >
                   Load Video
                 </button>
-                <p className="awa-path" style={{ marginTop: '12px', marginBottom: '40px' }}>{inputVideo && inputVideo !== 'dialogue.mp4' ? `Loaded: ${inputVideo}` : 'No video selected'}</p>
+                <p className="awa-path" style={{ marginTop: '12px', marginBottom: '40px' }}>{inputVideo ? `Loaded: ${inputVideo}` : 'No video selected'}</p>
 
                 <h3 style={{ fontSize: '14px', marginBottom: '8px' }}>Mask Generation</h3>
                 <p style={{ fontSize: '12px', color: 'var(--awa-muted)', marginBottom: '16px' }}>Click to mark a point, mask will be generated for this marked segment</p>
@@ -352,7 +372,7 @@ const AdvancedWanAnimateUI = ({ appName = 'Character Replace' }) => {
                     style={{ width: '100%', height: '300px', cursor: 'pointer', overflow: 'hidden' }}
                     onClick={() => refImageInputRef.current.click()}
                   >
-                    {referenceImage && referenceImage !== 'ref_image.png' ? (
+                    {referenceImage ? (
                       <img src={resolveMediaUrl(referenceImage)} alt="reference" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                     ) : (
                       <span>Click to select reference image</span>
@@ -409,12 +429,11 @@ const AdvancedWanAnimateUI = ({ appName = 'Character Replace' }) => {
                     type="range"
                     className="awa-input"
                     style={{ padding: 0 }}
-                    min={Math.min(videoDuration || 1, 5)}
-                    max={Math.max(videoDuration || 1, Math.min(videoDuration || 1, 5))}
+                    min={videoDuration > 0 ? Math.min(videoDuration, 5) : 5}
+                    max={videoDuration > 0 ? Math.max(videoDuration, 10) : 10}
                     step={1}
                     value={videoLength}
                     onChange={(e) => setVideoLength(parseFloat(e.target.value))}
-                    disabled={videoDuration === 0}
                   />
                 </div>
 

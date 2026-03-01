@@ -167,10 +167,12 @@ def main(**params):
         print("------ bg_video_path: ", bg_video_path)
         print("------ mask_video_path: ", mask_video_path)
 
-        mode = WanAnimateMode.REPLACEMENT
-        
-        if mode == WanAnimateMode.REPLACEMENT and (not bg_video_path or not mask_video_path):
-            raise ValueError("Replacement mode requires Background Video and Mask Video.")
+        if bg_video_path and mask_video_path:
+            mode = WanAnimateMode.REPLACEMENT
+        else:
+            mode = WanAnimateMode.ANIMATION
+            bg_video_path = ""
+            mask_video_path = ""
         
         frame_count = fix_frame_count(frame_count, 4)
         
@@ -289,7 +291,7 @@ app = App(
         'points': Input(label="Points", type="str", default="[]"),
         'labels': Input(label="Labels", type="str", default="[]"),
         
-        'reference_image': Input(label="Reference Image", type="str", default="ref_image.png"),
+        'reference_image': Input(label="Reference Image", type="str", default=""),
         'bg_video': Input(label="Background Video", type="str", default=""),
         'mask_video': Input(label="Mask Video", type="str", default=""),
         'pose_video': Input(label="Pose Video", type="str", default=""),
