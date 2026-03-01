@@ -333,7 +333,7 @@ async def websocket_endpoint(websocket: WebSocket, task_id: str):
             await asyncio.sleep(update_freq)
             
     except WebSocketDisconnect:
-        app_logger.info(f"WebSocket client disconnected for task {task_id}")
+        pass
     finally:
         try:
             await websocket.close()
@@ -345,4 +345,6 @@ def run_server():
     worker_thread.start()
 
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Suppress uvicorn's default access and connection logging 
+    # so polling doesn't spam the console.
+    uvicorn.run(app, host="0.0.0.0", port=8000, access_log=False, log_level="warning")

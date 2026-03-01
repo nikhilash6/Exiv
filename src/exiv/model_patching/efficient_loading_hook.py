@@ -36,7 +36,7 @@ class EfficientModelLoaderHook(ModelHook):
     # module here is the main model
     def execute(self, module, original_fn: Callable, *args, **kwargs):
         # ------ pre forward hook
-        app_logger.info(f"*****##### Loading {module.__class__.__name__}")
+        app_logger.debug(f"*****##### Loading {module.__class__.__name__}")
         app_logger.debug(f"full load modules count: {len(self.full_load)}")
         self._full_load(module)
         return original_fn(*args, **kwargs)

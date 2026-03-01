@@ -63,9 +63,14 @@ const AdvancedWanAnimateUI = ({ appName = 'Character Replace' }) => {
     setTaskId(data.task_id);
 
     if (addTask) {
+      let taskName = `Character Replace - ${mode}`;
+      if (mode === '0_init') taskName = 'Extract frame';
+      else if (mode === '1_segment') taskName = 'Segment mask';
+      else if (mode === '4_animate') taskName = 'Animate';
+
       addTask({
         id: data.task_id,
-        name: `Character Replace - ${mode}`,
+        name: taskName,
         status: 'queued',
         progress: 0,
       });
@@ -94,36 +99,12 @@ const AdvancedWanAnimateUI = ({ appName = 'Character Replace' }) => {
             setStep(1);
           } else if (step === 1) {
             setPreviewMask(output.preview);
-          } else if (step === 2) {
-            setFgVideo(output.fg_video);
-            setMaskVideo(output.mask_video);
-            if (isAutoChaining) {
-              setStep(3);
-              runTask('3_pose', { input_video: inputVideo });
-            }
-          } else if (step === 3) {
-            setPoseVideo(output.pose_video);
-            setFaceVideo(output.face_video);
-            if (isAutoChaining) {
-              setStep(4);
-              runTask('4_animate', {
-                bg_video: output.fg_video || fgVideo,
-                mask_video: output.mask_video || maskVideo,
-                pose_video: output.pose_video,
-                face_video: output.face_video,
-                reference_image: referenceImage,
-                positive,
-                negative: '',
-                seed: -1,
-                steps: 4,
-                cfg: 1.0,
-                width,
-                height,
-                frame_count: Math.ceil(videoLength * 16),
-              });
-            }
           } else if (step === 4) {
             setFinalVideo(output.final_video);
+            if (output.fg_video) setFgVideo(output.fg_video);
+            if (output.mask_video) setMaskVideo(output.mask_video);
+            if (output.pose_video) setPoseVideo(output.pose_video);
+            if (output.face_video) setFaceVideo(output.face_video);
             setStep(5);
             setIsAutoChaining(false);
           }
@@ -145,6 +126,14 @@ const AdvancedWanAnimateUI = ({ appName = 'Character Replace' }) => {
   }, [taskId, step, isAutoChaining, inputVideo, sessionId, positive, referenceImage, width, height, videoLength, fgVideo, maskVideo]);
 
   const handleRenderFinal = () => {
+    if (!inputVideo || !previewMask) {
+      if (window.useToast) {
+        addToast({ message: 'please upload a video and create a mask', type: 'error' });
+      } else {
+        alert('please upload a video and create a mask');
+      }
+      return;
+    }
     if (!referenceImage) {
       if (window.useToast) {
         addToast({ message: 'Please upload the reference image', type: 'error' });
@@ -153,32 +142,43 @@ const AdvancedWanAnimateUI = ({ appName = 'Character Replace' }) => {
       }
       return;
     }
-    setIsAutoChaining(true);
-    if (inputVideo && previewMask) {
-      setStep(2);
-      runTask('2_matte', { input_video: inputVideo, session_id: sessionId });
-    } else {
-      setStep(4);
-      runTask('4_animate', {
-        bg_video: '',
-        mask_video: '',
-        pose_video: '',
-        face_video: '',
-        reference_image: referenceImage,
-        positive,
-        negative: '',
-        seed: -1,
-        steps: 4,
-        cfg: 1.0,
-        width,
-        height,
-        frame_count: Math.ceil(videoLength * 16),
-      });
+    setStep(4);
+    if (window.useToast) {
+      addToast({ message: 'Animate task queued', type: 'success' });
     }
+    runTask('4_animate', {
+      input_video: inputVideo,
+      session_id: sessionId,
+      bg_video: '',
+      mask_video: '',
+      pose_video: '',
+      face_video: '',
+      reference_image: referenceImage,
+      positive,
+      negative: '',
+      seed: -1,
+      steps: 4,
+      cfg: 1.0,
+      width,
+      height,
+      frame_count: Math.ceil(videoLength * 16),
+    });
   };
 
   const handleFileUpload = async (file, setPathCallback, autoInit = false) => {
     if (!file) return;
+
+    if (autoInit) {
+      clearPoints();
+      setFirstFrame('');
+      setFinalVideo('');
+      setFgVideo('');
+      setPoseVideo('');
+      setMaskVideo('');
+      setFaceVideo('');
+      setTaskId(null);
+      setTaskStatus('');
+    }
 
     if (file.type.startsWith('video/')) {
       const video = document.createElement('video');
@@ -240,15 +240,14 @@ const AdvancedWanAnimateUI = ({ appName = 'Character Replace' }) => {
   };
 
   const statusClass =
-    taskStatus === 'failed' ? 'failed' : taskId ? 'running' : finalVideo ? 'done' : 'idle';
+    taskStatus === 'failed' ? 'failed' : (taskId && taskStatus !== 'completed') ? 'running' : finalVideo ? 'done' : 'idle';
 
-  if (isUploading) {
-    return (
-      <div className="awa-loading-screen">
-        <div className="awa-spinner" />
-      </div>
-    );
-  }
+  const getStatusText = () => {
+    if (taskStatus === 'failed') return 'failed';
+    if (taskId && taskStatus !== 'completed') return taskStatus || 'running';
+    if (finalVideo) return 'ready';
+    return 'idle';
+  };
 
   return (
     <div className="awa-page">
@@ -257,11 +256,11 @@ const AdvancedWanAnimateUI = ({ appName = 'Character Replace' }) => {
         <header className="awa-header">
           <div>
             <h1>Character Replace</h1>
-            <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: 'var(--awa-muted)' }}>replace a character from the input video to the one provided by you</p>
+            <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: 'var(--awa-muted)' }}>Replaces a character from the input video to the one provided by you</p>
           </div>
           <div className={`awa-run-status ${statusClass}`}>
-            <span>{taskId ? 'Running' : 'Status'}</span>
-            <strong>{taskId ? taskStatus || 'queued' : finalVideo ? 'ready' : 'idle'}</strong>
+            <span>Status</span>
+            <strong>{getStatusText()}</strong>
           </div>
         </header>
 
@@ -285,14 +284,13 @@ const AdvancedWanAnimateUI = ({ appName = 'Character Replace' }) => {
               <div className="awa-seg-main" style={{ flex: '1 1 50%', maxWidth: '50%', paddingRight: '12px', borderRight: '1px solid var(--awa-card-border)' }}>
                 <h3 style={{ fontSize: '14px', marginBottom: '8px' }}>Load Source Video</h3>
                 <p style={{ fontSize: '12px', color: 'var(--awa-muted)', marginBottom: '4px' }}>Pick source video and initialize session.</p>
-                <p style={{ fontSize: '12px', color: 'var(--awa-muted)', marginBottom: '4px' }}>* Videos greater than 5 secs are preferred.</p>
-                <p style={{ fontSize: '12px', color: 'var(--awa-muted)', marginBottom: '16px' }}>* If input video is not provided, then the ref image will be animated.</p>
+                <p style={{ fontSize: '12px', color: 'var(--awa-muted)', marginBottom: '16px' }}>* Videos of length 5-10 secs are preferred.</p>
                 <input
                   ref={videoInputRef}
                   type="file"
                   accept="video/*"
                   style={{ display: 'none' }}
-                  onChange={(e) => handleFileUpload(e.target.files[0], setInputVideo, true)}
+                  onChange={(e) => { handleFileUpload(e.target.files[0], setInputVideo, true); e.target.value = null; }}
                 />
                 <button
                   className="awa-btn primary"
@@ -309,7 +307,9 @@ const AdvancedWanAnimateUI = ({ appName = 'Character Replace' }) => {
                 <div className="awa-media-row" style={{ gridTemplateColumns: '1fr', margin: '0 0 20px 0' }}>
                   <div className="awa-media-panel">
                     <h3>{previewMask ? 'Mask Preview (Click to refine)' : 'Frame'}</h3>
-                    {firstFrame ? (
+                    {isUploading || (taskId && (step === 0 || step === 1)) ? (
+                      <div className="awa-placeholder" style={{ height: '300px' }}><div className="awa-spinner" /></div>
+                    ) : firstFrame ? (
                       <div className="awa-image-wrap">
                         <img
                           ref={imgRef}
@@ -348,7 +348,7 @@ const AdvancedWanAnimateUI = ({ appName = 'Character Replace' }) => {
                     }
                     disabled={!!taskId || points.length === 0 || !sessionId}
                   >
-                    Generate Mask
+                    {taskId && step === 1 ? 'Generating...' : 'Generate Mask'}
                   </button>
                   <button className="awa-btn ghost" type="button" onClick={clearPoints}>
                     Clear Mask
@@ -366,7 +366,7 @@ const AdvancedWanAnimateUI = ({ appName = 'Character Replace' }) => {
                     type="file"
                     accept="image/*"
                     style={{ display: 'none' }}
-                    onChange={(e) => handleFileUpload(e.target.files[0], setReferenceImage)}
+                    onChange={(e) => { handleFileUpload(e.target.files[0], setReferenceImage); e.target.value = null; }}
                   />
                   <div 
                     className="awa-placeholder" 
@@ -458,7 +458,7 @@ const AdvancedWanAnimateUI = ({ appName = 'Character Replace' }) => {
                 </div>
 
                 {/* Intermediate results shown below */}
-                {(fgVideo || poseVideo) && (
+                {(fgVideo || poseVideo || maskVideo || faceVideo) && (
                   <div className="awa-intermediate-results" style={{ marginTop: '32px', borderTop: '1px solid var(--awa-card-border)', paddingTop: '24px' }}>
                     <h2 style={{ fontSize: '14px', marginBottom: '16px', color: 'var(--awa-muted)' }}>Intermediate Generation Steps</h2>
                     <div className="awa-media-row">
@@ -467,8 +467,18 @@ const AdvancedWanAnimateUI = ({ appName = 'Character Replace' }) => {
                         {fgVideo ? <video controls src={resolveMediaUrl(fgVideo)} /> : <div className="awa-placeholder">Processing...</div>}
                       </div>
                       <div className="awa-media-panel">
+                        <h3>Background Mask</h3>
+                        {maskVideo ? <video controls src={resolveMediaUrl(maskVideo)} /> : <div className="awa-placeholder">Processing...</div>}
+                      </div>
+                    </div>
+                    <div className="awa-media-row" style={{ marginTop: '16px' }}>
+                      <div className="awa-media-panel">
                         <h3>Pose Estimation</h3>
                         {poseVideo ? <video controls src={resolveMediaUrl(poseVideo)} /> : <div className="awa-placeholder">Processing...</div>}
+                      </div>
+                      <div className="awa-media-panel">
+                        <h3>Face Tracking</h3>
+                        {faceVideo ? <video controls src={resolveMediaUrl(faceVideo)} /> : <div className="awa-placeholder">Processing...</div>}
                       </div>
                     </div>
                   </div>

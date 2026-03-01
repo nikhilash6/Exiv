@@ -65,7 +65,7 @@ class TaskManager:
     def get_task_progress(self, task_id: str) -> Dict:
         if task_id in self.task_dict:
             d = self.task_dict[task_id].result.model_dump()
-            print("task output: ", d)
+            pass
             return d
         else:
             return None

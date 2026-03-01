@@ -58,7 +58,7 @@ def main(**params):
         video_tensor, metadata = MediaProcessor.load_video(input_video, output_frames=False)
         first_frame = video_tensor[:, 0, :, :] # (C, H, W)
         preview_tensor = first_frame.unsqueeze(0).unsqueeze(2) # (1, C, 1, H, W)
-        preview_paths = MediaProcessor.save_latents_to_media(preview_tensor, media_type="image")
+        preview_paths = MediaProcessor.save_latents_to_media(preview_tensor, media_type="image", subfolder="temp")
         
         session_id = str(uuid.uuid4())
         return {"1": {"first_frame": preview_paths[0], "session_id": session_id}}
@@ -66,7 +66,7 @@ def main(**params):
     elif app_mode == "1_segment":
         matanyone_cls = registry.extensions.get("matanyone")
         if not matanyone_cls:
-            raise ValueError("MatAnyone extension is not available.")
+            raise ValueError("MatAnyone extension is not available. Install it from github.com/piyushK52/exiv_matanyone")
         matanyone_ext = matanyone_cls()
             
         session_id = params.get("session_id", str(uuid.uuid4()))
@@ -94,52 +94,9 @@ def main(**params):
         
         preview_tensor = seg_res["preview"]
         preview_tensor = preview_tensor.unsqueeze(0).unsqueeze(2)
-        preview_paths = MediaProcessor.save_latents_to_media(preview_tensor, media_type="image")
+        preview_paths = MediaProcessor.save_latents_to_media(preview_tensor, media_type="image", subfolder="temp")
         
         return {"1": {"preview": preview_paths[0], "session_id": session_id}}
-
-    elif app_mode == "2_matte":
-        matanyone_cls = registry.extensions.get("matanyone")
-        if not matanyone_cls:
-            raise ValueError("MatAnyone extension is not available.")
-        matanyone_ext = matanyone_cls()
-        session_id = params.get("session_id", "")
-        mask = SESSION_CACHE.get(session_id)
-        
-        if mask is None:
-            raise ValueError("Segmentation mask not found. Please run Step 1 (Segmentation) first.")
-            
-        video_tensor, metadata = MediaProcessor.load_video(input_video, output_frames=False)
-        
-        matte_res = matanyone_ext.process(
-            mode="matte_video", 
-            video=video_tensor, 
-            mask=mask,
-            output_type="black_background",
-            mask_padding=10,
-            blocky_mask=True,
-            binary_mask=True,
-        )
-        
-        fg_tensor = matte_res["foregrounds"]
-        al_tensor = matte_res["alphas"]
-
-        fg_paths = MediaProcessor.save_latents_to_media(fg_tensor, subfolder="matanyone_fg")
-        al_paths = MediaProcessor.save_latents_to_media(al_tensor, subfolder="matanyone_mask")
-        
-        return {"1": {"fg_video": fg_paths[0], "mask_video": al_paths[0]}}
-
-    elif app_mode == "3_pose":
-        dwpose_cls = registry.extensions.get("dwpose")
-        if not dwpose_cls:
-            raise ValueError("DWPose extension is not available.")
-        dwpose_ext = dwpose_cls()
-            
-        frames, metadata = MediaProcessor.load_video(input_video, output_frames=True, fps=16)
-        pose_video_path = create_dwpose_video(frames, dwpose_ext, detect_body=True, detect_hands=True, detect_face=False)
-        face_video_path = create_dwpose_video(frames, dwpose_ext, detect_body=False, detect_hands=False, detect_face=True)
-        
-        return {"1": {"pose_video": pose_video_path, "face_video": face_video_path}}
 
     elif app_mode == "4_animate":
         if context: context.start_anchor("Setup", steps=1)
@@ -159,8 +116,43 @@ def main(**params):
         ref_img_path = params.get("reference_image", "")
         pose_video_path = params.get("pose_video", "")
         face_video_path = params.get("face_video", "")
-        bg_video_path = params.get("bg_video", input_video)
+        bg_video_path = params.get("bg_video", "")
         mask_video_path = params.get("mask_video", "")
+        session_id = params.get("session_id", "")
+        input_video = params.get("input_video", "")
+        
+        if input_video and (not bg_video_path or not mask_video_path):
+            matanyone_cls = registry.extensions.get("matanyone")
+            if matanyone_cls:
+                mask = SESSION_CACHE.get(session_id)
+                if mask is not None:
+                    if context: context.start_anchor("Background Matting", steps=1)
+                    matanyone_ext = matanyone_cls()
+                    video_tensor, metadata = MediaProcessor.load_video(input_video, output_frames=False)
+                    matte_res = matanyone_ext.process(
+                        mode="matte_video", 
+                        video=video_tensor, 
+                        mask=mask,
+                        output_type="black_background",
+                        mask_padding=10,
+                        blocky_mask=True,
+                        binary_mask=True,
+                    )
+                    bg_video_path = MediaProcessor.save_latents_to_media(matte_res["foregrounds"], subfolder="matanyone_fg")[0]
+                    mask_video_path = MediaProcessor.save_latents_to_media(matte_res["alphas"], subfolder="matanyone_mask")[0]
+
+        if input_video and (not pose_video_path or not face_video_path):
+            if context: context.start_anchor("Pose Detection", steps=1)
+            dwpose_cls = registry.extensions.get("dwpose")
+            if dwpose_cls:
+                dwpose_ext = dwpose_cls()
+                frames, metadata = MediaProcessor.load_video(input_video, output_frames=True, fps=16)
+                pose_video_path = create_dwpose_video(frames, dwpose_ext, detect_body=True, detect_hands=True, detect_face=False)
+                face_video_path = create_dwpose_video(frames, dwpose_ext, detect_body=False, detect_hands=False, detect_face=True)
+
+        if not bg_video_path:
+            bg_video_path = input_video
+
         print("------ ref_image_path: ", ref_img_path)
         print("------ pose_video_path: ", pose_video_path)
         print("------ face_video_path: ", face_video_path)
@@ -275,17 +267,22 @@ def main(**params):
         MemoryManager.clear_memory()
         
         metadata_dict = {"positive": pos_prompt, "seed": seed, "mode": mode, "model": "Wan2.2 Animate"}
-        out_paths = MediaProcessor.save_latents_to_media(out, metadata=metadata_dict, debug=True)
-        return {"1": {"final_video": out_paths[0]}}
+        out_paths = MediaProcessor.save_latents_to_media(out, metadata=metadata_dict, debug=False)
+        return {"1": {
+            "final_video": out_paths[0],
+            "fg_video": bg_video_path,
+            "mask_video": mask_video_path,
+            "pose_video": pose_video_path,
+            "face_video": face_video_path
+        }}
         
     else:
         raise ValueError(f"Unknown app_mode: {app_mode}")
 
-
 app = App(
     name="Character Replace",
     inputs={
-        'app_mode': Input(label="App Mode", type="select", options=["0_init", "1_segment", "2_matte", "3_pose", "4_animate"], default="0_init"),
+        'app_mode': Input(label="App Mode", type="select", options=["0_init", "1_segment", "4_animate"], default="0_init"),
         'input_video': Input(label="Input Video", type="str", default=""),
         'session_id': Input(label="Session ID", type="str", default=""),
         'points': Input(label="Points", type="str", default="[]"),
