@@ -84,6 +84,19 @@ class App(BaseModel):
     asset_root: Optional[str] = None
     extra_metadata: Optional[dict] = None
     
+    def invoke(self, **kwargs):
+        # handle some arg cleanup
+        if "seed" in kwargs:
+            from ..components.samplers.utils import normalize_seed
+            kwargs["seed"] = normalize_seed(kwargs.get("seed", -1))
+            
+        if "context" not in kwargs:
+            def mock_progress(p, payload):
+                print(f"[{p:.0%}] {payload.get('status', '')}")
+            kwargs["context"] = TaskContext(mock_progress)
+            
+        return self.handler(**kwargs)
+    
     def run_standalone(self):
         try:
             from ..components.extension_registry import ExtensionRegistry
@@ -116,5 +129,5 @@ class App(BaseModel):
         args = vars(parser.parse_args())
         args["report_progress"] = mock_progress
 
-        result = self.handler(**args)
+        result = self.invoke(**args)
         print("\nOutput:", result)

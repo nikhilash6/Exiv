@@ -132,7 +132,7 @@ def process_task(task_id: str):
         
         params["context"] = TaskContext(report_progress)
 
-        result = app_def.handler(**params)
+        result = app_def.invoke(**params)
         
         safe_result = result if isinstance(result, dict) else {}
         for o in app_def.outputs:

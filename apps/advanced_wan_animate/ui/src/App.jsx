@@ -257,6 +257,7 @@ const AdvancedWanAnimateUI = ({ appName = 'Character Replace' }) => {
         <header className="awa-header">
           <div>
             <h1>Character Replace</h1>
+            <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: 'var(--awa-muted)' }}>replace a character from the input video to the one provided by you</p>
           </div>
           <div className={`awa-run-status ${statusClass}`}>
             <span>{taskId ? 'Running' : 'Status'}</span>

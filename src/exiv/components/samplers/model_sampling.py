@@ -5,7 +5,6 @@ from torch import Tensor
 from functools import partial
 from typing import Dict, List
 
-from .utils import normalize_seed
 from .scheduler_types import calculate_sigmas
 from .sampling_helpers import accumulate_output, batch_compatible_conds, determine_max_batch_size, filter_active_conds, prepare_model_conds
 from ..enum import DISCARD_PENULTIMATE_SIGMA_SAMPLERS, KSamplerType, SamplerType, SchedulerType
@@ -45,7 +44,7 @@ class KSampler:
         
         self.device = device or VRAM_DEVICE
         self.wrapped_model = wrapped_model
-        self.seed = normalize_seed(seed)
+        self.seed = seed
         self.start_step, self.end_step = start_step, end_step
         self.cfg = cfg 
         self.sampler_name = sampler_name

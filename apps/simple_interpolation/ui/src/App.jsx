@@ -150,6 +150,7 @@ const SimpleInterpolationUI = ({ appName = 'Simple Interpolation' }) => {
         <header className="awa-header">
           <div>
             <h1>Simple Interpolation</h1>
+            <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: 'var(--awa-muted)' }}>create a simple video by interpolating between the start and end frames</p>
           </div>
           <div className={`awa-run-status ${statusClass}`}>
             <span>{taskId ? 'Running' : 'Status'}</span>
