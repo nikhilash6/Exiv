@@ -1,9 +1,9 @@
 import torch
 import os
-from exiv.components.enum import KSamplerType, SchedulerType
+from exiv import app_logger
+from exiv.components import KSamplerType, SchedulerType, KSampler
 from exiv.components.cond_registry import preprocess_conds
 from exiv.components.models.wan.constructor import get_wan_instance
-from exiv.components.samplers.model_sampling import KSampler
 from exiv.components.samplers.utils import normalize_seed
 from exiv.components.vae.base import get_vae
 from exiv.model_utils.common_classes import Conditioning, ModelWrapper, Latent
@@ -11,7 +11,6 @@ from exiv.server.app_core import App, AppOutputType, Input, Output
 from exiv.utils.device import MemoryManager
 from exiv.utils.file import MediaProcessor
 from exiv.utils.file_path import FilePaths
-from exiv.utils.logging import app_logger
 
 def main(**params):
     # Extract parameters
