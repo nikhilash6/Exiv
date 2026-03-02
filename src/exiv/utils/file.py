@@ -80,9 +80,6 @@ def find_file_path(filename: str, start_path: str = None, recursive: bool = True
 def _interactive_download_check(model_path: str, download_url: str) -> bool:
     from .logging import app_logger
     from ..config import global_config
-    from .logging import app_logger
-    from ..config import global_config
-    import requests
 
     if global_config.auto_download:
         return True
@@ -104,12 +101,12 @@ def _interactive_download_check(model_path: str, download_url: str) -> bool:
     # CLI prompt
     print(f"\n[Exiv] File missing: {os.path.basename(model_path)}")
     while True:
-        user_input = input(f"Do you want to auto download this file ({size_label})? [yes/no/always]: ").strip().lower()
+        user_input = input(f"Do you want to auto download this file ({size_label})? [y/n/a] (yes/no/always): ").strip().lower()
         
         if user_input in ("yes", "y"):
             return True
         
-        elif user_input == "always":
+        elif user_input in ("always", "a"):
             global_config.auto_download = True
             app_logger.info("Auto-download enabled for this session.")
             return True
