@@ -34,12 +34,15 @@ class AppConfig:
     def _get_bool_val(self, val: Any) -> bool:
         return val.lower() in ("1", "true", "yes") if isinstance(val, str) else bool(val)
 
+    LOG_LEVEL_MAP = {
+        1: logging.ERROR,       # error + warning
+        2: logging.WARNING,     # error + warning
+        3: logging.INFO,        # info + warning + error + critical
+        4: logging.DEBUG,       # all logs
+    }
+
     def _get_logging_level(self, level_flag) -> int:
-        if level_flag in [1, "1"]: return logging.ERROR         # error + warning
-        if level_flag in [2, "2"]: return logging.WARNING       
-        if level_flag in [3, "3"]: return logging.INFO          # info + warning + error + critical
-        if level_flag in [4, "4"]: return logging.DEBUG         # all logs
-        return logging.CRITICAL
+        return self.LOG_LEVEL_MAP.get(int(level_flag), logging.CRITICAL)
 
     def update_config(self, metadata: dict):
         for flag in LOADING_MODE.value_list():
@@ -62,6 +65,19 @@ class AppConfig:
         if self.no_oom: return LOADING_MODE.NO_OOM.value
         elif self.low_vram: return LOADING_MODE.LOW_VRAM.value
         else: return LOADING_MODE.NORMAL_LOAD.value
+
+    def to_dict(self) -> dict:
+        reverse_log = {v: k for k, v in self.LOG_LEVEL_MAP.items()}
+        return {
+            "log_level": reverse_log.get(self.logging_level, 3),
+            "low_vram": self.low_vram,
+            "no_oom": self.no_oom,
+            "normal_load": self.normal_load,
+            "disable_mmap": self.disable_mmap,
+            "always_safe_load": self.always_safe_load,
+            "auto_download": self.auto_download,
+            "use_multi_stream": self.use_multi_stream,
+        }
 
 global_config = AppConfig()
 

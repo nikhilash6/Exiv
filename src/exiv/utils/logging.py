@@ -1,6 +1,5 @@
 import logging
 import colorlog
-from ..config import global_config
 
 class AppLogger(logging.Logger):
     def __init__(self, name="app_logger", log_file=None, log_level=logging.DEBUG):
@@ -38,4 +37,6 @@ class AppLogger(logging.Logger):
         for handler in self.handlers:
             handler.setLevel(log_level)
 
-app_logger = AppLogger(log_level=global_config.logging_level)
+# the actual level from global_config is applied in exiv/__init__.py 
+# after all modules have finished loading
+app_logger = AppLogger(log_level=logging.INFO)

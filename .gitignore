@@ -5,7 +5,7 @@
 .idea
 .DS_store
 .ipynb_checkpoints/*
-exiv_config.json
+config.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

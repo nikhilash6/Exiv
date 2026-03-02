@@ -9,6 +9,8 @@ from .server.server import start_worker, run_server
 # extension management
 from .components.extension_registry import ExtensionRegistry
 
+app_logger.set_level(global_config.logging_level)
+
 __all__ = [
     "global_config",
     "app_logger",

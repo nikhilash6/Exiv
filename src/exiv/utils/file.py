@@ -12,7 +12,7 @@ if TYPE_CHECKING:   # mainly for IDE suggestions
     import av
 
 
-CONFIG_FILENAME = "exiv_config.json"
+CONFIG_FILENAME = "config.json"
 
 from .file_path import FilePaths
 from ..utils.common import is_ffmpeg_present

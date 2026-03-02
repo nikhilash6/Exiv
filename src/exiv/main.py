@@ -49,7 +49,8 @@ def run(ctx, app_name):
 
 @cli.command(name="serve")
 def serve():
-    from .server.server import run_server
+    from .server.server import run_server, load_server_config
+    load_server_config()
     app_logger.info("Starting the web server on http://0.0.0.0:8000")
     run_server()
 
@@ -61,7 +62,7 @@ def serve():
 def register(path: str) -> None:
     """
     - Registers extensions found in a local path (or the path itself if it is an extension)
-    - Updates (or creates) the exiv_config.json file with individual extension paths
+    - Updates (or creates) the config.json file with individual extension paths
     - Installs requirements.txt if present for each extension
     - Does NOT imports the extension modules
     """
@@ -122,8 +123,7 @@ def register(path: str) -> None:
             app_logger.info(f"Extension already registered: {ext_path.name}")
 
     if updated:
-        config["extensions"] = existing_paths
-        ExtensionRegistry.save_config(config_file, config)
+        ExtensionRegistry.save_config(config_file, existing_paths)
         app_logger.info(f"Updated {config_file}")
 
 @cli.group(name="list")

@@ -8,9 +8,9 @@ from typing import Dict, List, Type, Any, Union
 from .extensions import Extension
 from ..utils.logging import app_logger
 from ..utils.file import find_file_path, CONFIG_FILENAME
+from ..utils.config_file import load_config as _load_config_file, save_section
 
 EXTENSION_ENTRYPOINT = "extension.py"
-DEFAULT_CONFIG = {"extensions": []}
 
 class ExtensionRegistry:
     _instance = None
@@ -52,24 +52,12 @@ class ExtensionRegistry:
 
     @classmethod
     def load_config(cls, config_file: Path) -> dict:
-        if not config_file.exists():
-            return DEFAULT_CONFIG.copy()
-
-        try:
-            with config_file.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-                if not isinstance(data.get("extensions", []), list):
-                    data["extensions"] = []
-                return data
-        except (OSError, json.JSONDecodeError) as e:
-            app_logger.warning(f"Could not read {config_file}, creating new one. Error: {e}")
-            return DEFAULT_CONFIG.copy()
+        """Loads config.json and returns the full dict (with both sections)."""
+        return _load_config_file(config_file)
 
     @classmethod
-    def save_config(cls, config_file: Path, config: dict) -> None:
-        with config_file.open("w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
-            f.write("\n")
+    def save_config(cls, config_file: Path, extensions: list) -> None:
+        save_section(config_file, "extensions", extensions)
 
     def load_extensions_from_directory(self, directory: str):
         if not os.path.exists(directory):
@@ -164,7 +152,7 @@ class ExtensionRegistry:
         """
         config_file_str, config_dir_str = find_file_path(CONFIG_FILENAME, recursive=True)
         if not config_file_str:
-            app_logger.debug("No exiv_config.json found, returning empty extension list.")
+            app_logger.debug("No config.json found, returning empty extension list.")
             return []
 
         config = self.load_config(Path(config_file_str))

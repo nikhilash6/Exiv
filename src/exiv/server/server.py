@@ -15,6 +15,9 @@ from ..components.extension_registry import ExtensionRegistry
 from .task_manager import RunRequest, ScriptResponse, ScriptStatus, TaskDetails, task_manager
 from ..utils.logging import app_logger
 from ..utils.file_path import FilePaths
+from ..utils.file import find_file_path, CONFIG_FILENAME
+from ..utils.config_file import load_config as _load_config_file, save_section
+from ..config import global_config
 
 APP_REGISTRY = {} # stores all the loaded apps
 
@@ -184,6 +187,51 @@ def get_extensions():
     Includes ID, Name, Version, Capabilities, Inputs (Schema), Slot.
     """
     return ExtensionRegistry.get_instance().get_all_extensions_metadata()
+
+
+def _get_config_file_path():
+    from pathlib import Path
+    from ..utils.file_path import USER_ROOT
+    config_file_str, _ = find_file_path(CONFIG_FILENAME, recursive=True)
+    if config_file_str:
+        return Path(config_file_str)
+    return Path(USER_ROOT) / CONFIG_FILENAME
+
+
+def load_server_config():
+    """
+    Called once at `exiv serve` startup.
+    Reads the 'settings' section of config.json and applies it to global_config.
+    Creates config.json with defaults if the file does not exist yet.
+    """
+    config_file = _get_config_file_path()
+    full_config = _load_config_file(config_file)   # creates file with defaults if missing
+    settings = full_config.get("settings", {})
+    if settings:
+        global_config.update_config(settings)
+        app_logger.info(f"Loaded server settings from {config_file}")
+    else:
+        app_logger.info(f"No settings found in {config_file}, using defaults.")
+
+
+@app.get("/api/config")
+def get_config():
+    """Returns the current in-memory server settings."""
+    return global_config.to_dict()
+
+
+@app.post("/api/config")
+def update_config(payload: dict = Body(...)):
+    """
+    Updates in-memory server settings and persists them to the 'settings'
+    section of config.json. The 'extensions' section is never modified.
+    """
+    from ..utils.logging import app_logger as _logger
+    global_config.update_config(payload)
+    _logger.set_level(global_config.logging_level)
+    config_file = _get_config_file_path()
+    save_section(config_file, "settings", global_config.to_dict())
+    return {"status": "ok", "config": global_config.to_dict()}
 
 @app.get("/api/apps")
 def get_apps():
