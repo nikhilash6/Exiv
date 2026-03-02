@@ -29,7 +29,7 @@ If you want a GUI to interact with Exiv, check it out [here](https://github.com/
 
 🔪 **Cutting Edge Models:** Built to support state-of-the-art open-source GenAI models with optimized inference.
 
-♻️ **Low VRAM support:** Exiv intelligently manages your VRAM and system memory, offloading models dynamically so you only use what you need, maximizing performance even on constrained hardware.
+🪶 **Low VRAM support:** Exiv intelligently manages your VRAM and system memory, offloading models dynamically so you only use what you need, maximizing performance even on constrained hardware.
 
 🔌 **Plug & Play Extensions:** Easily extend the engine's core capabilities by writing custom plugins. All features can be exposed via our JSON API server or embedded directly into your Python scripts.
 
@@ -59,10 +59,21 @@ pip install -e .[dev]
 ```
 
 ### Option B: Install via PIP (Recommended for feature integration)
-If you just want to use the stable version as a Python package and don't need to tinker with the codebase:
+If you just want to use the stable version as a Python package and don't need to tinker with the codebase. In-built apps are not available in this mode.
 ```bash
 pip install exiv
 ```
+
+## 🚀 Quick Start
+
+The fastest way to verify your installation and see Exiv in action is to run the simple text-to-video application. Note that this will require 20GB+ of model weights to be downloaded and is not available in the package mode.
+
+```bash
+# Run the simple T2V app with a custom prompt
+python apps/simple_t2v.py --prompt "a dog running in the park"
+```
+
+Once the generation is complete, the path to the output video will be printed in your terminal.
 
 ## ❓ FAQs
 
