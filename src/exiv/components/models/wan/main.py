@@ -615,11 +615,10 @@ class Wan21Model(ModelMixin):
         """
         Returns architectural constants for memory estimation.
         
-        attn_factor: 
-            ~2.0 - 2.5 (Optimized/Flash Attention): We only store Q,K,V and Output. The huge N×N attention matrix is never fully materialized.
-            ~4.0 - 6.0 (Vanilla/Old Attention): Calculates and stores the full N×N attention map (memory intensive for long sequences).
-        ffn_factor:
-            normally 1.0, extra 0.5 for any overhead involved
+        attn_factor: a tunable multiplier absorbing all per-token activation costs
+            (attention projections, score matrices, cross-attn, modulation, residuals).
+            Tune this based on hardware testing. Higher values = more conservative.
+        ffn_factor: multiplier for FFN intermediate cost, normally ~1.0-1.5.
         """
         try:
              dtype_size = torch.tensor([], dtype=self.dtype).element_size()

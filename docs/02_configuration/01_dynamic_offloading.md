@@ -21,3 +21,14 @@ export low_vram=1
 export no_oom=0
 python apps/your_app.py
 ```
+
+## Activation Memory Estimation
+
+In `low_vram` and `no_oom` modes, Exiv estimates peak activation memory to decide how many model layers can stay on the GPU simultaneously. This uses a simple formula:
+
+```
+peak_activation ≈ num_tokens × max(hidden_dim × attn_factor, ffn_dim × ffn_factor) × dtype_size
+```
+
+Each model defines `attn_factor` and `ffn_factor` via `get_memory_footprint_params()`. The `attn_factor` is a tunable, model-specific multiplier that absorbs all per-token activation costs — attention projections, score matrices, cross-attention, modulation, residuals, etc. It is intentionally high (~20–40) because it accounts for more than just attention. Adjust it based on hardware testing: higher values are more conservative (fewer layers on GPU), lower values are more aggressive.
+

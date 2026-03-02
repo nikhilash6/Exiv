@@ -280,15 +280,17 @@ def estimate_peak_activation_size(memory_footprint_config = None, target_shape =
         t_tokens = (t + patch_t - 1) // patch_t
         h_tokens = (h + patch_h - 1) // patch_h
         w_tokens = (w + patch_w - 1) // patch_w
-        
+        # total tokens / chunk the transformer processes at a time
         num_tokens = target_shape[0] * t_tokens * h_tokens * w_tokens
         
         # attn calculation
+        # q, k, v, o, modulation vectors, skip connections
         attn_peak = params["hidden_dim"] * params.get("attn_factor", 2.5)
         ffn_peak  = params["ffn_dim"]    * params.get("ffn_factor", 1.0)
         peak_width = max(attn_peak, ffn_peak)
         
         dtype_size = params.get("dtype_size", 2)
+        # basically - (how many tokens) * (peak floats per token) * (bytes per float)
         total_bytes = num_tokens * peak_width * dtype_size
         
         return total_bytes / BYTES_IN_MB
