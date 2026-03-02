@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 
-const SimpleInterpolationUI = ({ appName = 'Simple Interpolation' }) => {
+const FrameInterpolationUI = ({ appName = 'Frame Interpolation' }) => {
   const [taskId, setTaskId] = useState(null);
   const [taskStatus, setTaskStatus] = useState('');
   const [error, setError] = useState('');
@@ -337,4 +337,4 @@ const SimpleInterpolationUI = ({ appName = 'Simple Interpolation' }) => {
   );
 };
 
-export default SimpleInterpolationUI;
+export default FrameInterpolationUI;

@@ -24,16 +24,15 @@ vae_dtype = torch.float16
 
 def main(**params):
     context = params.get("context")
+    keyframes = params.get("keyframes", [])
+    
     if context:
         context.start_anchor("Setup", steps=1)
 
-    def progress_callback(progress_fraction, stage, segment_idx=0, total_segments=1): 
-        actual_progress = (segment_idx + progress_fraction) / total_segments
-        app_logger.debug(f"Segment {segment_idx+1}/{total_segments} - Percent: {progress_fraction}  -- Stage: {stage}")
+    def progress_callback(progress_fraction, stage): 
+        app_logger.debug(f"Percent: {progress_fraction}  -- Stage: {stage}")
         if context:
-            context.progress(actual_progress, f"Processing Segment {segment_idx+1}", stage=stage) 
-    
-    keyframes = params.get("keyframes", [])
+            context.progress(progress_fraction, "Processing", stage=stage) 
     prompts = params.get("prompts", [])
     durations = params.get("durations", []) # durations in seconds
     negative = params.get("negative", "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走")
@@ -54,7 +53,7 @@ def main(**params):
         # Pad durations if necessary
         durations = durations + [5] * (len(keyframes) - 1 - len(durations))
 
-    if context: context.start_anchor("Loading Model", steps=1)
+    if context: context.start_anchor("Loading Model", steps=2)
     
     # cur_model = "wan21_vace_1_3B_fp16.safetensors"
     cur_model = "wan21_vace_14B_fp16.safetensors"
@@ -73,6 +72,8 @@ def main(**params):
     t_c = wan_vae.temporal_compression_ratio
     latent_format = model_wrapper.model.model_arch_config.latent_format
 
+    if context: context.start_anchor("Processing Segments", steps=12 * total_segments)
+
     for i in range(total_segments):
         start_img = keyframes[i]
         end_img = keyframes[i+1]
@@ -80,7 +81,10 @@ def main(**params):
         duration = durations[i]
         segment_frame_count = int(duration * 16) + 1 # 16fps, e.g. 5s -> 81 frames
         
-        if context: context.start_anchor(f"Segment {i+1} Preprocessing", steps=1)
+        def chunk_progress_callback(p, s, stage_offset=0.0, stage_weight=1.0):
+            local_p = (stage_offset + p * stage_weight) / total_segments
+            global_p = (i / total_segments) + local_p
+            progress_callback(global_p, s)
         
         # build conditionals
         pos_cond = Conditioning(group_name="positive", input_metadata=prompt)
@@ -108,7 +112,7 @@ def main(**params):
             width=width, 
             frame_count=segment_frame_count,
             cfg=cfg,
-            progress_callback=null_func # Silence inner progress
+            progress_callback=lambda p, s: chunk_progress_callback(p, s, stage_offset=0.0, stage_weight=0.2)
         )
         
         extra_frames = batched_cond.conds[0].extra.get(ExtraCond.EXTRA_LATENT_FRAMES, 0)
@@ -121,7 +125,6 @@ def main(**params):
             wan_vae,
         )
 
-        if context: context.start_anchor(f"Segment {i+1} Sampling", steps=1)
         main_sampler = KSampler(
             wrapped_model=model_wrapper,
             seed=seed if i == 0 else (seed + i if seed != -1 else -1),
@@ -132,10 +135,9 @@ def main(**params):
             batched_conditioning=batched_cond,
             latent_image=latent
         )
-        out = main_sampler.run_sampling(callback=lambda p, s: progress_callback(p, s, i, total_segments))
+        out = main_sampler.run_sampling(callback=lambda p, s: chunk_progress_callback(p, s, stage_offset=0.2, stage_weight=0.8))
         if extra_frames > 0: out = out[:, :, extra_frames*t_c:]
         
-        if context: context.start_anchor(f"Segment {i+1} Decoding", steps=1)
         out = out.to(dtype=vae_dtype)
         decoded = wan_vae.decode(out, (width, height, segment_frame_count))
         

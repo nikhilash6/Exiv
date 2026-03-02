@@ -210,6 +210,11 @@ def main(**params):
         generated_frames = 0
         all_pixels = []
         temporal_latent_pixel = None
+        
+        import math
+        num_chunks = max(1, math.ceil((frame_count - max_overlap) / (bs - max_overlap))) if frame_count > bs else 1
+        chunk_idx = 0
+
         while generated_frames < frame_count:
             chunk_frames = bs if generated_frames == 0 else min(bs, frame_count - generated_frames + max_overlap)
             chunk_frames = fix_frame_count(chunk_frames, 4)
@@ -221,6 +226,13 @@ def main(**params):
                 create_cond("negative", neg_prompt, current_offset, temporal_latent_pixel, current_overlap)
             ]
             
+            def chunk_progress_callback(p, s, stage_offset=0.0, stage_weight=1.0):
+                # stage_offset: 0.0 for preprocessing, 0.2 for sampling
+                # stage_weight: 0.2 for preprocessing, 0.8 for sampling
+                local_p = (stage_offset + p * stage_weight) / num_chunks
+                global_p = (chunk_idx / num_chunks) + local_p
+                progress_callback(global_p, s)
+
             batched_cond: BatchedConditioning = preprocess_conds(
                 model_wrapper=model_wrapper,
                 cond_list=cond_list,
@@ -228,7 +240,7 @@ def main(**params):
                 width=width, 
                 frame_count=chunk_frames,
                 cfg=cfg,
-                progress_callback=lambda p, s: progress_callback(0.1 + p * 0.5, s)
+                progress_callback=lambda p, s: chunk_progress_callback(p, s, stage_offset=0.0, stage_weight=0.2)
             )
             
             latent = Latent() 
@@ -250,7 +262,7 @@ def main(**params):
                 batched_conditioning=batched_cond,
                 latent_image=latent
             )
-            out = sampler.run_sampling(callback=lambda i, s: progress_callback(i, s))
+            out = sampler.run_sampling(callback=lambda i, s: chunk_progress_callback(i, s, stage_offset=0.2, stage_weight=0.8))
             
             decoded_chunk = wan_vae.decode(out.to(dtype=VAE_DTYPE), (width, height, chunk_frames))
             frames_to_clip = 8
@@ -259,6 +271,7 @@ def main(**params):
                 temporal_latent_pixel = decoded_chunk[0, :, -max_overlap:].permute(1, 0, 2, 3)
 
             generated_frames += chunk_frames if generated_frames == 0 else chunk_frames - max_overlap
+            chunk_idx += 1
 
         out = torch.cat(all_pixels, dim=2)
         

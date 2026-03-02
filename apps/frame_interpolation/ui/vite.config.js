@@ -9,7 +9,7 @@ export default defineConfig({
     minify: false,
     lib: {
       entry: 'src/main.jsx',
-      name: 'SimpleInterpolationPlugin',
+      name: 'FrameInterpolationPlugin',
       formats: ['iife'],
       fileName: () => 'index.js'
     },

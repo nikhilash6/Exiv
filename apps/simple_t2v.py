@@ -111,6 +111,7 @@ def main(**params):
 
 app = App(
     name="Simple Text to Video",
+    description="Lightweight T2V, mostly for quickstart demo",
     inputs={
         'prompt': Input(
             label="Prompt", 
