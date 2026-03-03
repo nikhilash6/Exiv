@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import json
 from typing import Dict, List
 
-from exiv import app_logger
+from exiv.utils.logging import app_logger
 from exiv.components import KSamplerType, SchedulerType, KSampler
 from exiv.components.cond_registry import preprocess_conds
 from exiv.components.models.wan.constructor import get_wan_instance
@@ -63,15 +63,10 @@ def main(**params):
     total_segments = len(keyframes) - 1
     all_segment_frames = []
 
-    wan_vae = get_vae(
-        vae_type=model_wrapper.model.model_arch_config.default_vae_type,
-        vae_dtype=vae_dtype,
-        use_tiling=use_vae_tiling
-    )
-    t_c = wan_vae.temporal_compression_ratio
+    
     latent_format = model_wrapper.model.model_arch_config.latent_format
 
-    if context: context.start_anchor("Processing Segments", steps=12 * total_segments)
+    if context: context.start_anchor("Processing Segments", steps=16)
 
     for i in range(total_segments):
         start_img = keyframes[i]
@@ -114,12 +109,17 @@ def main(**params):
             progress_callback=lambda p, s: chunk_progress_callback(p, s, stage_offset=0.0, stage_weight=0.2)
         )
         
-        extra_frames = batched_cond.conds[0].extra.get(ExtraCond.EXTRA_LATENT_FRAMES, 0)
+        wan_vae = get_vae(
+            vae_type=model_wrapper.model.model_arch_config.default_vae_type,
+            vae_dtype=vae_dtype,
+            use_tiling=use_vae_tiling
+        )
+        
         latent = Latent()
         latent.encode_keyframe_condition( 
             width, 
             height,
-            segment_frame_count + (extra_frames * t_c), 
+            segment_frame_count, 
             latent_format, 
             wan_vae,
         )
@@ -135,18 +135,17 @@ def main(**params):
             latent_image=latent
         )
         out = main_sampler.run_sampling(callback=lambda p, s: chunk_progress_callback(p, s, stage_offset=0.2, stage_weight=0.8))
-        if extra_frames > 0: out = out[:, :, extra_frames*t_c:]
-        
         out = out.to(dtype=vae_dtype)
         decoded = wan_vae.decode(out, (width, height, segment_frame_count))
         
         # decoded shape is likely [B, C, T, H, W]
         if i < total_segments - 1:
             # Overwrite last frame: take all but last frame of this segment
-            all_segment_frames.append(decoded[:, :, :-1, :, :])
+            all_segment_frames.append(decoded[:, :, :-1, :, :].detach().cpu())
         else:
-            all_segment_frames.append(decoded)
+            all_segment_frames.append(decoded.detach().cpu())
         
+        del main_sampler, out, batched_cond, pos_cond, neg_cond, cond_list, latent, decoded, wan_vae
         MemoryManager.clear_memory()
 
     if context: context.start_anchor("Combining", steps=1)
@@ -155,7 +154,7 @@ def main(**params):
     output_paths = MediaProcessor.save_latents_to_media(final_video_tensor)
     
     wan_dit_model.to("cpu")
-    del wan_dit_model, model_wrapper, wan_vae
+    del wan_dit_model, model_wrapper
     MemoryManager.clear_memory()
     
     return {"1": output_paths[0]}

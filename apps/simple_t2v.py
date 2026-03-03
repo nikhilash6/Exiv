@@ -1,6 +1,6 @@
 import torch
 import os
-from exiv import app_logger
+from exiv.utils.logging import app_logger
 from exiv.components import KSamplerType, SchedulerType, KSampler
 from exiv.components.cond_registry import preprocess_conds
 from exiv.components.models.wan.constructor import get_wan_instance

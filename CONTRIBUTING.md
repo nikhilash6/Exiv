@@ -14,11 +14,11 @@ You can contribute in many ways, including but not limited to:
 
 ## Discussing Ideas
 We highly recommend discussing your ideas before investing significant time in development:
-*   **Join our Discord**: The best place to chat with the community and maintainers about your ideas.
+*   **Join our Discord**: The best place to chat with the community and maintainers about your ideas. [Discord Link](https://discord.gg/4eFZuJDYXg)
 *   **Create an Issue**: If you prefer, you can open an issue on GitHub to discuss your proposed changes.
 
-## Becoming a Core Maintainer
-If you are interested in becoming a core maintainer, please let me know in the Discord server! I can provide you with an additional list of tasks that can be tackled and will be good for learning the system and getting up to speed.
+## Getting More Involved
+If you want to stick around and help maintain the project, dm me on Discord! If you aren't sure what to pick up, I can point you to some tasks in the backlog to help you get the hang of things.
 
 ## Development Workflow
 1.  **Fork & Clone**: Fork the repository and clone it locally.

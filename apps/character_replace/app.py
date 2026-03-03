@@ -3,7 +3,8 @@ import torch
 import json
 import uuid
 
-from exiv import app_logger, ExtensionRegistry
+from exiv.utils.logging import app_logger
+from exiv.components.extension_registry import ExtensionRegistry
 from exiv.components import KSamplerType, SchedulerType, VAEType, KSampler
 from exiv.components.cond_registry import preprocess_conds
 from exiv.components.models.wan.constructor import get_wan_instance
