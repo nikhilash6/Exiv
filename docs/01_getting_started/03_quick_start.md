@@ -6,7 +6,7 @@ The fastest way to verify your installation is to run one of the pre-built test 
 You can execute a built-in app directly after installation. Remember this will download more than 20 GB of model weights the first time you run it. Also note that this app won't be available if you've installed Exiv in the package mode.
 
 ```bash
-python apps/simple_t2v.py --prompt "a dog running in the park"
+python apps/simple_t2v.py --prompt "Cinematic shot of a Golden Retriever sprinting through a sunny park, 8k, motion blur."
 ```
 
 **Expected Output:**

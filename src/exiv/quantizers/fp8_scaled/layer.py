@@ -53,7 +53,7 @@ class FP8ScaledLinear(nn.Module):
             # older arch
             weight_casted = self.weight.to(input.dtype)        # bit-cast expansion, relatively cheap
             scale = self.scale_weight.to(input.dtype)
-            bias = self.bias.to(input.dtype)
+            bias = self.bias.to(input.dtype) if self.bias is not None else None
             # Optimization: apply scale to the smaller tensor
             if weight_casted.numel() < input.numel():
                 out = F.linear(input, weight_casted * scale, bias)

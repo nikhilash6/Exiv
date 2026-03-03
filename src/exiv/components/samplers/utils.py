@@ -34,7 +34,7 @@ def make_beta_schedule(schedule_type, n_timestep, linear_start=1e-4, linear_end=
     return betas
 
 def normalize_seed(seed):
-    max_val = 99999
+    max_val = 9999999
     if seed == -1:
         seed = random.randint(1, max_val)
     elif seed >= 0:

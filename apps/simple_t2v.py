@@ -23,7 +23,7 @@ def main(**params):
      signature, watermark, username, blurry, artist name, deformed, disfigured, poorly drawn face, mutation, mutated, extra limbs, extra legs, extra arms, fused fingers, too many fingers,\
      long neck, cross-eyed, mutated hands, polar lowres, bad body, bad proportions, gross proportions, malformed limbs, missing arms, missing legs, extra foot, out of frame, body out of\
      frame, canvas boundary, grainy, tiling, poorly drawn hands, poorly drawn feet, out of focus, duplicate, morbidity, mutilation, trite, logo, watermark, banner)"
-    seed = normalize_seed(-1)
+    seed = normalize_seed(-1) # good seed -> 6369278
     steps = 20
     cfg = 6.0
     frame_count = 81
@@ -115,7 +115,7 @@ app = App(
         'prompt': Input(
             label="Prompt", 
             type="text", 
-            default="A dog running in the park, cinematic lighting, 4k"
+            default="Cinematic shot of a Golden Retriever sprinting through a sunny park, 8k, motion blur."
         ),
         'width': Input(label="Width", type="number", default=512),
         'height': Input(label="Height", type="number", default=512),

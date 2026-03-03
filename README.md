@@ -70,7 +70,7 @@ The fastest way to verify your installation and see Exiv in action is to run the
 
 ```bash
 # Run the simple T2V app with a custom prompt
-python apps/simple_t2v.py --prompt "a dog running in the park"
+python apps/simple_t2v.py --prompt "Cinematic shot of a Golden Retriever sprinting through a sunny park, 8k, motion blur."
 ```
 
 Once the generation is complete, the path to the output video will be printed in your terminal.

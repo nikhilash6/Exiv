@@ -7,5 +7,14 @@
         "commercial_use": true,
         "license": "Apache 2.0",
         "repo": "https://github.com/google-research/text-to-text-transfer-transformer"
+    },
+    "umt5_xxl_fp8.safetensors": {
+        "type": "text_encoder",
+        "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+        "family": "T5",
+        "variant": "UMT5 XXL fp8",
+        "commercial_use": true,
+        "license": "Apache 2.0",
+        "repo": "https://github.com/google-research/text-to-text-transfer-transformer"
     }
 }

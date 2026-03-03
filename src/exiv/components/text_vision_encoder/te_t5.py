@@ -63,7 +63,7 @@ class T5DenseActDense(nn.Module):
         if (
             isinstance(self.wo.weight, torch.Tensor)
             and hidden_states.dtype != self.wo.weight.dtype
-            and self.wo.weight.dtype != torch.int8
+            and self.wo.weight.dtype not in [torch.int8, torch.uint8, getattr(torch, "float8_e4m3fn", None)]
         ):
             hidden_states = hidden_states.to(self.wo.weight.dtype)
         return self.wo(hidden_states)
@@ -88,7 +88,7 @@ class T5DenseGatedActDense(nn.Module):
         if (
             isinstance(self.wo.weight, torch.Tensor)
             and hidden_states.dtype != self.wo.weight.dtype
-            and self.wo.weight.dtype != torch.int8
+            and self.wo.weight.dtype not in [torch.int8, torch.uint8, getattr(torch, "float8_e4m3fn", None)]
         ):
             hidden_states = hidden_states.to(self.wo.weight.dtype)
 
