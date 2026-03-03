@@ -23,7 +23,7 @@ BASE_URL = f"http://{TEST_HOST}:{TEST_PORT}"
 
 EXPECTED_CONFIG_KEYS = {
     "log_level", "low_vram", "no_oom", "normal_load",
-    "disable_mmap", "always_safe_load", "auto_download", "use_multi_stream",
+    "auto_download",
 }
 
 
@@ -109,7 +109,7 @@ class ConfigFileHelperTest(unittest.TestCase):
         cfg_path = Path(self._config_file)
         initial = {
             "extensions": [],
-            "settings": {"auto_download": True, "use_multi_stream": False},
+            "settings": {"auto_download": True},
         }
         with open(cfg_path, "w") as f:
             json.dump(initial, f)
@@ -121,7 +121,6 @@ class ConfigFileHelperTest(unittest.TestCase):
 
         self.assertEqual(result["extensions"], ["path/to/new_ext"])
         self.assertTrue(result["settings"]["auto_download"])
-        self.assertFalse(result["settings"]["use_multi_stream"])
 
     def test_load_config_creates_file_with_defaults(self):
         from pathlib import Path

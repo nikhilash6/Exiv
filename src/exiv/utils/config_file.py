@@ -21,10 +21,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "low_vram": True,
     "no_oom": False,
     "normal_load": False,
-    "disable_mmap": False,
-    "always_safe_load": True,
     "auto_download": False,
-    "use_multi_stream": True,
 }
 
 DEFAULT_CONFIG: dict[str, Any] = {

@@ -73,10 +73,7 @@ class AppConfig:
             "low_vram": self.low_vram,
             "no_oom": self.no_oom,
             "normal_load": self.normal_load,
-            "disable_mmap": self.disable_mmap,
-            "always_safe_load": self.always_safe_load,
             "auto_download": self.auto_download,
-            "use_multi_stream": self.use_multi_stream,
         }
 
 global_config = AppConfig()
