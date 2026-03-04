@@ -22,6 +22,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "no_oom": False,
     "normal_load": False,
     "auto_download": False,
+    "extra_model_paths": [],
 }
 
 DEFAULT_CONFIG: dict[str, Any] = {

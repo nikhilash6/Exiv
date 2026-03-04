@@ -11,12 +11,12 @@ logger = logging.getLogger(__name__)
 
 # going with what everyone is using
 DEFAULT_MAPPING = {
-        "checkpoint":      ["models/checkpoints"],
+        "checkpoint":      ["models/checkpoints", "models/diffusion_models"],
         "unet":            ["models/unet", "models/diffusion_models"],
         "lora":            ["models/loras"],
         "vae":             ["models/vae"],
-        "text_encoder":    ["models/clip"],
-        "vision_encoder":  ["models/clip_vision"],
+        "text_encoder":    ["models/clip", "models/text_encoders"],
+        "vision_encoder":  ["models/clip_vision", "models/vision_encoders"],
         "style_model":     ["models/style_models"],
         "embedding":       ["models/embeddings"],
         "hypernetwork":    ["models/hypernetworks"],
@@ -179,6 +179,8 @@ class FilePaths:
                 # optimization: ignoring hidden directories and common large folders that don't contain models
                 dirnames[:] = [d for d in dirnames if not d.startswith('.') and d not in ('venv', '__pycache__', 'node_modules', 'dist', 'build', 'exiv.egg-info')]
                 for f in filenames:
+                    # ignoring files without any extension
+                    if not os.path.splitext(f)[1]: continue
                     files_in_root.append(os.path.join(dirpath, f))
             
             cls._file_cache[root] = files_in_root
