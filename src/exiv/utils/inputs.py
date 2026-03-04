@@ -12,6 +12,7 @@ class InputType(ExtendedEnum):
     JSON = "json"
     TEXT = "text"
     FILE = "file"
+    MODEL = "model"
 
 class Input(BaseModel):
     # interface class for the inputs
@@ -25,6 +26,7 @@ class Input(BaseModel):
     step: Optional[float] = None
     options: Optional[List[str]] = None
     accept: Optional[str] = None # For files
+    categories: Optional[List[str]] = None # For models
     
     # - this allows ANY other argument (min, max, options, accept, icon, etc.)
     # - it will automatically be serialized to the JSON
@@ -58,3 +60,6 @@ def SliderInput(label, min, max, default=0):
 
 def FileInput(label, accept="*"):
     return Input(label=label, type="file", accept=accept)
+
+def ModelInput(label, categories, default=None):
+    return Input(label=label, type="model", categories=categories, default=default)

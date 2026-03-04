@@ -9,7 +9,7 @@ from exiv.utils.file import MediaProcessor
 
 from ...latent_format import Wan21VAELatentFormat, Wan22VAELatentFormat
 from ....model_utils.model_mixin import ModelArchConfig
-from ....utils.device import VRAM_DEVICE
+from ....utils.device import VRAM_DEVICE, MemoryManager
 from ....utils.tensor import common_upscale, get_tensor_weak_hash
 from ...enum import Model, VAEType
 from ...cond_registry import fix_keyframe_indexing, get_image_tensor, get_text_embeddings, get_vision_embeddings, register_preprocessor
@@ -274,7 +274,7 @@ def _process_vace_context(cond_list: List[Conditioning], wrapper: ModelWrapper, 
                 aux_c.data = final
         c.extra[ExtraCond.EXTRA_LATENT_FRAMES] = extra_frames       
     
-def _process_visual_embeddings(cond_list, model_wrapper, height, width, progress_callback):
+def _process_visual_embeddings(cond_list, model_wrapper, height, width, progress_callback, clip_model_name=None):
     pending_embeds = []
     for c in cond_list:
         for aux_c in c.aux:
@@ -286,7 +286,7 @@ def _process_visual_embeddings(cond_list, model_wrapper, height, width, progress
     images = [get_image_tensor(aux.input_metadata, height, width) for aux in pending_embeds]
     clip_embed_list: List[VisionEncoderOutput] = get_vision_embeddings(
         images, 
-        ve_model_filename=model_wrapper.model.model_arch_config.default_vision_encoder
+        ve_model_filename=clip_model_name or model_wrapper.model.model_arch_config.default_vision_encoder
     )
     for aux_c, embed in zip(pending_embeds, clip_embed_list):
         aux_c.data = embed.intermediate_hidden_states
@@ -366,16 +366,16 @@ def _process_wan_animate_aux(cond_list: List[Conditioning], model_wrapper, wan_v
                     
                 aux_c.data = face_video
 
-def process_auxiliaries(cond_list: List[Conditioning], wrapper: ModelWrapper, wan_vae, height, width, frame_count, progress_callback):
+def process_auxiliaries(cond_list: List[Conditioning], wrapper: ModelWrapper, wan_vae, height, width, frame_count, progress_callback, clip_model_name=None):
     if wrapper.model.model_type in [Model.WAN21_VACE_14B_R2V.value, Model.WAN21_VACE_1_3B_R2V.value]:
         for cond in cond_list: _process_vace_keyframes(cond, height, width, frame_count)
         _process_vace_context(cond_list, wrapper, wan_vae, height, width, frame_count, progress_callback)
     elif wrapper.model.model_type == Model.WAN22_14B_ANIMATE.value:
-        _process_visual_embeddings(cond_list, wrapper, height, width, progress_callback)
+        _process_visual_embeddings(cond_list, wrapper, height, width, progress_callback, clip_model_name)
         _process_ref_latents(cond_list, wrapper, wan_vae, height, width, frame_count, progress_callback)
         _process_wan_animate_aux(cond_list, wrapper, wan_vae, height, width, frame_count, progress_callback)
     else:
-        _process_visual_embeddings(cond_list, wrapper, height, width, progress_callback)
+        _process_visual_embeddings(cond_list, wrapper, height, width, progress_callback, clip_model_name)
         _process_ref_latents(cond_list, wrapper, wan_vae, height, width, frame_count, progress_callback)
 
 @register_preprocessor(Model.WAN21_VACE_14B_R2V.value)
@@ -391,29 +391,45 @@ def preprocess_wan_conditionals(
         height: int, 
         width: int, 
         frame_count: int,
-        vae: Optional[VAEBase] = None,           # uses the default vae if not provided
-        progress_callback: Callable = null_func
+        vae: Optional[VAEBase] = None,           # TODO: not a good practice, passing both vae an vae_name
+        progress_callback: Callable = null_func,
+        t5_model_name: Optional[str] = None,
+        clip_model_name: Optional[str] = None,
+        vae_model_name: Optional[str] = None,
+        **kwargs
 ) -> BatchedConditioning:
     
     progress_callback(0.1, "Initializing")
+    
+    progress_callback(0.2, "Encoding prompts")
+    # generate text embeddings (Heavy VRAM operation)
+    prompts = [c.input_metadata for c in cond_list]
+    te_embeds: List[TextEncoderOutput] = get_text_embeddings(
+        prompts, te_model_filename=t5_model_name or model_wrapper.model.model_arch_config.default_text_encoder)
+    for i, te_embed in enumerate(te_embeds): cond_list[i].data = te_embed.last_hidden_state
+
+    # NOTE: we generally pass vae_model_name instead of vae object because it allows the internal
+    # logic of preprocess conds to handle loading / offloading on its own. although not used now, but maybe
+    # used for bigger VAE models in the future
     if vae is None:
         wan_vae = get_vae(
             vae_type=model_wrapper.model.model_arch_config.default_vae_type,
             vae_dtype=torch.float16,
-            use_tiling=False
+            use_tiling=False,
+            override_filename=vae_model_name
         )
     else:
         wan_vae = vae
+        
     frame_count = fix_frame_count(frame_count, wan_vae.temporal_compression_ratio)
-    
-    progress_callback(0.2, "Encoding prompts")
-    # generate text embeddings
-    prompts = [c.input_metadata for c in cond_list]
-    te_embeds: List[TextEncoderOutput] = get_text_embeddings(
-        prompts, te_model_filename=model_wrapper.model.model_arch_config.default_text_encoder)
-    for i, te_embed in enumerate(te_embeds): cond_list[i].data = te_embed.last_hidden_state
 
-    process_auxiliaries(cond_list, model_wrapper, wan_vae, height, width, frame_count, progress_callback)
+    process_auxiliaries(cond_list, model_wrapper, wan_vae, height, width, frame_count, progress_callback, clip_model_name)
+    
+    # clean up internal VAE instance if we created it
+    if vae is None:
+        del wan_vae
+        MemoryManager.clear_memory()
+        
     batched_cond = BatchedConditioning(
         execution_order=["positive", "negative"]    # TODO: generalize this order based on index rather than group_name
     )

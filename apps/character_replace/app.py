@@ -13,6 +13,7 @@ from exiv.model_patching.lora_hook import enable_lora_hook
 from exiv.model_utils.common_classes import AuxConditioning, AuxCondType, Conditioning, BatchedConditioning, Latent, ModelWrapper
 from exiv.model_utils.lora_mixin import LoraDefinition
 from exiv.server.app_core import App, AppOutputType, Input, Output
+from exiv.utils.inputs import ModelInput
 from exiv.utils.device import MemoryManager
 from exiv.utils.file import MediaProcessor, ensure_model_availability
 from exiv.utils.file_path import FilePathData, FilePaths
@@ -112,6 +113,12 @@ def main(**params):
         width = params.get("width", 640)
         frame_count = params.get("frame_count", 81)
 
+        # model overrides
+        wan_model_name = params.get("wan_model_name", "wan22_animate_14b_fp8_e4m3_scaled.safetensors")
+        t5_model_name = params.get("t5_model_name")
+        clip_model_name = params.get("clip_model_name")
+        vae_model_name = params.get("vae_model_name")
+
         ref_img_path = params.get("reference_image", "")
         pose_video_path = params.get("pose_video", "")
         face_video_path = params.get("face_video", "")
@@ -169,8 +176,7 @@ def main(**params):
         
         if context: context.start_anchor("Preprocessing", steps=6)
         
-        model_name = "wan22_animate_14b_fp8_e4m3_scaled"
-        model_path_data = FilePaths.get_path(filename=model_name, file_type="checkpoint")
+        model_path_data = FilePaths.get_path(filename=wan_model_name, file_type="checkpoint")
         wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
         
         model_path_data = FilePaths.get_path(filename="wan_animate_lightx_cfg_step_distill_lora.safetensors", file_type="lora")
@@ -200,7 +206,7 @@ def main(**params):
             ]
             return cond
 
-        wan_vae = get_vae(VAEType.WAN21.value, VAE_DTYPE, USE_VAE_TILING)
+        wan_vae = get_vae(VAEType.WAN21.value, VAE_DTYPE, USE_VAE_TILING, override_filename=vae_model_name)
         latent_format = model_wrapper.model.model_arch_config.latent_format
         
         if context: context.start_anchor("Sampling", steps=12)
@@ -239,7 +245,10 @@ def main(**params):
                 width=width, 
                 frame_count=chunk_frames,
                 cfg=cfg,
-                progress_callback=lambda p, s: chunk_progress_callback(p, s, stage_offset=0.0, stage_weight=0.2)
+                progress_callback=lambda p, s: chunk_progress_callback(p, s, stage_offset=0.0, stage_weight=0.2),
+                t5_model_name=t5_model_name,
+                clip_model_name=clip_model_name,
+                vae_model_name=vae_model_name
             )
             
             latent = Latent() 
@@ -316,6 +325,10 @@ app = App(
         'frame_count': Input(label="Frame Count", type="number", default=81),
         'sampler_name': Input(label="Sampler", type="select", options=KSamplerType.value_list(), default=KSamplerType.EULER.value),
         'scheduler_name': Input(label="Scheduler", type="select", options=SchedulerType.value_list(), default=SchedulerType.SIMPLE.value),
+        'wan_model_name': ModelInput(label="Wan Model", categories=["checkpoint"], default="wan22_animate_14b_fp8_e4m3_scaled.safetensors"),
+        't5_model_name': ModelInput(label="T5 Text Encoder", categories=["text_encoder"], default="umt5_xxl_fp16.safetensors"),
+        'clip_model_name': ModelInput(label="CLIP Vision Encoder", categories=["vision_encoder"], default="CLIP-ViT-H-fp16.safetensors"),
+        'vae_model_name': ModelInput(label="VAE Model", categories=["vae"], default="wan_2_1_vae.safetensors"),
     },
     outputs=[Output(id=1, type=AppOutputType.JSON.value)],
     extra_metadata={'preserve_state': True},

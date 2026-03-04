@@ -1,9 +1,11 @@
 (function(React2) {
   "use strict";
-  const FrameInterpolationUI = ({ appName = "Frame Interpolation" }) => {
+  const ModelSelector = window.ModelSelector || (() => null);
+  const FrameInterpolationUI = ({ appName = "Frame Interpolation", appDefinition }) => {
     const [taskId, setTaskId] = React2.useState(null);
     const [taskStatus, setTaskStatus] = React2.useState("");
     const [error, setError] = React2.useState("");
+    const [models, setModels] = React2.useState({});
     const [keyframes, setKeyframes] = React2.useState(["", ""]);
     const [prompts, setPrompts] = React2.useState(["smooth transition"]);
     const [durations, setDurations] = React2.useState([5]);
@@ -74,6 +76,7 @@
           body: JSON.stringify({
             app_name: appName,
             params: {
+              ...models,
               keyframes,
               prompts,
               durations,
@@ -187,7 +190,7 @@
       /* @__PURE__ */ React2.createElement("option", { value: 3 }, "3s"),
       /* @__PURE__ */ React2.createElement("option", { value: 4 }, "4s"),
       /* @__PURE__ */ React2.createElement("option", { value: 5 }, "5s")
-    )))))), /* @__PURE__ */ React2.createElement("button", { className: "add-keyframe-card", onClick: addKeyframe }, /* @__PURE__ */ React2.createElement("div", { className: "plus-icon" }, "+"), /* @__PURE__ */ React2.createElement("span", null, "Add Frame"))))), /* @__PURE__ */ React2.createElement("section", { className: "awa-card full-width" }, /* @__PURE__ */ React2.createElement("div", { className: "awa-card-head" }, /* @__PURE__ */ React2.createElement("h2", null, "2. Global Settings & Output")), /* @__PURE__ */ React2.createElement("div", { className: "awa-init-layout" }, /* @__PURE__ */ React2.createElement("div", { className: "awa-init-sidebar" }, /* @__PURE__ */ React2.createElement("div", { className: "awa-row" }, /* @__PURE__ */ React2.createElement("div", { className: "awa-col" }, /* @__PURE__ */ React2.createElement("label", { className: "awa-label" }, "Width"), /* @__PURE__ */ React2.createElement(
+    )))))), /* @__PURE__ */ React2.createElement("button", { className: "add-keyframe-card", onClick: addKeyframe }, /* @__PURE__ */ React2.createElement("div", { className: "plus-icon" }, "+"), /* @__PURE__ */ React2.createElement("span", null, "Add Frame"))))), /* @__PURE__ */ React2.createElement("section", { className: "awa-card full-width" }, /* @__PURE__ */ React2.createElement("div", { className: "awa-card-head" }, /* @__PURE__ */ React2.createElement("h2", null, "2. Global Settings & Output")), /* @__PURE__ */ React2.createElement("div", { className: "awa-init-layout" }, /* @__PURE__ */ React2.createElement("div", { className: "awa-init-sidebar" }, ModelSelector && /* @__PURE__ */ React2.createElement(ModelSelector, { appDefinition, onChange: setModels }), /* @__PURE__ */ React2.createElement("div", { className: "awa-row" }, /* @__PURE__ */ React2.createElement("div", { className: "awa-col" }, /* @__PURE__ */ React2.createElement("label", { className: "awa-label" }, "Width"), /* @__PURE__ */ React2.createElement(
       "input",
       {
         type: "number",

@@ -188,6 +188,17 @@ def get_extensions():
     """
     return ExtensionRegistry.get_instance().get_all_extensions_metadata()
 
+@app.get("/api/models")
+def get_models(category: str):
+    """
+    Returns a list of models matching the requested category.
+    """
+    files = FilePaths.get_files(category)
+    return [
+        {"name": f.name, "path": f.path, "is_present": f.is_present, "url": f.url}
+        for f in files
+    ]
+
 
 def _get_config_file_path():
     from pathlib import Path
