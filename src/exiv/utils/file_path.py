@@ -175,7 +175,9 @@ class FilePaths:
                 continue
             
             files_in_root = []
-            for dirpath, _, filenames in os.walk(root):
+            for dirpath, dirnames, filenames in os.walk(root):
+                # optimization: ignoring hidden directories and common large folders that don't contain models
+                dirnames[:] = [d for d in dirnames if not d.startswith('.') and d not in ('venv', '__pycache__', 'node_modules', 'dist', 'build', 'exiv.egg-info')]
                 for f in filenames:
                     files_in_root.append(os.path.join(dirpath, f))
             

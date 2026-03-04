@@ -22,7 +22,6 @@ def main(**params):
     # Model overrides
     model_name = params.get("wan_model_name", "wan21_1_3B.safetensors")
     t5_model_name = params.get("t5_model_name")
-    clip_model_name = params.get("clip_model_name")
     vae_model_name = params.get("vae_model_name")
     
     # Hardcoded/Default values
@@ -59,7 +58,6 @@ def main(**params):
         frame_count=frame_count,
         cfg=cfg,
         t5_model_name=t5_model_name,
-        clip_model_name=clip_model_name,
         vae_model_name=vae_model_name
     )
 
@@ -129,7 +127,6 @@ app = App(
         'height': Input(label="Height", type="number", default=512),
         'wan_model_name': ModelInput(label="Wan Model", categories=["checkpoint"], default="wan21_1_3B.safetensors"),
         't5_model_name': ModelInput(label="T5 Text Encoder", categories=["text_encoder"], default="umt5_xxl_fp16.safetensors"),
-        'clip_model_name': ModelInput(label="CLIP Vision Encoder", categories=["vision_encoder"], default="CLIP-ViT-H-fp16.safetensors"),
         'vae_model_name': ModelInput(label="VAE Model", categories=["vae"], default="wan_2_1_vae.safetensors"),
     },
     outputs=[Output(id=1, type=AppOutputType.VIDEO.value)],
