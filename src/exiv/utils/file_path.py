@@ -119,6 +119,18 @@ class FilePaths:
         return path
 
     @classmethod
+    def set_extra_search_paths(cls, paths: List[str]):
+        """Sets external search paths, replacing any previously set extra paths."""
+        core_paths = [os.path.abspath(USER_ROOT), os.path.abspath(PACKAGE_ROOT)]
+        cls._search_roots = [r for r in cls._search_roots if r["path"] in core_paths]
+        
+        for p in paths:
+            if p:
+                abs_p = os.path.abspath(p)
+                if os.path.exists(abs_p):
+                    cls.add_search_path(abs_p)
+
+    @classmethod
     def add_search_path(cls, path: str, mapping: Dict[str, Union[str, List[str]]] = None):
         """
         Registers a root directory to search for files.
@@ -138,8 +150,12 @@ class FilePaths:
             else:
                 clean_map[key] = val
                 
+        abs_path = os.path.abspath(path)
+        if any(r["path"] == abs_path for r in cls._search_roots):
+            return
+            
         cls._search_roots.append({
-            "path": os.path.abspath(path),
+            "path": abs_path,
             "map": clean_map
         })
         

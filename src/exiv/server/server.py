@@ -223,6 +223,8 @@ def load_server_config():
         app_logger.info(f"Loaded server settings from {config_file}")
     else:
         app_logger.info(f"No settings found in {config_file}, using defaults.")
+    
+    FilePaths.set_extra_search_paths(global_config.extra_model_paths)
 
 
 @app.get("/api/config")
@@ -240,6 +242,7 @@ def update_config(payload: dict = Body(...)):
     from ..utils.logging import app_logger as _logger
     global_config.update_config(payload)
     _logger.set_level(global_config.logging_level)
+    FilePaths.set_extra_search_paths(global_config.extra_model_paths)
     config_file = _get_config_file_path()
     save_section(config_file, "settings", global_config.to_dict())
     return {"status": "ok", "config": global_config.to_dict()}

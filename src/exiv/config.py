@@ -30,6 +30,7 @@ class AppConfig:
         self.use_multi_stream = self._get_bool_val(os.getenv("use_multi_stream", "1"))
         
         self.stop_generation = False
+        self.extra_model_paths = []
 
     def _get_bool_val(self, val: Any) -> bool:
         return val.lower() in ("1", "true", "yes") if isinstance(val, str) else bool(val)
@@ -59,6 +60,9 @@ class AppConfig:
              
         if "auto_download" in metadata:
             self.auto_download = self._get_bool_val(metadata["auto_download"])
+            
+        if "extra_model_paths" in metadata:
+            self.extra_model_paths = metadata["extra_model_paths"] if isinstance(metadata["extra_model_paths"], list) else []
              
     @property
     def loading_mode(self):
@@ -74,6 +78,7 @@ class AppConfig:
             "no_oom": self.no_oom,
             "normal_load": self.normal_load,
             "auto_download": self.auto_download,
+            "extra_model_paths": self.extra_model_paths,
         }
 
 global_config = AppConfig()
