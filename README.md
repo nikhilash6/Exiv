@@ -51,7 +51,8 @@ cd Exiv
 
 # Create and activate a virtual environment
 python3 -m venv venv
-source venv/bin/activate
+source venv/bin/activate          # Linux / macOS
+# venv\Scripts\activate           # Windows (Command Prompt)
 
 # Install dependencies (including dev tools)
 pip install torch --index-url https://download.pytorch.org/whl/cu121
