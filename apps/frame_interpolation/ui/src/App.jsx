@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 
-const FrameInterpolationUI = ({ appName = 'Frame Interpolation' }) => {
+const ModelSelector = window.ModelSelector || (() => null);
+
+const FrameInterpolationUI = ({ appName = 'Frame Interpolation', appDefinition }) => {
   const [taskId, setTaskId] = useState(null);
   const [taskStatus, setTaskStatus] = useState('');
   const [error, setError] = useState('');
+  const [models, setModels] = useState({});
 
   const [keyframes, setKeyframes] = useState(['', '']);
   const [prompts, setPrompts] = useState(['smooth transition']);
@@ -92,6 +95,7 @@ const FrameInterpolationUI = ({ appName = 'Frame Interpolation' }) => {
         body: JSON.stringify({
           app_name: appName,
           params: {
+            ...models,
             keyframes,
             prompts,
             durations,
@@ -282,6 +286,7 @@ const FrameInterpolationUI = ({ appName = 'Frame Interpolation' }) => {
             </div>
             <div className="awa-init-layout">
               <div className="awa-init-sidebar">
+                {ModelSelector && <ModelSelector appDefinition={appDefinition} onChange={setModels} />}
                 <div className="awa-row">
                   <div className="awa-col">
                     <label className="awa-label">Width</label>

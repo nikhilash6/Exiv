@@ -106,7 +106,57 @@ window.ExivPlugins['calculator'] = App;
 console.log("Calculator Plugin Registered!");
 ```
 
-### 4. API Integration (Task Queueing & Status)
+### 4. Interacting with Host Components
+
+Your plugin has access to the global `window` object, which Exiv uses to expose certain hooks and UI components for a seamless experience. 
+
+Currently, Exiv exposes:
+- **`window.useTaskActions`**: To register tasks in the host's global task queue.
+- **`window.useToast`**: To trigger notifications in the host UI.
+- **`window.ModelSelector`**: A React component you can render to automatically display model dropdowns based on the `ModelInput` definitions in your Python App.
+
+#### Using ModelSelector
+
+If your python `App` defines inputs of type `ModelInput`, you can let Exiv render the model selection UI automatically by importing and rendering `ModelSelector`. The host frontend passes down the `appDefinition` prop to your root component, which contains the schema needed by the selector.
+
+```jsx
+import React, { useState } from 'react';
+
+// Safely retrieve the component from the window object
+const ModelSelector = window.ModelSelector || (() => null);
+
+const MyAppUI = ({ appName, appDefinition }) => {
+  const [models, setModels] = useState({});
+
+  const runTask = async () => {
+    const res = await fetch('/api/apps/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        app_name: appName,
+        params: {
+          ...models, // Pass selected models to the backend
+          num1: 5,
+        }
+      })
+    });
+  };
+
+  return (
+    <div>
+      {/* Renders collapsible model dropdowns automatically */}
+      {ModelSelector && (
+        <ModelSelector appDefinition={appDefinition} onChange={setModels} />
+      )}
+      <button onClick={runTask}>Run App</button>
+    </div>
+  );
+};
+export default MyAppUI;
+```
+
+### 5. API Integration (Task Queueing & Status)
+
 
 Inside your main component (`App.jsx`), you will need to interact with the backend to trigger processing and poll for updates.
 
@@ -209,3 +259,5 @@ npx vite build --watch
 ```
 
 This will automatically recompile your plugin bundle whenever you save a React file. Then, just refresh the main Exiv browser page to see your latest changes!
+
+> **Troubleshooting Note:** If you have made changes to your React UI code but they are not reflecting on the frontend even after refreshing the page, ensure you have properly executed the NPM build command (`npm run build`) in your UI directory and try restarting the backend python server.

@@ -188,6 +188,32 @@ def get_extensions():
     """
     return ExtensionRegistry.get_instance().get_all_extensions_metadata()
 
+@app.get("/api/models")
+def get_models(category: str):
+    """
+    Returns a list of models matching the requested categories (comma-separated).
+    """
+    categories = [c.strip() for c in category.split(",")]
+    all_files = []
+    for cat in categories:
+        if cat:
+            all_files.extend(FilePaths.get_files(cat))
+            
+    # deduplicate by name if multiple categories return the same model
+    # this is a little tricky, since categories can multiple overlap, we can
+    # end up with same exact filename in multiple categories
+    seen = set()
+    unique_files = []
+    for f in all_files:
+        if f.name not in seen:
+            seen.add(f.name)
+            unique_files.append(f)
+
+    return [
+        {"name": f.name, "path": f.path, "is_present": f.is_present, "url": f.url}
+        for f in unique_files
+    ]
+
 
 def _get_config_file_path():
     from pathlib import Path
@@ -212,6 +238,8 @@ def load_server_config():
         app_logger.info(f"Loaded server settings from {config_file}")
     else:
         app_logger.info(f"No settings found in {config_file}, using defaults.")
+    
+    FilePaths.set_extra_search_paths(global_config.extra_model_paths)
 
 
 @app.get("/api/config")
@@ -229,6 +257,7 @@ def update_config(payload: dict = Body(...)):
     from ..utils.logging import app_logger as _logger
     global_config.update_config(payload)
     _logger.set_level(global_config.logging_level)
+    FilePaths.set_extra_search_paths(global_config.extra_model_paths)
     config_file = _get_config_file_path()
     save_section(config_file, "settings", global_config.to_dict())
     return {"status": "ok", "config": global_config.to_dict()}

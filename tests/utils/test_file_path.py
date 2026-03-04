@@ -228,9 +228,88 @@ class TestFilePaths(unittest.TestCase):
         _ = FilePaths.get_files("checkpoint")
         self.assertTrue(len(FilePaths._file_cache) > 0)
         
-        # Add new path (even if same, it triggers logic)
-        FilePaths.add_search_path(self.test_dir) 
-        self.assertEqual(FilePaths._file_cache, {}) # Cache should be empty
+        # Add new path
+        new_dir = tempfile.mkdtemp()
+        try:
+            FilePaths.add_search_path(new_dir) 
+            self.assertEqual(FilePaths._file_cache, {}) # Cache should be empty
+        finally:
+            shutil.rmtree(new_dir)
+
+    @patch('exiv.utils.file_path.USER_ROOT', new_callable=lambda: tempfile.mkdtemp())
+    def test_set_extra_search_paths(self, mock_user_root):
+        """Test setting extra search paths, including absolute conversion and deduplication."""
+        FilePaths._search_roots = [] # clear existing for test clarity
+        
+        # mock core paths
+        import exiv.utils.file_path
+        
+        FilePaths.add_search_path(mock_user_root)
+        
+        # Setup test files in mock_user_root
+        os.makedirs(os.path.join(mock_user_root, "models/checkpoints"), exist_ok=True)
+        with open(os.path.join(mock_user_root, "models/checkpoints/v1-5.ckpt"), 'w') as f:
+            f.write("dummy")
+            
+        initial_roots_count = len(FilePaths._search_roots)
+        
+        # Add relative and absolute paths
+        extra_dir_1 = tempfile.mkdtemp()
+        extra_dir_2_rel = "some_relative_mock_dir"
+        extra_dir_2_abs = os.path.abspath(extra_dir_2_rel)
+        
+        try:
+            os.makedirs(extra_dir_2_abs, exist_ok=True)
+            
+            # Setup mock models in extra paths
+            os.makedirs(os.path.join(extra_dir_1, "models/checkpoints"), exist_ok=True)
+            with open(os.path.join(extra_dir_1, "models/checkpoints/model_extra1.ckpt"), 'w') as f:
+                f.write("dummy")
+                
+            os.makedirs(os.path.join(extra_dir_2_abs, "models/checkpoints"), exist_ok=True)
+            with open(os.path.join(extra_dir_2_abs, "models/checkpoints/model_extra2.ckpt"), 'w') as f:
+                f.write("dummy")
+            
+            # Also create a file that exists in mock_user_root to test precedence
+            with open(os.path.join(extra_dir_1, "models/checkpoints/v1-5.ckpt"), 'w') as f:
+                f.write("override")
+                
+            # Set extra search paths
+            # Add extra_dir_1 twice to test deduplication
+            FilePaths.set_extra_search_paths([extra_dir_1, extra_dir_2_rel, extra_dir_1])
+            
+            # Verify roots
+            roots_paths = [r["path"] for r in FilePaths._search_roots]
+            self.assertIn(os.path.abspath(extra_dir_1), roots_paths)
+            self.assertIn(extra_dir_2_abs, roots_paths)
+            
+            # Verify counts (mock_user_root + 2 unique extra)
+            self.assertEqual(len(roots_paths), initial_roots_count + 2)
+            
+            # Get files
+            with patch.dict(exiv.utils.file_path.DOWNLOAD_MAP, {}, clear=True):
+                ckpts = FilePaths.get_files("checkpoint")
+                names = [f.name for f in ckpts]
+                
+                # Should find both extra models
+                self.assertIn("model_extra1.ckpt", names)
+                self.assertIn("model_extra2.ckpt", names)
+                
+                # Resolving a model that only exists in an extra path (Test #1)
+                res_extra = FilePaths.get_path("model_extra1.ckpt", "checkpoint")
+                self.assertTrue(res_extra.path.startswith(os.path.abspath(extra_dir_1)))
+                
+                # Resolving duplicate model (v1-5.ckpt exists in both mock_user_root and extra_dir_1) (Test #2)
+                res_dup = FilePaths.get_path("v1-5.ckpt", "checkpoint")
+                
+                # mock_user_root was added before the extra paths, so it should take precedence
+                self.assertTrue(res_dup.path.startswith(os.path.abspath(mock_user_root)))
+                
+        finally:
+            shutil.rmtree(extra_dir_1)
+            if os.path.exists(extra_dir_2_abs):
+                shutil.rmtree(extra_dir_2_abs)
+            shutil.rmtree(mock_user_root)
 
     def test_get_save_folder(self):
         """Test retrieving the default save folder for a type."""

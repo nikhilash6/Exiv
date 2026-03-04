@@ -11,12 +11,12 @@ logger = logging.getLogger(__name__)
 
 # going with what everyone is using
 DEFAULT_MAPPING = {
-        "checkpoint":      ["models/checkpoints"],
+        "checkpoint":      ["models/checkpoints", "models/diffusion_models"],
         "unet":            ["models/unet", "models/diffusion_models"],
         "lora":            ["models/loras"],
         "vae":             ["models/vae"],
-        "text_encoder":    ["models/clip"],
-        "vision_encoder":  ["models/clip_vision"],
+        "text_encoder":    ["models/clip", "models/text_encoders"],
+        "vision_encoder":  ["models/clip_vision", "models/vision_encoders"],
         "style_model":     ["models/style_models"],
         "embedding":       ["models/embeddings"],
         "hypernetwork":    ["models/hypernetworks"],
@@ -119,6 +119,18 @@ class FilePaths:
         return path
 
     @classmethod
+    def set_extra_search_paths(cls, paths: List[str]):
+        """Sets external search paths, replacing any previously set extra paths."""
+        core_paths = [os.path.abspath(USER_ROOT), os.path.abspath(PACKAGE_ROOT)]
+        cls._search_roots = [r for r in cls._search_roots if r["path"] in core_paths]
+        
+        for p in paths:
+            if p:
+                abs_p = os.path.abspath(p)
+                if os.path.exists(abs_p):
+                    cls.add_search_path(abs_p)
+
+    @classmethod
     def add_search_path(cls, path: str, mapping: Dict[str, Union[str, List[str]]] = None):
         """
         Registers a root directory to search for files.
@@ -138,8 +150,12 @@ class FilePaths:
             else:
                 clean_map[key] = val
                 
+        abs_path = os.path.abspath(path)
+        if any(r["path"] == abs_path for r in cls._search_roots):
+            return
+            
         cls._search_roots.append({
-            "path": os.path.abspath(path),
+            "path": abs_path,
             "map": clean_map
         })
         
@@ -159,8 +175,12 @@ class FilePaths:
                 continue
             
             files_in_root = []
-            for dirpath, _, filenames in os.walk(root):
+            for dirpath, dirnames, filenames in os.walk(root):
+                # optimization: ignoring hidden directories and common large folders that don't contain models
+                dirnames[:] = [d for d in dirnames if not d.startswith('.') and d not in ('venv', '__pycache__', 'node_modules', 'dist', 'build', 'exiv.egg-info')]
                 for f in filenames:
+                    # ignoring files without any extension
+                    if not os.path.splitext(f)[1]: continue
                     files_in_root.append(os.path.join(dirpath, f))
             
             cls._file_cache[root] = files_in_root

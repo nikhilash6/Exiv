@@ -1,11 +1,13 @@
 (function(React2) {
   "use strict";
-  const AdvancedWanAnimateUI = ({ appName = "Character Replace" }) => {
+  const ModelSelector = window.ModelSelector || (() => null);
+  const AdvancedWanAnimateUI = ({ appName = "Character Replace", appDefinition }) => {
     const [step, setStep] = React2.useState(0);
     const [taskId, setTaskId] = React2.useState(null);
     const [taskStatus, setTaskStatus] = React2.useState("");
     const [error, setError] = React2.useState("");
     const [isAutoChaining, setIsAutoChaining] = React2.useState(false);
+    const [models, setModels] = React2.useState({});
     const [inputVideo, setInputVideo] = React2.useState("");
     const [sessionId, setSessionId] = React2.useState("");
     const [firstFrame, setFirstFrame] = React2.useState("");
@@ -44,7 +46,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           app_name: appName,
-          params: { app_mode: mode, ...params }
+          params: { app_mode: mode, ...models, ...params }
         })
       });
       const data = await res.json();
@@ -291,7 +293,7 @@
         onClick: () => refImageInputRef.current.click()
       },
       referenceImage ? /* @__PURE__ */ React2.createElement("img", { src: resolveMediaUrl(referenceImage), alt: "reference", style: { width: "100%", height: "100%", objectFit: "contain" } }) : /* @__PURE__ */ React2.createElement("span", null, "Click to select reference image")
-    ))))), /* @__PURE__ */ React2.createElement("section", { className: "awa-card full-width", style: { animationDelay: "260ms" } }, /* @__PURE__ */ React2.createElement("div", { className: "awa-card-head" }, /* @__PURE__ */ React2.createElement("h2", null, "2. Animate"), /* @__PURE__ */ React2.createElement("span", { className: finalVideo ? "pill done" : "pill" }, finalVideo ? "Rendered" : taskId && isAutoChaining ? "Generating..." : "Ready to Run")), /* @__PURE__ */ React2.createElement("div", { className: "awa-init-layout" }, /* @__PURE__ */ React2.createElement("div", { className: "awa-init-sidebar" }, /* @__PURE__ */ React2.createElement("p", null, "Configure prompts and reference image, then render output."), /* @__PURE__ */ React2.createElement("label", { className: "awa-label", htmlFor: "positivePrompt" }, "Prompt"), /* @__PURE__ */ React2.createElement(
+    ))))), /* @__PURE__ */ React2.createElement("section", { className: "awa-card full-width", style: { animationDelay: "260ms" } }, /* @__PURE__ */ React2.createElement("div", { className: "awa-card-head" }, /* @__PURE__ */ React2.createElement("h2", null, "2. Animate"), /* @__PURE__ */ React2.createElement("span", { className: finalVideo ? "pill done" : "pill" }, finalVideo ? "Rendered" : taskId && isAutoChaining ? "Generating..." : "Ready to Run")), /* @__PURE__ */ React2.createElement("div", { className: "awa-init-layout" }, /* @__PURE__ */ React2.createElement("div", { className: "awa-init-sidebar" }, /* @__PURE__ */ React2.createElement("p", null, "Configure prompts and reference image, then render output."), ModelSelector && /* @__PURE__ */ React2.createElement(ModelSelector, { appDefinition, onChange: setModels }), /* @__PURE__ */ React2.createElement("label", { className: "awa-label", htmlFor: "positivePrompt" }, "Prompt"), /* @__PURE__ */ React2.createElement(
       "textarea",
       {
         id: "positivePrompt",

@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 
-const AdvancedWanAnimateUI = ({ appName = 'Character Replace' }) => {
+const ModelSelector = window.ModelSelector || (() => null);
+
+const AdvancedWanAnimateUI = ({ appName = 'Character Replace', appDefinition }) => {
   const [step, setStep] = useState(0);
   const [taskId, setTaskId] = useState(null);
   const [taskStatus, setTaskStatus] = useState('');
   const [error, setError] = useState('');
   const [isAutoChaining, setIsAutoChaining] = useState(false);
+  const [models, setModels] = useState({});
 
   const [inputVideo, setInputVideo] = useState('');
   const [sessionId, setSessionId] = useState('');
@@ -55,7 +58,7 @@ const AdvancedWanAnimateUI = ({ appName = 'Character Replace' }) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         app_name: appName,
-        params: { app_mode: mode, ...params },
+        params: { app_mode: mode, ...models, ...params },
       }),
     });
 
@@ -392,6 +395,7 @@ const AdvancedWanAnimateUI = ({ appName = 'Character Replace' }) => {
             <div className="awa-init-layout">
               <div className="awa-init-sidebar">
                 <p>Configure prompts and reference image, then render output.</p>
+                {ModelSelector && <ModelSelector appDefinition={appDefinition} onChange={setModels} />}
                 <label className="awa-label" htmlFor="positivePrompt">Prompt</label>
                 <textarea
                   id="positivePrompt"

@@ -8,6 +8,7 @@ from exiv.components.samplers.utils import normalize_seed
 from exiv.components.vae.base import get_vae
 from exiv.model_utils.common_classes import Conditioning, ModelWrapper, Latent
 from exiv.server.app_core import App, AppOutputType, Input, Output
+from exiv.utils.inputs import ModelInput
 from exiv.utils.device import MemoryManager
 from exiv.utils.file import MediaProcessor
 from exiv.utils.file_path import FilePaths
@@ -17,6 +18,11 @@ def main(**params):
     prompt = params.get("prompt")
     width = params.get("width", 512)
     height = params.get("height", 512)
+    
+    # Model overrides
+    model_name = params.get("wan_model_name", "wan21_1_3B.safetensors")
+    t5_model_name = params.get("t5_model_name")
+    vae_model_name = params.get("vae_model_name")
     
     # Hardcoded/Default values
     negative_prompt = "(worst quality, low quality, normal quality, lowres, low resolution, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, jpeg artifacts,\
@@ -31,7 +37,6 @@ def main(**params):
     app_logger.info(f"Starting T2V with prompt: {prompt}")
 
     # 1. Load Model (Wan2.1 1.3B)
-    model_name = "wan21_1_3B.safetensors"
     model_path_data = FilePaths.get_path(filename=model_name, file_type="checkpoint")
     
     app_logger.info(f"Loading model: {model_name}")
@@ -51,14 +56,15 @@ def main(**params):
         height=height,
         width=width,
         frame_count=frame_count,
-        cfg=cfg
+        cfg=cfg,
+        t5_model_name=t5_model_name,
+        vae_model_name=vae_model_name
     )
 
     # 3. Setup Latent
     app_logger.info("Setting up latent...")
     vae_type = model_wrapper.model.model_arch_config.default_vae_type
-    wan_vae = get_vae(vae_type=vae_type, vae_dtype=torch.float16)
-    
+    wan_vae = get_vae(vae_type=vae_type, vae_dtype=torch.float16, override_filename=vae_model_name)
     latent = Latent()
     latent.encode_keyframe_condition(
         width, 
@@ -119,6 +125,9 @@ app = App(
         ),
         'width': Input(label="Width", type="number", default=512),
         'height': Input(label="Height", type="number", default=512),
+        'wan_model_name': ModelInput(label="Wan Model", categories=["checkpoint"], default="wan21_1_3B.safetensors"),
+        't5_model_name': ModelInput(label="T5 Text Encoder", categories=["text_encoder"], default="umt5_xxl_fp16.safetensors"),
+        'vae_model_name': ModelInput(label="VAE Model", categories=["vae"], default="wan_2_1_vae.safetensors"),
     },
     outputs=[Output(id=1, type=AppOutputType.VIDEO.value)],
     handler=main

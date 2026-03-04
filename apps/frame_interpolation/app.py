@@ -13,6 +13,7 @@ from exiv.components.vae.base import get_vae
 from exiv.model_utils.common_classes import AuxConditioning, AuxCondType, BatchedConditioning, Conditioning, ExtraCond, Latent
 from exiv.model_utils.common_classes import ModelWrapper
 from exiv.server.app_core import App, AppOutputType, Input, Output
+from exiv.utils.inputs import ModelInput
 from exiv.utils.common import null_func
 from exiv.utils.device import MemoryManager
 from exiv.utils.file import MediaProcessor
@@ -43,6 +44,11 @@ def main(**params):
     height = params.get("height", 512)
     width = params.get("width", 512)
     
+    # model overrides
+    wan_model_name = params.get("wan_model_name", "wan21_vace_14B_fp16.safetensors")
+    t5_model_name = params.get("t5_model_name")
+    vae_model_name = params.get("vae_model_name")
+    
     if len(keyframes) < 2:
         raise ValueError("At least two keyframes must be provided.")
     if len(prompts) < len(keyframes) - 1:
@@ -54,9 +60,7 @@ def main(**params):
 
     if context: context.start_anchor("Loading Model", steps=2)
     
-    # cur_model = "wan21_vace_1_3B_fp16.safetensors"
-    cur_model = "wan21_vace_14B_fp16.safetensors"
-    model_path_data = FilePaths.get_path(filename=cur_model, file_type="checkpoint")
+    model_path_data = FilePaths.get_path(filename=wan_model_name, file_type="checkpoint")
     wan_dit_model = get_wan_instance(model_path_data.path, model_path_data.url, force_dtype=torch.float16)
     model_wrapper = ModelWrapper(model=wan_dit_model)
     
@@ -102,17 +106,19 @@ def main(**params):
         batched_cond: BatchedConditioning = preprocess_conds(
             model_wrapper=model_wrapper,
             cond_list=cond_list,
-            height=height, 
-            width=width, 
+            height=height,
+            width=width,
             frame_count=segment_frame_count,
             cfg=cfg,
-            progress_callback=lambda p, s: chunk_progress_callback(p, s, stage_offset=0.0, stage_weight=0.2)
+            progress_callback=lambda p, s: chunk_progress_callback(p, s, stage_offset=0.0, stage_weight=0.2),
+            t5_model_name=t5_model_name,
+            vae_model_name=vae_model_name
         )
-        
         wan_vae = get_vae(
             vae_type=model_wrapper.model.model_arch_config.default_vae_type,
             vae_dtype=vae_dtype,
-            use_tiling=use_vae_tiling
+            use_tiling=use_vae_tiling,
+            override_filename=vae_model_name
         )
         
         latent = Latent()
@@ -170,6 +176,9 @@ app = App(
         'cfg': Input(label="CFG", type="number", default=6.0),
         'height': Input(label="Height", type="number", default=512),
         'width': Input(label="Width", type="number", default=512),
+        'wan_model_name': ModelInput(label="Wan Model", categories=["checkpoint"], default="wan21_vace_14B_fp16.safetensors"),
+        't5_model_name': ModelInput(label="T5 Text Encoder", categories=["text_encoder"], default="umt5_xxl_fp16.safetensors"),
+        'vae_model_name': ModelInput(label="VAE Model", categories=["vae"], default="wan_2_1_vae.safetensors"),
     },
     outputs=[Output(id=1, type=AppOutputType.VIDEO.value)],
     handler=main
