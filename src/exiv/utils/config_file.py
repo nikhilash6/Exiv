@@ -22,6 +22,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "no_oom": False,
     "normal_load": False,
     "auto_download": False,
+    "disable_mmap": False,
     "extra_model_paths": [],
 }
 

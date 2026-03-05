@@ -232,7 +232,7 @@ class ModelMixin(nn.Module, LoraMixin, ConditioningMixin, metaclass=ModuleMeta):
         model_path = ensure_model_availability(model_path, download_url, force_download)
         state_dict = get_state_dict(model_path, model_type=model_type)
         model_state_dict = self.state_dict()
-        
+              
         for param_name, param in state_dict.items():
             if param_name not in model_state_dict: 
                 app_logger.warning(f"skipping the param {param_name} as it's not present in the model definition")

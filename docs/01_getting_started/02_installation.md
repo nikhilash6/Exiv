@@ -32,7 +32,7 @@ cd Exiv
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-pip install torch --index-url https://download.pytorch.org/whl/cu121    # if not already installed
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121    # if not already installed
 pip install -e .[dev]       # [dev] installs development dependencies like pytest
 ```
 
@@ -76,6 +76,13 @@ pip install exiv
 2. Make sure you have up-to-date NVIDIA GPU drivers.
 3. Verify: `nvcc --version`
 
+### Windows Media Feature Pack (Required for Windows N/KN editions)
+If you are using a **Windows N** or **KN** edition, you must install the **Media Feature Pack** to avoid `DLL load failed while importing cv2` errors.
+1. Go to **Settings** > **Apps** > **Optional features**.
+2. Select **Add a feature**.
+3. Search for **Media Feature Pack** and install it.
+4. **Restart your computer** after installation.
+
 ### FFmpeg *(optional)*
 Required only for saving metadata to output files. Download from [ffmpeg.org](https://ffmpeg.org/download.html#build-windows), extract, and add the `bin` folder to your system PATH.
 
@@ -95,7 +102,7 @@ cd Exiv
 ```
 python -m venv venv
 venv\Scripts\activate
-pip install torch --index-url https://download.pytorch.org/whl/cu121
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 pip install -e .[dev]
 ```
 

@@ -55,7 +55,7 @@ source venv/bin/activate          # Linux / macOS
 # venv\Scripts\activate           # Windows (Command Prompt)
 
 # Install dependencies (including dev tools)
-pip install torch --index-url https://download.pytorch.org/whl/cu121
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 pip install -e .[dev]
 ```
 
