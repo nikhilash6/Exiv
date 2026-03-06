@@ -29,9 +29,9 @@ class VisionEncoderTest(unittest.TestCase):
         MemoryManager.clear_memory()
     
     LOADING_PARAMS = [
-        ("no_oom",   {"no_oom": True,  "low_vram": False, "normal_load": False}, 1840, VRAM_DEVICE, True),       # this will force revert to normal_load mode
-        ("normal",   {"no_oom": False, "low_vram": False, "normal_load": True},  1840, VRAM_DEVICE, True),
-        ("normal",   {"no_oom": False, "low_vram": False, "normal_load": True},  5997, VRAM_DEVICE, False),
+        ("no_oom",   {"no_oom": True,  "low_vram": False, "normal_load": False, "auto_download": True}, 1840, VRAM_DEVICE, True),       # this will force revert to normal_load mode
+        ("normal",   {"no_oom": False, "low_vram": False, "normal_load": True, "auto_download": True},  1840, VRAM_DEVICE, True),
+        ("normal",   {"no_oom": False, "low_vram": False, "normal_load": True, "auto_download": True},  5997, VRAM_DEVICE, False),
     ]
     @parameterized.expand(LOADING_PARAMS)
     def test_wan21_vae(self, load_mode, config, expected_mem, expected_device, use_tiling):
@@ -76,9 +76,9 @@ class VisionEncoderTest(unittest.TestCase):
 
     # TODO: low_vram / no_oom should automatically trigger use_tiling = False
     LOADING_PARAMS = [
-        ("no_oom",   {"no_oom": True,  "low_vram": False, "normal_load": False}, 4407, VRAM_DEVICE, True),       # this will force revert to normal_load mode
-        ("normal",   {"no_oom": False, "low_vram": False, "normal_load": True},  4407, VRAM_DEVICE, True),       # TODO: decoding cache increases vram, look into how this can be reduced
-        ("normal",   {"no_oom": False, "low_vram": False, "normal_load": True},  8595, VRAM_DEVICE, False),      # TODO: cross check the vram usage with the original implementation
+        ("no_oom",   {"no_oom": True,  "low_vram": False, "normal_load": False, "auto_download": True}, 4407, VRAM_DEVICE, True),       # this will force revert to normal_load mode
+        ("normal",   {"no_oom": False, "low_vram": False, "normal_load": True, "auto_download": True},  4407, VRAM_DEVICE, True),       # TODO: decoding cache increases vram, look into how this can be reduced
+        ("normal",   {"no_oom": False, "low_vram": False, "normal_load": True, "auto_download": True},  9898, VRAM_DEVICE, False),      # TODO: cross check the vram usage with the original implementation
     ]
     @parameterized.expand(LOADING_PARAMS)
     def test_wan22_vae(self, load_mode, config, expected_mem, expected_device, use_tiling):

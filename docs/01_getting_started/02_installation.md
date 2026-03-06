@@ -55,6 +55,8 @@ pip install exiv
 <!-- /section -->
 
 <!-- section: windows-nvidia -->
+> **Note:** This has been only tested on high RAM and VRAM machines, support for low VRAM will be added soon.
+
 ## 1. Prerequisites
 
 ### Python 3.10+

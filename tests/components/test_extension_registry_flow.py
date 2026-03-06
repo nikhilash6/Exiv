@@ -276,7 +276,7 @@ class TestExtensionRegistryFlow(unittest.TestCase):
         ext_d1 = self.create_dummy_extension(dir1, "ext_d1", "ExtD1")
         ext_d2 = self.create_dummy_extension(dir2, "ext_d2", "ExtD2")
         
-        config_path = os.path.join(self.test_dir, "exiv_config.json")
+        config_path = os.path.join(self.test_dir, CONFIG_FILENAME)
         with open(config_path, "w") as f:
             json.dump({"extensions": [ext_d1, ext_d2]}, f)
             
@@ -309,7 +309,7 @@ class TestExtensionRegistryFlow(unittest.TestCase):
         self.create_dummy_extension(ext_base, "ext1", "ExtOne")
         
         # config in /project, pointing to ../extensions/ext1
-        config_path = os.path.join(project_dir, "exiv_config.json")
+        config_path = os.path.join(project_dir, CONFIG_FILENAME)
         encoded_rel_path = os.path.join("..", "extensions", "ext1") 
         with open(config_path, "w") as f:
             json.dump({"extensions": [encoded_rel_path]}, f)

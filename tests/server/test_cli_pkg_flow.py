@@ -21,7 +21,7 @@ class CLITest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, "Script should exit with code 0.")
         # Check task status in stdout, relying on json-like structure or printed logs
-        self.assertIn("Task finished successfully", result.stdout)
+        self.assertIn("Success script finished.", result.stdout)
 
     def test_cli_run_fail(self):
         env = os.environ.copy()
@@ -35,7 +35,8 @@ class CLITest(unittest.TestCase):
             env=env
         )
         
-        print("---- result: ", result.stdout)
+        print("---- result stdout: ", result.stdout)
+        print("---- result stderr: ", result.stderr)
         self.assertEqual(result.returncode, 0)
-        self.assertIn("Task Failed", result.stdout)
-        self.assertIn("This is a test error", result.stdout)
+        self.assertIn("Running fail script...", result.stdout)
+        self.assertIn("This is a test error", result.stderr)

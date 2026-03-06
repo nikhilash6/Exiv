@@ -48,10 +48,15 @@ class TestMultiStepLora(unittest.TestCase):
         self.create_model()
 
     def tearDown(self):
+        import gc
+        gc.collect()
         for path in [self.LORA_PATH, self.LORA_A_PATH, \
             self.LORA_B_PATH, self.DUMMY_MODEL_PATH]:
             if os.path.exists(path):
-                os.remove(path)
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
         MemoryManager.clear_memory()
         
     def create_model(self):
@@ -191,8 +196,14 @@ class TestFP8ScaledLora(unittest.TestCase):
         self._create_model()
         
     def tearDown(self):
-        if os.path.exists(self.LORA_PATH): os.remove(self.LORA_PATH)
-        if os.path.exists(FP8SimpleModel.DUMMY_MODEL_PATH): os.remove(FP8SimpleModel.DUMMY_MODEL_PATH)
+        import gc
+        gc.collect()
+        for path in [self.LORA_PATH, FP8SimpleModel.DUMMY_MODEL_PATH]:
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
         MemoryManager.clear_memory()
 
     def _create_model(self):

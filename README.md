@@ -31,7 +31,7 @@ If you want a GUI to interact with Exiv, check it out [here](https://github.com/
 
 🪶 **Low VRAM support:** Exiv intelligently manages your VRAM and system memory, offloading models dynamically so you only use what you need, maximizing performance even on constrained hardware.
 
-🔌 **Plug & Play Extensions:** Easily extend the engine's core capabilities by writing custom plugins. All features can be exposed via our JSON API server or embedded directly into your Python scripts.
+🔌 **Plug & Play Extensions:** Easily extend the engine's core capabilities by writing custom plugins. All features can be exposed via the JSON API server or embedded directly into your Python scripts.
 
 🚀 **Modular & Extensible:** Core architecture is broken into conditionings and hooks, making it incredibly simple to build, debug, and extend.
 
@@ -41,7 +41,7 @@ If you want a GUI to interact with Exiv, check it out [here](https://github.com/
 
 ## 🛠️ Installation
 
-For a full guide and platform-specific requirements, please refer to our [Installation Documentation](https://exiv.pages.dev/docs/getting-started/installation).
+For a full guide and platform-specific requirements, please refer to the [Installation Documentation](https://exiv.pages.dev/docs/getting-started/installation).
 
 ### Option A: Clone from Source (Recommended for hacking and dev)
 If you want to modify the source code, build extensions, or contribute to Exiv:
