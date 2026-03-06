@@ -25,8 +25,11 @@ def cli():
 @click.pass_context
 def run(ctx, app_name):
     """ Runs a task synchronously """
-    from .server.server import start_worker
+    from .server.server import start_worker, load_apps_from_directory
     from .server.task_manager import task_manager
+
+    # load apps before running
+    load_apps_from_directory()
 
     metadata = {}
     # ctx.args will be a list like ['--seed', '12345', '--negative-prompt', 'blurry']
@@ -44,7 +47,12 @@ def run(ctx, app_name):
 
     task_id = task_manager.add_task(app_name=app_name, params=metadata)
     start_worker(sync_mode=True)
-    return task_manager.get_task_progress(task_id=task_id)
+    
+    progress = task_manager.get_task_progress(task_id=task_id)
+    if progress:
+        app_logger.info(f"Task {app_name} finished with status: {progress['status']}")
+    
+    return progress
 
 
 @cli.command(name="serve")

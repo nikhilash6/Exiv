@@ -23,6 +23,7 @@ from tests.test_utils.common import check_memory_usage
 @unittest.skipIf(not is_cuda_available, "Only available for cuda devices")
 class VisionEncoderTest(unittest.TestCase):
     def setUp(self):
+        global_config.auto_download = True
         MemoryManager.clear_memory()    
     
     def tearDown(self):

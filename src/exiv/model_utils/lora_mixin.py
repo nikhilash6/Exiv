@@ -7,8 +7,6 @@ from typing import Any, List, Optional, Union
 import struct, json
 from dataclasses import dataclass
 
-from tqdm import tqdm
-
 from ..utils.enum import ExtendedEnum
 from ..utils.file import ensure_model_availability
 from ..utils.file_path import FilePathData, FilePaths
@@ -146,6 +144,7 @@ class LoraMixin:
         self.lora_definitions.append(lora_def)
     
     def prepare_loras_for_inference(self, total_steps, device=OFFLOAD_DEVICE):
+        from tqdm import tqdm
         setattr(self, LORA_WEIGHTS_CACHE_DICT, {})      # reset cache dict
         cache = getattr(self, LORA_WEIGHTS_CACHE_DICT)
         if self.lora_definitions: app_logger.info("Loading LoRAs...")

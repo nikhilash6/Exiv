@@ -2,10 +2,7 @@ import torch
 from torch import Tensor
 
 import math
-import numpy as np
 from typing import Union, Tuple, List, Optional
-
-from PIL import Image
 
 from ..model_utils.common_classes import ModelWrapper
 from ..utils.logging import app_logger
@@ -27,12 +24,12 @@ def fix_empty_latent_channels(wrapped_model: ModelWrapper, latent_image: torch.T
         latent_image = repeat_to_batch_size(latent_image, latent_channels, dim=1)
     return latent_image
 
-def prepare_noise(latent_image: torch.Tensor, seed: int | None = None, noise_inds: Optional[np.ndarray] = None):
+def prepare_noise(latent_image: torch.Tensor, seed: int | None = None, noise_inds: Optional[Union[List, Tuple]] = None):
     """
     Creates random noise tensors based on a latent image's shape, dtype, and layout are used
     e.g. usage, noise_inds = [0, 0, 1, 1] -> first two will share the same noise + the last two will as well
     """
-    
+    import numpy as np
     generator = torch.Generator(device="cpu")
     if seed is not None: generator.manual_seed(seed)
 
@@ -185,6 +182,8 @@ def bislerp(samples, width, height):
     return result.to(orig_dtype)
 
 def lanczos(samples, width, height):
+    from PIL import Image
+    import numpy as np
     images = [Image.fromarray(np.clip(255. * image.movedim(0, -1).cpu().numpy(), 0, 255).astype(np.uint8)) for image in samples]
     images = [image.resize((width, height), resample=Image.Resampling.LANCZOS) for image in images]
     images = [torch.from_numpy(np.array(image).astype(np.float32) / 255.0).movedim(-1, 0) for image in images]

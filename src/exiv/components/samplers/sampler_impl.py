@@ -1,9 +1,6 @@
 from functools import partial
 import torch
 from torch import nn, Tensor
-import torchsde
-from tqdm.auto import trange, tqdm
-from scipy import integrate
 
 import math
 from typing import Any, Callable, List, Optional
@@ -144,6 +141,7 @@ class BatchedBrownianTree:
     """A wrapper around torchsde.BrownianTree that enables batches of entropy."""
 
     def __init__(self, x, t0, t1, seed=None, **kwargs):
+        import torchsde
         self.cpu_tree = True
         if "cpu" in kwargs:
             self.cpu_tree = kwargs.pop("cpu")
@@ -207,6 +205,7 @@ class BrownianTreeNoiseSampler:
 @torch.no_grad()
 def sample_euler(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, s_churn=0., s_tmin=0., s_tmax=float('inf'), s_noise=1.):
     """Implements Algorithm 2 (Euler steps) from Karras et al. (2022)."""
+    from tqdm.auto import trange
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
     for i in trange(len(sigmas) - 1, disable=disable):
@@ -233,9 +232,11 @@ def sample_euler(model_forward: Callable[..., Any], x, sigmas, extra_args=None, 
 @torch.no_grad()
 def sample_euler_ancestral(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
     """Ancestral sampling with Euler method steps."""
+    from tqdm.auto import trange
     extra_args = {} if extra_args is None else extra_args
     noise_sampler = default_noise_sampler(x) if noise_sampler is None else noise_sampler
     s_in = x.new_ones([x.shape[0]])
+    from tqdm.auto import trange
     for i in trange(len(sigmas) - 1, disable=disable):
         denoised = model_forward(x, sigmas[i] * s_in, **extra_args)
         sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=eta)
@@ -253,6 +254,7 @@ def sample_euler_ancestral(model_forward: Callable[..., Any], x, sigmas, extra_a
 @torch.no_grad()
 def sample_heun(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, s_churn=0., s_tmin=0., s_tmax=float('inf'), s_noise=1.):
     """Implements Algorithm 2 (Heun steps) from Karras et al. (2022)."""
+    from tqdm.auto import trange
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
     for i in trange(len(sigmas) - 1, disable=disable):
@@ -288,6 +290,7 @@ def sample_heun(model_forward: Callable[..., Any], x, sigmas, extra_args=None, c
 @torch.no_grad()
 def sample_dpm_2(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, s_churn=0., s_tmin=0., s_tmax=float('inf'), s_noise=1.):
     """A sampler inspired by DPM-Solver-2 and Algorithm 2 from Karras et al. (2022)."""
+    from tqdm.auto import trange
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
     for i in trange(len(sigmas) - 1, disable=disable):
@@ -324,9 +327,11 @@ def sample_dpm_2(model_forward: Callable[..., Any], x, sigmas, extra_args=None, 
 @torch.no_grad()
 def sample_dpm_2_ancestral(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
     """Ancestral sampling with DPM-Solver second-order steps."""
+    from tqdm.auto import trange
     extra_args = {} if extra_args is None else extra_args
     noise_sampler = default_noise_sampler(x) if noise_sampler is None else noise_sampler
     s_in = x.new_ones([x.shape[0]])
+    from tqdm.auto import trange
     for i in trange(len(sigmas) - 1, disable=disable):
         denoised = model_forward(x, sigmas[i] * s_in, **extra_args)
         sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=eta)
@@ -351,6 +356,7 @@ def sample_dpm_2_ancestral(model_forward: Callable[..., Any], x, sigmas, extra_a
 
 
 def linear_multistep_coeff(order, t, i, j):
+    from scipy import integrate
     if order - 1 > i:
         raise ValueError(f'Order {order} too high for step {i}')
     def fn(tau):
@@ -365,6 +371,7 @@ def linear_multistep_coeff(order, t, i, j):
 
 @torch.no_grad()
 def sample_lms(model_forward: Callable[..., Any], x, sigmas, extra_args=None, callback=None, disable=None, order=4):
+    from tqdm.auto import trange
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
     sigmas_cpu = sigmas.detach().cpu().numpy()
@@ -563,6 +570,7 @@ class DPMSolver(nn.Module):
 @torch.no_grad()
 def sample_dpm_fast(model_forward: Callable[..., Any], x, sigma_min, sigma_max, n, extra_args=None, callback=None, disable=None, eta=0., s_noise=1., noise_sampler=None):
     """DPM-Solver-Fast (fixed step size). See https://arxiv.org/abs/2206.00927."""
+    from tqdm.auto import tqdm
     if sigma_min <= 0 or sigma_max <= 0:
         raise ValueError('sigma_min and sigma_max must not be 0')
     with tqdm(total=n, disable=disable) as pbar:
@@ -574,6 +582,7 @@ def sample_dpm_fast(model_forward: Callable[..., Any], x, sigma_min, sigma_max, 
 @torch.no_grad()
 def sample_dpm_adaptive(model_forward: Callable[..., Any], x, sigma_min, sigma_max, extra_args=None, callback=None, disable=None, order=3, rtol=0.05, atol=0.0078, h_init=0.05, pcoeff=0., icoeff=1., dcoeff=0., accept_safety=0.81, eta=0., s_noise=1., noise_sampler=None, return_info=False):
     """DPM-Solver-12 and 23 (adaptive step size). See https://arxiv.org/abs/2206.00927."""
+    from tqdm.auto import tqdm
     if sigma_min <= 0 or sigma_max <= 0:
         raise ValueError('sigma_min and sigma_max must not be 0')
     with tqdm(disable=disable) as pbar:
@@ -597,6 +606,7 @@ def sample_dpmpp_2s_ancestral(model_forward: Callable[..., Any], x, sigmas, extr
     sigma_fn = lambda t: t.neg().exp()
     t_fn = lambda sigma: sigma.log().neg()
 
+    from tqdm.auto import trange
     for i in trange(len(sigmas) - 1, disable=disable):
         denoised = model_forward(x, sigmas[i] * s_in, **extra_args)
         sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=eta)
@@ -632,6 +642,7 @@ def sample_dpmpp_2s_ancestral_RF(model_forward: Callable[..., Any], x, sigmas, e
 
     # logged_x = x.unsqueeze(0)
 
+    from tqdm.auto import trange
     for i in trange(len(sigmas) - 1, disable=disable):
         denoised = model_forward(x, sigmas[i] * s_in, **extra_args)
         downstep_ratio = 1 + (sigmas[i+1]/sigmas[i] - 1) * eta
@@ -684,6 +695,7 @@ def sample_dpmpp_sde(model_forward: Callable[..., Any], x, sigmas, extra_args=No
     sigma_fn = lambda t: t.neg().exp()
     t_fn = lambda sigma: sigma.log().neg()
 
+    from tqdm.auto import trange
     for i in trange(len(sigmas) - 1, disable=disable):
         denoised = model_forward(x, sigmas[i] * s_in, **extra_args)
         if callback is not None:
@@ -724,6 +736,7 @@ def sample_dpmpp_2m(model_forward: Callable[..., Any], x, sigmas, extra_args=Non
     t_fn = lambda sigma: sigma.log().neg()
     old_denoised = None
 
+    from tqdm.auto import trange
     for i in trange(len(sigmas) - 1, disable=disable):
         denoised = model_forward(x, sigmas[i] * s_in, **extra_args)
         if callback is not None:
@@ -759,6 +772,7 @@ def sample_dpmpp_2m_sde(model_forward: Callable[..., Any], x, sigmas, extra_args
     h_last = None
     h = None
 
+    from tqdm.auto import trange
     for i in trange(len(sigmas) - 1, disable=disable):
         denoised = model_forward(x, sigmas[i] * s_in, **extra_args)
         if callback is not None:
@@ -804,6 +818,7 @@ def sample_dpmpp_3m_sde(model_forward: Callable[..., Any], x, sigmas, extra_args
     denoised_1, denoised_2 = None, None
     h, h_1, h_2 = None, None, None
 
+    from tqdm.auto import trange
     for i in trange(len(sigmas) - 1, disable=disable):
         denoised = model_forward(x, sigmas[i] * s_in, **extra_args)
         if callback is not None:
@@ -883,6 +898,7 @@ def generic_step_sampler(model_forward: Callable[..., Any], x, sigmas, extra_arg
     noise_sampler = default_noise_sampler(x) if noise_sampler is None else noise_sampler
     s_in = x.new_ones([x.shape[0]])
 
+    from tqdm.auto import trange
     for i in trange(len(sigmas) - 1, disable=disable):
         denoised = model_forward(x, sigmas[i] * s_in, **extra_args)
         if callback is not None:
@@ -901,6 +917,7 @@ def sample_lcm(model_forward: Callable[..., Any], x, sigmas, extra_args=None, ca
     extra_args = {} if extra_args is None else extra_args
     noise_sampler = default_noise_sampler(x) if noise_sampler is None else noise_sampler
     s_in = x.new_ones([x.shape[0]])
+    from tqdm.auto import trange
     for i in trange(len(sigmas) - 1, disable=disable):
         denoised = model_forward(x, sigmas[i] * s_in, **extra_args)
         if callback is not None:
@@ -917,6 +934,7 @@ def sample_heunpp2(model_forward: Callable[..., Any], x, sigmas, extra_args=None
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
     s_end = sigmas[-1]
+    from tqdm.auto import trange
     for i in trange(len(sigmas) - 1, disable=disable):
         gamma = min(s_churn / (len(sigmas) - 1), 2 ** 0.5 - 1) if s_tmin <= sigmas[i] <= s_tmax else 0.
         eps = torch.randn_like(x) * s_noise
@@ -977,6 +995,7 @@ def sample_ipndm(model_forward: Callable[..., Any], x, sigmas, extra_args=None, 
     x_next = x
 
     buffer_model = []
+    from tqdm.auto import trange
     for i in trange(len(sigmas) - 1, disable=disable):
         t_cur = sigmas[i]
         t_next = sigmas[i + 1]
@@ -1018,6 +1037,7 @@ def sample_ipndm_v(model_forward: Callable[..., Any], x, sigmas, extra_args=None
     t_steps = sigmas
 
     buffer_model = []
+    from tqdm.auto import trange
     for i in trange(len(sigmas) - 1, disable=disable):
         t_cur = sigmas[i]
         t_next = sigmas[i + 1]

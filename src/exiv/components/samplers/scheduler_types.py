@@ -1,8 +1,6 @@
 import torch
 
 import math
-import numpy as np
-import scipy
 
 from ..enum import SchedulerType
 from ...utils.logging import app_logger
@@ -37,6 +35,8 @@ def append_zero(x):
 
 # Implemented based on: https://arxiv.org/abs/2407.12173
 def beta_scheduler(model_sampling, steps, alpha=0.6, beta=0.6):
+    import numpy as np
+    import scipy.stats
     total_timesteps = (len(model_sampling.sigmas) - 1)
     ts = 1 - np.linspace(0, 1, steps, endpoint=False)
     ts = np.rint(scipy.stats.beta.ppf(ts, alpha, beta) * total_timesteps)

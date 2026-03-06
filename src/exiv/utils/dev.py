@@ -7,7 +7,6 @@ import os
 import torch
 from torch import Tensor
 
-import psutil
 import gc
 import sys
 import time
@@ -44,6 +43,7 @@ def print_memory_usage(tag, n=5, show_all=False):
 
     # --- General CPU RAM ---
     if show_all:
+        import psutil
         print("\n--- CPU Memory (psutil) ---")
         mem_info = psutil.virtual_memory()
         print(f"Total: {format_bytes(mem_info.total)}")
@@ -243,9 +243,7 @@ def print_model_params(model: torch.nn.Module, break_dtype=None):
             break
 
 import torch
-import numpy as np
-from PIL import Image, ImageDraw
-import math
+from torch import Tensor
 
 def get_covariance_matrix(tensor, channel_dim):
     dims = list(range(tensor.ndim))
@@ -294,6 +292,8 @@ def generate_spark_lines(t, bins=20):
         print(sparkline[i:i+100])
 
 def visualize_latents_pca(tensor):
+    from PIL import Image
+    import numpy as np
     if tensor.ndim == 3: tensor = tensor.unsqueeze(0)
     elif tensor.ndim == 4: pass 
     elif tensor.ndim == 5: 
@@ -337,6 +337,8 @@ def visualize_latents_pca(tensor):
 
 # --- 2. Updated Grid Helper Function with Styled Borders ---
 def create_styled_image_grid(images, black_gap=3, white_border=1):
+    from PIL import Image, ImageDraw
+    import math
     """
     Arranges images into a grid separated by black lines with a white center frame.
     
@@ -391,6 +393,7 @@ def create_styled_image_grid(images, black_gap=3, white_border=1):
 
 import hashlib
 def get_tensor_hash(t, visualize_latent=False):
+    import numpy as np
     # Fix: cast to float() immediately to avoid bf16 numpy errors
     t = t.detach().float().cpu()
     data = t.contiguous().numpy()

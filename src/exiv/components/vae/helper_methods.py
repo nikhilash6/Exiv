@@ -2,8 +2,6 @@ import torch
 import torch.nn.functional as F
 
 from typing import Optional, Tuple
-import numpy as np
-from PIL import Image
 
 from ...utils.tensor import random_tensor
 
@@ -27,6 +25,8 @@ class VAEImageProcessor:
 
     # PONDER: this maybe useful in other parts of the code 
     def _pack_to_nchw(self, image):
+        from PIL import Image
+        import numpy as np
         # Standardize Input Types
         if isinstance(image, Image.Image):
             image = np.array(image).astype(np.float32) / 255.0
@@ -141,6 +141,7 @@ class DiagonalGaussianDistribution:
                 )
 
     def nll(self, sample: torch.Tensor, dims: Tuple[int, ...] = [1, 2, 3]) -> torch.Tensor:
+        import numpy as np
         if self.deterministic:
             return torch.Tensor([0.0])
         logtwopi = np.log(2.0 * np.pi)

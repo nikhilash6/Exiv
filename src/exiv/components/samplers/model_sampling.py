@@ -17,7 +17,6 @@ from ...utils.common import null_func
 from ...utils.logging import app_logger
 from ...model_patching.hook_registry import HookLocation, HookRegistry, HookType
 from ...model_utils.helper_methods import get_mem_usage
-from ...utils.dev import ProfileContext
 
 class KSampler:
     def __init__(
@@ -272,6 +271,7 @@ def compute_batched_output(
 
 # NOTE: separated for debugging / testing purposes
 def run_model(model, feed_x, feed_t, **feed_input):
+    # from ...utils.dev import ProfileContext
     # with ProfileContext("wan_profile"):
     out = model(feed_x, feed_t, **feed_input)
     return out

@@ -2,7 +2,6 @@ import torch
 import torch.nn.functional as F
 import torchvision.transforms.functional as TF
 
-from PIL import Image
 from typing import Callable, Dict, List, Optional
 
 from exiv.utils.file import MediaProcessor

@@ -1,12 +1,12 @@
 import math
 import torch
-import numpy as np
 
 import random
 
 from ..enum import BetaSchedule
 
 def make_beta_schedule(schedule_type, n_timestep, linear_start=1e-4, linear_end=2e-2, cosine_s=8e-3):
+    import numpy as np
     # added noise is proportional to sqrt(beta) and thus schedules are also defined with that in mind
     if schedule_type == BetaSchedule.LINEAR.value:
         betas = (

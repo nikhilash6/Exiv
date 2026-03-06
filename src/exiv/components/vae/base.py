@@ -1,15 +1,13 @@
 import torch
 from torch import Tensor
 
-from .helper_methods import VAEImageProcessor
 from ..enum import VAEType
 from ...config import LOADING_MODE
 from ...utils.logging import app_logger
 from ...utils.device import OFFLOAD_DEVICE, VRAM_DEVICE
 from ...utils.file import ensure_model_availability
-from ...utils.file_path import FilePathData, FilePaths
+from ...utils.file_path import FilePaths
 from ...model_utils.model_mixin import ModelMixin
-from ...model_utils.helper_methods import move_model
 
 
 class VAEBase(ModelMixin):
@@ -48,6 +46,7 @@ class VAEBase(ModelMixin):
     # ---------------------------------------------------------------
     @torch.inference_mode
     def encode(self, x):
+        from .helper_methods import VAEImageProcessor
         assert hasattr(self, "_encode"), "core encoding logic is NOT defined"
         assert hasattr(self, "spatial_compression_ratio"), "spatial_compression_ratio attribute is missing from the VAE instance"
         x = VAEImageProcessor(self.spatial_compression_ratio).process_image(x)
@@ -261,6 +260,7 @@ def get_vae(
 ) -> VAEBase:
     from .wan_vae import Wan21VAE
     from .wan_vae22 import Wan22VAE
+    from ...model_utils.helper_methods import move_model
     
     def _load_vae(cls, default_name):
         fname = override_filename or default_name
