@@ -78,6 +78,7 @@ class AppConfig:
             "no_oom": self.no_oom,
             "normal_load": self.normal_load,
             "auto_download": self.auto_download,
+            "disable_mmap": self.disable_mmap,
             "extra_model_paths": self.extra_model_paths,
         }
 

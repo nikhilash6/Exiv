@@ -105,7 +105,7 @@ class MemoryManager:
             stats = torch.cuda.memory_stats(device)
             mem_active = stats['active_bytes.all.current']                  # actively used by tensors
             mem_reserved = stats['reserved_bytes.all.current']              # mem asked to be reserved by driver
-            mem_free_from_driver, _ = torch.cuda.mem_get_info(device)       # mem not yet reserved
+            mem_free_from_driver, _ = torch.cuda.mem_get_info(device.index if device.index is not None else 0)       # mem not yet reserved
             mem_free_torch = mem_reserved - mem_active                      # mem reserved but not in use
             return (mem_free_from_driver + mem_free_torch) / BYTES_IN_MB
         # mps

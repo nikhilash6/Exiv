@@ -1,8 +1,11 @@
+import os
 from typing import List
 from setuptools import setup, find_packages
 
+CWD = os.path.abspath(os.path.dirname(__file__))
+
 def read_requirements_file(file_name: str) -> List[str]:
-    with open(f"./{file_name}.txt", "r", encoding="utf-8") as file:
+    with open(os.path.join(CWD, f"{file_name}.txt"), "r", encoding="utf-8") as file:
         requirements = file.readlines()
 
     res: List[str] = []
@@ -20,7 +23,7 @@ setup(
     name="exiv",
     version="0.1",
     description="Modular & Extensible Gen AI backend!",
-    long_description=open("README.md", "r", encoding="utf-8").read(),
+    long_description=open(os.path.join(CWD, "README.md"), "r", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
     author="Piyush Kumar",
     package_dir={"": "src"},

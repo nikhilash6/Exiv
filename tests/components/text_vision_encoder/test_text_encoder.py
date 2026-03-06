@@ -12,6 +12,7 @@ from exiv.utils.device import VRAM_DEVICE, MemoryManager
 from exiv.config import global_config
 from exiv.utils.device import is_cuda_available
 
+from exiv.utils.file import ensure_model_availability
 from exiv.utils.file_path import FilePathData, FilePaths
 from tests.test_utils.common import check_memory_usage
 

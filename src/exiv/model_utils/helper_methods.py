@@ -205,9 +205,10 @@ def clean_state_dict(state_dict, model_type=None):
                     new_key = new_key[len(prefix):]
             new_state_dict[new_key] = value
         state_dict = new_state_dict
-    
+
     return state_dict
 
+# TODO: replace this with custom loading logic (very buggy on windows)
 # code adapted from ComfyUI
 def get_state_dict(model_path, model_type=None, device=torch.device("cpu")):
     if isinstance(device, str):

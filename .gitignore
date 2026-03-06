@@ -29,6 +29,8 @@ node_modules/
 *.egg-info/
 .installed.cfg
 *.egg
+*.tar.gz
+*.whl
 MANIFEST
 
 # User files

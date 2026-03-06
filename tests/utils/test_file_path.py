@@ -317,7 +317,7 @@ class TestFilePaths(unittest.TestCase):
         
         # Standard type
         save_path = FilePaths.get_save_folder("checkpoint")
-        expected = os.path.join(os.path.abspath(self.test_dir), "models/checkpoints")
+        expected = os.path.join(os.path.abspath(self.test_dir), "models", "checkpoints")
         self.assertEqual(save_path, expected)
         self.assertTrue(os.path.exists(save_path))
         

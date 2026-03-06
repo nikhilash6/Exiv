@@ -110,7 +110,7 @@ def get_wan_instance(
     state_dict = get_state_dict(model_path, model_type="checkpoint")    # TODO: convert these model_type strings into enums
     cls, config, dict_dtype, model_arch_config = detect_wan_params(state_dict)
     del state_dict
-    
+
     dtype = force_dtype or dict_dtype
     wan_dit_model = cls(**config, force_load_mode=force_load_mode, dtype=dtype, quant_type=quant_type)
     wan_dit_model.model_arch_config = model_arch_config
