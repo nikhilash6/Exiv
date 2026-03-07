@@ -14,7 +14,7 @@ os.environ["EXIV_APPS_DIR"] = TEST_APPS_DIR
 from exiv.server import server
 importlib.reload(server)
 
-from exiv.server.server import app
+from exiv.server.server import get_app, load_apps_from_directory
 from exiv.config import global_config
 
 TEST_HOST = "127.0.0.1"
@@ -30,6 +30,10 @@ EXPECTED_CONFIG_KEYS = {
 class ConfigApiTest(unittest.TestCase):
 
     def setUp(self):
+        # ensure apps are loaded for the test
+        load_apps_from_directory()
+        app = get_app()
+
         class StoppableUvicorn(uvicorn.Server):
             def run(self, *args, **kwargs):
                 self._thread = threading.Thread(target=super().run, args=args, kwargs=kwargs)

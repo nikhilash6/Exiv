@@ -1,7 +1,5 @@
 import torch
 
-from PIL import Image
-
 class LatentFormat:
     scale_factor = 1.0
     latent_channels = 4

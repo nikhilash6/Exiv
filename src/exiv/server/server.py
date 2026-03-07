@@ -7,8 +7,6 @@ import traceback
 from typing import Any, Dict
 import shutil
 import uuid
-from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File
-from fastapi.responses import FileResponse
 
 from .app_core import App, TaskContext
 from ..components.extension_registry import ExtensionRegistry
@@ -20,6 +18,249 @@ from ..utils.config_file import load_config as _load_config_file, save_section
 from ..config import global_config
 
 APP_REGISTRY = {} # stores all the loaded apps
+
+def _get_config_file_path():
+    from pathlib import Path
+    from ..utils.file_path import USER_ROOT
+    config_file_str, _ = find_file_path(CONFIG_FILENAME, recursive=True)
+    if config_file_str:
+        return Path(config_file_str)
+    return Path(USER_ROOT) / CONFIG_FILENAME
+
+def load_server_config():
+    """
+    Called once at `exiv serve` startup.
+    Reads the 'settings' section of config.json and applies it to global_config.
+    Creates config.json with defaults if the file does not exist yet.
+    """
+    config_file = _get_config_file_path()
+    full_config = _load_config_file(config_file)   # creates file with defaults if missing
+    settings = full_config.get("settings", {})
+    if settings:
+        global_config.update_config(settings)
+        app_logger.info(f"Loaded server settings from {config_file}")
+    else:
+        app_logger.info(f"No settings found in {config_file}, using defaults.")
+    
+    FilePaths.set_extra_search_paths(global_config.extra_model_paths)
+
+def get_app():
+    from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File
+    from fastapi.responses import FileResponse
+    import hashlib
+
+    app = FastAPI()
+
+    @app.get("/api/extensions")
+    def get_extensions():
+        """
+        Returns the metadata for ALL registered extensions.
+        Includes ID, Name, Version, Capabilities, Inputs (Schema), Slot.
+        """
+        return ExtensionRegistry.get_instance().get_all_extensions_metadata()
+
+    @app.get("/api/models")
+    def get_models(category: str):
+        """
+        Returns a list of models matching the requested categories (comma-separated).
+        """
+        categories = [c.strip() for c in category.split(",")]
+        all_files = []
+        for cat in categories:
+            if cat:
+                all_files.extend(FilePaths.get_files(cat))
+                
+        # deduplicate by name if multiple categories return the same model
+        # this is a little tricky, since categories can multiple overlap, we can
+        # end up with same exact filename in multiple categories
+        seen = set()
+        unique_files = []
+        for f in all_files:
+            if f.name not in seen:
+                seen.add(f.name)
+                unique_files.append(f)
+
+        return [
+            {"name": f.name, "path": f.path, "is_present": f.is_present, "url": f.url}
+            for f in unique_files
+        ]
+
+    @app.get("/api/config")
+    def get_config():
+        """Returns the current in-memory server settings."""
+        return global_config.to_dict()
+
+    @app.post("/api/config")
+    def update_config(payload: dict = Body(...)):
+        """
+        Updates in-memory server settings and persists them to the 'settings'
+        section of config.json. The 'extensions' section is never modified.
+        """
+        from ..utils.logging import app_logger as _logger
+        global_config.update_config(payload)
+        _logger.set_level(global_config.logging_level)
+        FilePaths.set_extra_search_paths(global_config.extra_model_paths)
+        config_file = _get_config_file_path()
+        save_section(config_file, "settings", global_config.to_dict())
+        return {"status": "ok", "config": global_config.to_dict()}
+
+    @app.get("/api/apps")
+    def get_apps():
+        return [app_def.model_dump(exclude={"handler"}) for app_def in APP_REGISTRY.values()]
+
+    @app.post("/api/upload")
+    async def upload_file(file: UploadFile = File(...)):
+        """
+        Uploads a file to the server's temp directory and returns the absolute path.
+        Uses SHA256 hash of content to avoid redundant copies.
+        """
+        try:
+            # read content to hash it
+            content = await file.read()
+            file_hash = hashlib.sha256(content).hexdigest()
+            
+            # temp directory for upload
+            upload_dir = os.path.join(FilePaths.OUTPUT_DIRECTORY, "uploads")
+            os.makedirs(upload_dir, exist_ok=True)
+            
+            # use hash + original extension to keep it unique but identifiable
+            _, ext = os.path.splitext(file.filename)
+            filename = f"{file_hash}{ext}"
+            file_path = os.path.abspath(os.path.join(upload_dir, filename))
+            
+            if os.path.exists(file_path):
+                app_logger.info(f"File already exists (hash match): {file_path}")
+                return {"status": "success", "file_path": file_path}
+
+            with open(file_path, "wb") as buffer:
+                buffer.write(content)
+                
+            app_logger.info(f"File uploaded successfully to: {file_path}")
+            return {"status": "success", "file_path": file_path}
+        except Exception as e:
+            app_logger.error(f"Upload failed: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+    @app.post("/api/apps/run")
+    async def run_app_endpoint(request: RunRequest):
+        app_name = request.app_name
+        user_params = request.params
+
+        if app_name not in APP_REGISTRY:
+            traceback.print_exc()
+            raise HTTPException(status_code=404, detail=f"App '{app_name}' not found")
+        
+        target_app = APP_REGISTRY[app_name]
+        
+        clean_data = {}
+        try:
+            for key, input_def in target_app.inputs.items():
+                val = user_params.get(key, input_def.default)
+                clean_data[key] = input_def.validate_value(val)
+                
+        except Exception as e:
+            traceback.print_exc()
+            raise HTTPException(status_code=400, detail=str(e))
+
+        task_id = task_manager.add_task(app_name=app_name, params=clean_data)
+        
+        return {"status": "queued", "task_id": task_id}
+
+    @app.get("/status/{task_id}")
+    async def get_script_progress(task_id: str):
+        status = task_manager.get_task_progress(task_id)
+        if status:
+            return status
+        else:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+    @app.get("/api/apps/{app_name}/assets/{filename:path}")
+    async def get_app_asset(app_name: str, filename: str):
+        if app_name not in APP_REGISTRY:
+            raise HTTPException(status_code=404, detail="App not found")
+        
+        app_def = APP_REGISTRY[app_name]
+        if not app_def.frontend_assets:
+            raise HTTPException(status_code=404, detail="App has no frontend assets")
+
+        # security check: filename must be allowed
+        allowed_files = app_def.frontend_assets.values()
+        if filename not in allowed_files:
+            raise HTTPException(status_code=403, detail="Access denied to this file")
+
+        if not app_def.asset_root:
+             raise HTTPException(status_code=500, detail="App asset root not configured")
+             
+        file_path = os.path.join(app_def.asset_root, filename)
+        
+        if not os.path.exists(file_path) or not os.path.isfile(file_path):
+            raise HTTPException(status_code=404, detail="Asset not found")
+            
+        return FileResponse(file_path)
+
+    @app.get("/api/outputs/{filename:path}")
+    async def get_output_file(filename: str):
+        out_dir = FilePaths.OUTPUT_DIRECTORY
+        file_path = os.path.join(out_dir, filename)
+        
+        # prevent directory traversal (e.g. "../filename")
+        if not os.path.abspath(file_path).startswith(os.path.abspath(out_dir)):
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        if not os.path.exists(file_path) or not os.path.isfile(file_path):
+            raise HTTPException(status_code=404, detail="File not found")
+            
+        return FileResponse(file_path)
+
+    @app.get("/api/outputs")
+    async def list_output_files(subfolder: str = None):
+        out_dir = FilePaths.OUTPUT_DIRECTORY
+        
+        if subfolder:
+            out_dir = os.path.join(out_dir, subfolder)
+            # security check for subfolder
+            if not os.path.abspath(out_dir).startswith(os.path.abspath(FilePaths.OUTPUT_DIRECTORY)):
+                 raise HTTPException(status_code=403, detail="Access denied")
+        
+        if not os.path.exists(out_dir):
+            return []
+            
+        files = []
+        for filename in os.listdir(out_dir):
+            file_path = os.path.join(out_dir, filename)
+            if os.path.isfile(file_path):
+                _, ext = os.path.splitext(filename)
+                files.append({
+                    "filename": filename, 
+                    "extension": ext
+                })
+                
+        return files
+
+    @app.websocket("/ws/status/{task_id}")
+    async def websocket_endpoint(websocket: WebSocket, task_id: str):
+        update_freq = 0.5     # seconds
+        await websocket.accept()
+        if task_manager.get_task_progress(task_id) is None:
+            await websocket.close(code=1008, reason="Task not found")
+            return
+
+        try:
+            while True:
+                progress = task_manager.get_task_progress(task_id)
+                await websocket.send_json(progress)
+                if progress['status'] in [ScriptStatus.COMPLETED.value, ScriptStatus.FAILED.value]:
+                    break
+                await asyncio.sleep(update_freq)
+                
+        except WebSocketDisconnect:
+            pass
+        finally:
+            try:
+                await websocket.close()
+            except: pass
+            
+    return app
 
 def load_apps_from_directory(directory: str = "apps"):
     """
@@ -89,14 +330,6 @@ def load_apps_from_directory(directory: str = "apps"):
                     app_logger.debug(f"Loaded: {module.app.name}")
             except Exception as e:
                 app_logger.error(f"Error loading {module_name}: {e}")
-
-# Initialize Systems
-# 1. Apps
-load_apps_from_directory()
-app_logger.info(f"Apps found: {[a for a, _ in APP_REGISTRY.items()]}")
-
-# 2. Extensions
-ExtensionRegistry.get_instance()
 
 def process_task(task_id: str):
     def _update_task(status, progress, msg, output=None, data=None):
@@ -178,253 +411,19 @@ def start_worker(sync_mode=False):
         if sync_mode: break                               # for cli, pkg import
 
 
-app = FastAPI()
-
-@app.get("/api/extensions")
-def get_extensions():
-    """
-    Returns the metadata for ALL registered extensions.
-    Includes ID, Name, Version, Capabilities, Inputs (Schema), Slot.
-    """
-    return ExtensionRegistry.get_instance().get_all_extensions_metadata()
-
-@app.get("/api/models")
-def get_models(category: str):
-    """
-    Returns a list of models matching the requested categories (comma-separated).
-    """
-    categories = [c.strip() for c in category.split(",")]
-    all_files = []
-    for cat in categories:
-        if cat:
-            all_files.extend(FilePaths.get_files(cat))
-            
-    # deduplicate by name if multiple categories return the same model
-    # this is a little tricky, since categories can multiple overlap, we can
-    # end up with same exact filename in multiple categories
-    seen = set()
-    unique_files = []
-    for f in all_files:
-        if f.name not in seen:
-            seen.add(f.name)
-            unique_files.append(f)
-
-    return [
-        {"name": f.name, "path": f.path, "is_present": f.is_present, "url": f.url}
-        for f in unique_files
-    ]
-
-
-def _get_config_file_path():
-    from pathlib import Path
-    from ..utils.file_path import USER_ROOT
-    config_file_str, _ = find_file_path(CONFIG_FILENAME, recursive=True)
-    if config_file_str:
-        return Path(config_file_str)
-    return Path(USER_ROOT) / CONFIG_FILENAME
-
-
-def load_server_config():
-    """
-    Called once at `exiv serve` startup.
-    Reads the 'settings' section of config.json and applies it to global_config.
-    Creates config.json with defaults if the file does not exist yet.
-    """
-    config_file = _get_config_file_path()
-    full_config = _load_config_file(config_file)   # creates file with defaults if missing
-    settings = full_config.get("settings", {})
-    if settings:
-        global_config.update_config(settings)
-        app_logger.info(f"Loaded server settings from {config_file}")
-    else:
-        app_logger.info(f"No settings found in {config_file}, using defaults.")
-    
-    FilePaths.set_extra_search_paths(global_config.extra_model_paths)
-
-
-@app.get("/api/config")
-def get_config():
-    """Returns the current in-memory server settings."""
-    return global_config.to_dict()
-
-
-@app.post("/api/config")
-def update_config(payload: dict = Body(...)):
-    """
-    Updates in-memory server settings and persists them to the 'settings'
-    section of config.json. The 'extensions' section is never modified.
-    """
-    from ..utils.logging import app_logger as _logger
-    global_config.update_config(payload)
-    _logger.set_level(global_config.logging_level)
-    FilePaths.set_extra_search_paths(global_config.extra_model_paths)
-    config_file = _get_config_file_path()
-    save_section(config_file, "settings", global_config.to_dict())
-    return {"status": "ok", "config": global_config.to_dict()}
-
-@app.get("/api/apps")
-def get_apps():
-    return [app.model_dump(exclude={"handler"}) for app in APP_REGISTRY.values()]
-
-import hashlib
-
-@app.post("/api/upload")
-async def upload_file(file: UploadFile = File(...)):
-    """
-    Uploads a file to the server's temp directory and returns the absolute path.
-    Uses SHA256 hash of content to avoid redundant copies.
-    """
-    try:
-        # read content to hash it
-        content = await file.read()
-        file_hash = hashlib.sha256(content).hexdigest()
-        
-        # temp directory for upload
-        upload_dir = os.path.join(FilePaths.OUTPUT_DIRECTORY, "uploads")
-        os.makedirs(upload_dir, exist_ok=True)
-        
-        # use hash + original extension to keep it unique but identifiable
-        _, ext = os.path.splitext(file.filename)
-        filename = f"{file_hash}{ext}"
-        file_path = os.path.abspath(os.path.join(upload_dir, filename))
-        
-        if os.path.exists(file_path):
-            app_logger.info(f"File already exists (hash match): {file_path}")
-            return {"status": "success", "file_path": file_path}
-
-        with open(file_path, "wb") as buffer:
-            buffer.write(content)
-            
-        app_logger.info(f"File uploaded successfully to: {file_path}")
-        return {"status": "success", "file_path": file_path}
-    except Exception as e:
-        app_logger.error(f"Upload failed: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
-
-@app.post("/api/apps/run")
-async def run_app_endpoint(request: RunRequest):
-    app_name = request.app_name
-    user_params = request.params
-
-    if app_name not in APP_REGISTRY:
-        traceback.print_exc()
-        raise HTTPException(status_code=404, detail=f"App '{app_name}' not found")
-    
-    target_app = APP_REGISTRY[app_name]
-    
-    clean_data = {}
-    try:
-        for key, input_def in target_app.inputs.items():
-            val = user_params.get(key, input_def.default)
-            clean_data[key] = input_def.validate_value(val)
-            
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=400, detail=str(e))
-
-    task_id = task_manager.add_task(app_name=app_name, params=clean_data)
-    
-    return {"status": "queued", "task_id": task_id}
-
-@app.get("/status/{task_id}")
-async def get_script_progress(task_id: str):
-    status = task_manager.get_task_progress(task_id)
-    if status:
-        return status
-    else:
-        raise HTTPException(status_code=404, detail="Task not found")
-
-@app.get("/api/apps/{app_name}/assets/{filename:path}")
-async def get_app_asset(app_name: str, filename: str):
-    if app_name not in APP_REGISTRY:
-        raise HTTPException(status_code=404, detail="App not found")
-    
-    app = APP_REGISTRY[app_name]
-    if not app.frontend_assets:
-        raise HTTPException(status_code=404, detail="App has no frontend assets")
-
-    # security check: filename must be allowed
-    allowed_files = app.frontend_assets.values()
-    if filename not in allowed_files:
-        raise HTTPException(status_code=403, detail="Access denied to this file")
-
-    if not app.asset_root:
-         raise HTTPException(status_code=500, detail="App asset root not configured")
-         
-    file_path = os.path.join(app.asset_root, filename)
-    
-    if not os.path.exists(file_path) or not os.path.isfile(file_path):
-        raise HTTPException(status_code=404, detail="Asset not found")
-        
-    return FileResponse(file_path)
-
-@app.get("/api/outputs/{filename:path}")
-async def get_output_file(filename: str):
-    out_dir = FilePaths.OUTPUT_DIRECTORY
-    file_path = os.path.join(out_dir, filename)
-    
-    # prevent directory traversal (e.g. "../filename")
-    if not os.path.abspath(file_path).startswith(os.path.abspath(out_dir)):
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    if not os.path.exists(file_path) or not os.path.isfile(file_path):
-        raise HTTPException(status_code=404, detail="File not found")
-        
-    return FileResponse(file_path)
-
-@app.get("/api/outputs")
-async def list_output_files(subfolder: str = None):
-    out_dir = FilePaths.OUTPUT_DIRECTORY
-    
-    if subfolder:
-        out_dir = os.path.join(out_dir, subfolder)
-        # security check for subfolder
-        if not os.path.abspath(out_dir).startswith(os.path.abspath(FilePaths.OUTPUT_DIRECTORY)):
-             raise HTTPException(status_code=403, detail="Access denied")
-    
-    if not os.path.exists(out_dir):
-        return []
-        
-    files = []
-    for filename in os.listdir(out_dir):
-        file_path = os.path.join(out_dir, filename)
-        if os.path.isfile(file_path):
-            _, ext = os.path.splitext(filename)
-            files.append({
-                "filename": filename, 
-                "extension": ext
-            })
-            
-    return files
-
-@app.websocket("/ws/status/{task_id}")
-async def websocket_endpoint(websocket: WebSocket, task_id: str):
-    update_freq = 0.5     # seconds
-    await websocket.accept()
-    if task_manager.get_task_progress(task_id) is None:
-        await websocket.close(code=1008, reason="Task not found")
-        return
-
-    try:
-        while True:
-            progress = task_manager.get_task_progress(task_id)
-            await websocket.send_json(progress)
-            if progress['status'] in [ScriptStatus.COMPLETED.value, ScriptStatus.FAILED.value]:
-                break
-            await asyncio.sleep(update_freq)
-            
-    except WebSocketDisconnect:
-        pass
-    finally:
-        try:
-            await websocket.close()
-        except: pass
-
 def run_server():
+    # 1. Apps
+    load_apps_from_directory()
+    app_logger.info(f"Apps found: {[a for a, _ in APP_REGISTRY.items()]}")
+
+    # 2. Extensions
+    ExtensionRegistry.get_instance()
+
     worker_thread = threading.Thread(target=start_worker)
     worker_thread.daemon = True
     worker_thread.start()
 
+    app = get_app()
     import uvicorn
     # Suppress uvicorn's default access and connection logging 
     # so polling doesn't spam the console.

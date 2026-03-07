@@ -262,8 +262,7 @@ class FilePaths:
         4. Download Map Exact match
         5. Download Map Stem match
         
-        Returns a dict: {'name': str, 'path': str, 'is_present': bool, 'url': str|None}
-        Raises FileNotFoundError if not found in local or downloadable.
+        Returns a FilePathData object.
         """
         
         # user specific path is directly used (e.g. "/tmp/custom.safetensors" or "./model.ckpt")
@@ -285,6 +284,8 @@ class FilePaths:
         
         if not cls._file_cache:
             cls.init_cache()
+
+        lookup_name = os.path.basename(filename)
 
         # local files
         candidates = []
@@ -312,7 +313,7 @@ class FilePaths:
                 f_name = os.path.basename(f_path)
                 
                 # exact match
-                if f_name == filename:
+                if f_name == lookup_name:
                     if os.path.exists(f_path):
                         url = DOWNLOAD_MAP.get(f_name, {}).get("url") if f_name in DOWNLOAD_MAP and DOWNLOAD_MAP[f_name].get("type") == file_type else None
                         return FilePathData(
@@ -323,7 +324,7 @@ class FilePaths:
                         )
                 
                 # stem match (if input has no extension)
-                if os.path.splitext(f_name)[0] == filename:
+                if os.path.splitext(f_name)[0] == lookup_name:
                      if os.path.exists(f_path):
                         candidates.append(f_path)
 
@@ -343,21 +344,23 @@ class FilePaths:
         save_folder = cls.get_save_folder(file_type)
 
         # exact download map
-        if filename in DOWNLOAD_MAP:
-            info = DOWNLOAD_MAP[filename]
+        if lookup_name in DOWNLOAD_MAP:
+            info = DOWNLOAD_MAP[lookup_name]
             if info.get("type") == file_type:
-                target_path = os.path.join(save_folder, filename)
+                # if filename is just the basename, use default save folder
+                # otherwise use the path provided by the user
+                target_path = potential_path if lookup_name != filename else os.path.join(save_folder, lookup_name)
                 return FilePathData(
-                        name=filename,
+                        name=lookup_name,
                         path=target_path,
                         is_present=False,
                         url=info.get("url")
                     )
 
-        # steam download map
+        # stem download map
         for name, info in DOWNLOAD_MAP.items():
             if info.get("type") == file_type:
-                if os.path.splitext(name)[0] == filename:
+                if os.path.splitext(name)[0] == lookup_name:
                     target_path = os.path.join(save_folder, name)
                     return FilePathData(
                         name=name,
@@ -366,7 +369,6 @@ class FilePaths:
                         url=info.get("url")
                     )
 
-        # raise FileNotFoundError(f"File '{filename}' of type '{file_type}' not found locally or in download map.")
         return FilePathData()
     
     @classmethod

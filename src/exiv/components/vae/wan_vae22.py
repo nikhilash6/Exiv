@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 
-from .base import VAEBase, VAEImageProcessor
+from .base import VAEBase
 from .wan_vae import CausalConv3d, RMS_norm, Upsample
 from ..attention import vae_optimized_attention
 

@@ -17,7 +17,7 @@ from exiv.server import server, task_manager, ScriptStatus
 importlib.reload(server)
 
 from exiv.server.task_manager import task_manager, ScriptStatus
-from exiv.server.server import app, start_worker
+from exiv.server.server import get_app, load_apps_from_directory, start_worker
 
 TEST_HOST = "127.0.0.1"
 TEST_PORT = 8008
@@ -31,6 +31,10 @@ class ServerIntegrationTest(unittest.TestCase):
         """Set up and run the server and worker in background threads before any tests."""
         task_manager.task_dict = {}
         task_manager.task_queue.queue.clear()
+
+        # ensure apps are loaded for the test
+        load_apps_from_directory()
+        app = get_app()
 
         class StoppableUvicorn(uvicorn.Server):
             def run(self, *args, **kwargs):
