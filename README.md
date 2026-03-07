@@ -16,12 +16,11 @@ Exiv is a fast, lightweight, and highly extensible AI backend engine designed fo
 
 If you want a GUI to interact with Exiv, check it out [here](https://github.com/piyushK52/Exiv-UI).
 
-<div align="center">
-  <!-- TODO: Add Explainer Video Link Here -->
-  <a href="#">
-    <img src="https://img.youtube.com/vi/YOUR_VIDEO_ID/0.jpg" alt="Exiv Explainer Video" width="600"/>
-  </a>
-</div>
+
+
+https://github.com/user-attachments/assets/37f5eb8d-7a74-48dc-b0cf-b56b5ddbf235
+
+
 
 ## ✨ Feature Summary
 
