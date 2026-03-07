@@ -1,4 +1,4 @@
-__version__ = "0.1"
+__version__ = "0.2"
 
 # core configurations and loggers
 from .config import global_config

@@ -21,7 +21,7 @@ dev_deps = read_requirements_file("requirements-dev")
 
 setup(
     name="exiv",
-    version="0.1",
+    version="0.2",
     description="Modular & Extensible Gen AI backend!",
     long_description=open(os.path.join(CWD, "README.md"), "r", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
