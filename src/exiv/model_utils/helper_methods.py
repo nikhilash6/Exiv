@@ -18,9 +18,7 @@ def move_model(model, device):
             name, 
             target_device=device,
         )
-
     return model
-
 
 def _iter_tensor_attributes(module: nn.Module):
     """

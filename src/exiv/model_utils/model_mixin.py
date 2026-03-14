@@ -7,6 +7,7 @@ from typing import List
 from .conditioning_mixin import ConditioningMixin
 from .lora_mixin import LoraMixin
 from .helper_methods import estimate_peak_activation_size, get_state_dict, set_module_tensor_to_device
+from ..utils.common import get_module_from_name
 from ..components.latent_format import LatentFormat
 from ..components.enum import ModelType
 from ..components.samplers.sampler_types import get_model_sampling
@@ -201,17 +202,6 @@ class ModelMixin(nn.Module, LoraMixin, ConditioningMixin, metaclass=ModuleMeta):
             app_logger.info("Applying quantization patches...")
             self.quantizer.validate_environment()
             self.quantizer.process_model_before_weight_loading(model=self)
-            
-    def _get_param_context(self, param_name):
-        """Traverses module hierarchy and determines dtype"""
-        parent_module = self
-        splits = param_name.split(".")
-        for split in splits[:-1]: parent_module = getattr(parent_module, split)
-        # TODO: rn only doing conv3d patch embedding in fp32
-        local_target_dtype = self.dtype
-        if isinstance(parent_module, torch.nn.Conv3d) and "embedding" in param_name:
-            local_target_dtype = torch.float32
-        return parent_module, splits[-1], local_target_dtype
 
     def load_model(
         self,
@@ -238,7 +228,12 @@ class ModelMixin(nn.Module, LoraMixin, ConditioningMixin, metaclass=ModuleMeta):
                 app_logger.warning(f"skipping the param {param_name} as it's not present in the model definition")
                 continue
             
-            parent_module, leaf_name, local_target_dtype = self._get_param_context(param_name)
+            parent_module, leaf_name,  = get_module_from_name(self, param_name)
+            local_target_dtype = self.dtype
+            # TODO: check and update if this conversion can be bypassed
+            if isinstance(parent_module, torch.nn.Conv3d) and "embedding" in param_name:
+                local_target_dtype = torch.float32
+            
             if self.dtype is not None:
                 if self.quantizer is not None:
                     pass    # not overiding dtype of quantized models

@@ -21,6 +21,8 @@ class HookLocation(ExtendedEnum):
     SAMPLER_STEP = "sampler_step"      # around compute_batched_output
     INNER_SAMPLER_STEP = "inner_sampler_step"   # inside compute_batched_output
     MODEL_RUN = "model_run"            # __call__ / the actual model call
+    PRE_LOGIT_PROCESS = "pre_logit_process"   # before applying temperature/top-k
+    AR_SAMPLER_STEP = "ar_sampler_step"       # after next token is sampled in AR loops
 
 class HookType(ExtendedEnum):
     GENERIC = "generic"

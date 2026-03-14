@@ -118,3 +118,18 @@ def optimized_attention(q: Tensor, k: Tensor, v: Tensor, heads: int, mask: Tenso
 
         out = attn_fn(q, k, v, attn_bias=attn_bias)
         return out.view(b, -1, dim)
+
+# TODO: streamline later
+def eager_attention_forward(
+    module: nn.Module,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    heads: int,
+    attention_mask: Optional[torch.Tensor],
+    **kwargs,
+):
+    key_states = repeat_kv(key, module.num_key_value_groups)
+    value_states = repeat_kv(value, module.num_key_value_groups)
+    # TODO: check if -inf are handled properly
+    return optimized_attention(query, key_states, value_states, heads, attention_mask)
