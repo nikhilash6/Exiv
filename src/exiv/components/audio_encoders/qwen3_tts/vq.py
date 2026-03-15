@@ -1,5 +1,4 @@
-# coding=utf-8
-# Copyright 2026 The Qwen team, Alibaba Group and the HuggingFace Inc. team. All rights reserved.
+# Copyright 2026 The Qwen team, Alibaba Group. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,6 +16,34 @@ from typing import Optional
 import torch
 from torch import nn
 from torch.nn import functional as F
+
+"""
+   SplitResidualVectorQuantizer  <-- Top-Level Entry Point (Receives the 8 codes)
+   │
+   ├── rvq_first: ResidualVectorQuantizer           <-- Handles Code #1 (Semantic: "What word is said")
+   │   │
+   │   ├── input_proj / output_proj                 <-- Adjusts vector dimensions if needed
+   │   └── vq: ResidualVectorQuantization           <-- Core Loop logic
+   │       └── layers: ModuleList
+   │           └── [0] VectorQuantization           <-- Wrapper for Layer 1
+   │               ├── project_out                  <-- Linear projection layer
+   │               └── _codebook: EuclideanCodebook <-- The "Average Sum/Usage" Math Table
+   │
+   └── rvq_rest: ResidualVectorQuantizer            <-- Handles Codes #2 through #8 (Acoustic: "Who is saying it, tone, breath")
+       │
+       ├── input_proj / output_proj
+       └── vq: ResidualVectorQuantization           <-- Loops over the remaining 7 codes and ADDS their vectors together
+           └── layers: ModuleList
+               ├── [0] VectorQuantization           <-- Wrapper for Layer 2
+               │   └── _codebook: EuclideanCodebook
+               ├── [1] VectorQuantization           <-- Wrapper for Layer 3
+               │   └── _codebook: EuclideanCodebook
+               ├── ...
+               └── [6] VectorQuantization           <-- Wrapper for Layer 8
+                   └── _codebook: EuclideanCodebook
+"""
+
+
 
 class EuclideanCodebook(nn.Module):
     def __init__(self, dim: int, codebook_size: int, epsilon: float = 1e-5):

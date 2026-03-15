@@ -1,2 +1,0 @@
-from .tokenizer.configuration_qwen3_tts_tokenizer import Qwen3TTSTokenizerConfig
-from .tokenizer.modeling_qwen3_tts_tokenizer import Qwen3TTSTokenizerModel

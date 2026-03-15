@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2026 The Alibaba Qwen team.
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -24,11 +23,13 @@ import numpy as np
 import torch
 from torch.nn.utils.rnn import pad_sequence
 
-from ..core import (
+from .qwen3_tts.configuration_qwen3_tts_tokenizer import (
     Qwen3TTSTokenizerConfig,
+)
+from .qwen3_tts.modeling_qwen3_tts_tokenizer import (
     Qwen3TTSTokenizerModel,
 )
-from ..core.tokenizer.modeling_utils import MimiFeatureExtractor
+from transformers import AutoFeatureExtractor
 
 AudioInput = Union[
     str,  # wav path, or base64 string
@@ -42,7 +43,6 @@ class Qwen3TTSTokenizer:
     """
     A wrapper for Qwen3 TTS Tokenizer 12Hz with standalone loading.
 
-    - from_pretrained(): loads speech tokenizer model and feature_extractor manually.
     - encode(): supports wav path(s), base64 audio string(s), numpy array(s).
     - decode(): accepts either the raw model encode output, or a minimal dict/list-of-dicts.
 
@@ -51,42 +51,11 @@ class Qwen3TTSTokenizer:
     - Returned audio is float32 numpy arrays and the output sample rate.
     """
 
-    def __init__(self):
-        self.model = None
-        self.feature_extractor = None
-        self.config = None
+    def __init__(self, model_path):
+        self.config = Qwen3TTSTokenizerConfig()
+        self.feature_extractor = AutoFeatureExtractor.from_pretrained(model_path)
+        self.model = Qwen3TTSTokenizerModel(self.config)
         self.device = None
-
-    @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path: str, **kwargs) -> "Qwen3TTSTokenizer":
-        """
-        Initialize tokenizer manually without AutoModel.
-
-        Args:
-            pretrained_model_name_or_path (str):
-                Local directory or hub path.
-            **kwargs (Any):
-                Forwarded to model initialization.
-
-        Returns:
-            Qwen3TTSTokenizer:
-                Initialized instance.
-        """
-        inst = cls()
-
-        # In a real transformer-free scenario, we would load config.json here
-        # For now, we assume the Config and Model classes are available and use them
-        config = Qwen3TTSTokenizerConfig()
-        inst.config = config
-        
-        inst.feature_extractor = MimiFeatureExtractor.from_pretrained(pretrained_model_name_or_path)
-        inst.model = Qwen3TTSTokenizerModel(config)
-        
-        # NOTE: Model weights loading would happen here via a custom loader in exiv
-        # inst.model.load_state_dict(...)
-
-        inst.device = inst.model.device
-        return inst
 
     def _is_probably_base64(self, s: str) -> bool:
         if s.startswith("data:audio"):

@@ -14,7 +14,7 @@
 # limitations under the License.
 """Qwen3TTSTokenizer model configuration"""
 
-from ......utils.logging import app_logger
+from ....utils.logging import app_logger
 
 class BaseConfig:
     def __init__(self, **kwargs):
@@ -25,51 +25,7 @@ class BaseConfig:
         return self.__dict__.copy()
 
 
-class MimiConfig(BaseConfig):
-    def __init__(
-        self,
-        vocab_size=1024,
-        hidden_size=512,
-        num_hidden_layers=8,
-        num_attention_heads=8,
-        num_key_value_heads=8,
-        intermediate_size=2048,
-        hidden_act="silu",
-        max_position_embeddings=2048,
-        initializer_range=0.02,
-        layer_norm_eps=1e-5,
-        use_cache=True,
-        pad_token_id=None,
-        bos_token_id=None,
-        eos_token_id=None,
-        tie_word_embeddings=True,
-        rope_theta=10000.0,
-        rope_scaling=None,
-        q_norm=True,
-        k_norm=True,
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
-        self.vocab_size = vocab_size
-        self.hidden_size = hidden_size
-        self.num_hidden_layers = num_hidden_layers
-        self.num_attention_heads = num_attention_heads
-        self.num_key_value_heads = num_key_value_heads
-        self.intermediate_size = intermediate_size
-        self.hidden_act = hidden_act
-        self.max_position_embeddings = max_position_embeddings
-        self.initializer_range = initializer_range
-        self.layer_norm_eps = layer_norm_eps
-        self.use_cache = use_cache
-        self.pad_token_id = pad_token_id
-        self.bos_token_id = bos_token_id
-        self.eos_token_id = eos_token_id
-        self.tie_word_embeddings = tie_word_embeddings
-        self.rope_theta = rope_theta
-        self.rope_scaling = rope_scaling
-        self.q_norm = q_norm
-        self.k_norm = k_norm
-
+from transformers import MimiConfig
 
 class Qwen3TTSTokenizerDecoderConfig(BaseConfig):
     r"""

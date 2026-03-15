@@ -1,5 +1,4 @@
-# coding=utf-8
-# Copyright 2026 The Qwen team, Alibaba Group and the HuggingFace Inc. team. All rights reserved.
+# Copyright 2026 The Qwen team, Alibaba Group. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -31,14 +30,32 @@ from .configuration_qwen3_tts_tokenizer import (
 from .modeling_utils import (
     ModelOutput,
     BaseModelOutputWithPast,
-    PreTrainedModel,
-    MimiModel,
     repeat_kv,
     rotate_half,
     apply_rotary_pos_emb,
 )
-from ......utils.logging import app_logger
-from ......components.attention import eager_attention_forward
+from transformers import MimiModel
+from ....utils.logging import app_logger
+from ...attention import eager_attention_forward
+
+
+"""
+   Qwen3TTSTokenizerModel  <-- The Wrapper
+   │
+   ├── encoder: Qwen3TTSTokenizerEncoder (MimiModel)  <-- Turns Audio to Codes
+   │
+   └── decoder: Qwen3TTSTokenizerDecoder              <-- Turns Codes to Audio
+       │
+       ├── quantizer: SplitResidualVectorQuantizer    <-- Turns Codes to Vectors
+       │
+       ├── pre_transformer: Qwen3TTSTokenizerDecoderTransformerModel <-- Smooths vectors using Attention
+       │   ├── layer 1
+       │   ├── layer 2...
+       │
+       └── upsample: ModuleList[CausalConvNet...]     <-- Stretches vectors into Audio Waveforms
+"""
+
+
 
 @dataclass
 class Qwen3TTSTokenizerEncoderOutput(ModelOutput):
@@ -59,11 +76,6 @@ class Qwen3TTSTokenizerDecoderOutput(ModelOutput):
     """
 
     audio_values: List[torch.FloatTensor] = None
-
-
-class Qwen3TTSTokenizerDecoderPreTrainedModel(PreTrainedModel):
-    config: Qwen3TTSTokenizerDecoderConfig
-    base_model_prefix = "model"
 
 
 class Qwen3TTSTokenizerCausalConvNet(nn.Module):
@@ -348,9 +360,10 @@ class Qwen3TTSTokenizerDecoderTransformerLayer(nn.Module):
         return hidden_states
 
 
-class Qwen3TTSTokenizerDecoderTransformerModel(Qwen3TTSTokenizerDecoderPreTrainedModel):
+class Qwen3TTSTokenizerDecoderTransformerModel(nn.Module):
     def __init__(self, config: Qwen3TTSTokenizerDecoderConfig):
-        super().__init__(config)
+        super().__init__()
+        self.config = config
         self.layers = nn.ModuleList(
             [Qwen3TTSTokenizerDecoderTransformerLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
         )
@@ -478,9 +491,10 @@ class Qwen3TTSTokenizerDecoderDecoderBlock(nn.Module):
 
 from .vq import SplitResidualVectorQuantizer
 
-class Qwen3TTSTokenizerDecoder(PreTrainedModel):
+class Qwen3TTSTokenizerDecoder(nn.Module):
     def __init__(self, config: Qwen3TTSTokenizerDecoderConfig):
-        super().__init__(config)
+        super().__init__()
+        self.config = config
         self.total_upsample = np.prod(config.upsample_rates + config.upsampling_ratios)
         self.pre_transformer = Qwen3TTSTokenizerDecoderTransformerModel(config)
         
@@ -539,19 +553,17 @@ class Qwen3TTSTokenizerDecoder(PreTrainedModel):
             start_index = end_index
         return torch.cat(wavs, dim=-1)
 
-
+# NOTE: qwen uses mimi for encoder but its own custom
+# logic (esp snakebeta) for decoding
 class Qwen3TTSTokenizerEncoder(MimiModel):
     def __init__(self, config):
         super().__init__(config)
 
 
-class Qwen3TTSTokenizerPreTrainedModel(PreTrainedModel):
-    pass
-
-
-class Qwen3TTSTokenizerModel(Qwen3TTSTokenizerPreTrainedModel):
+class Qwen3TTSTokenizerModel(nn.Module):
     def __init__(self, config: Qwen3TTSTokenizerConfig):
-        super().__init__(config)
+        super().__init__()
+        self.config = config
         self.encoder_valid_num_quantizers = config.encoder_valid_num_quantizers
         self.input_sample_rate = config.input_sample_rate
         self.output_sample_rate = config.output_sample_rate
