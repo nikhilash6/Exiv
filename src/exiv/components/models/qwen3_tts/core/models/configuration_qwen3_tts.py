@@ -15,30 +15,6 @@
 from ......utils.logging import app_logger
 
 
-class Qwen3TTSSpeakerEncoderConfig:
-    def __init__(
-        self,
-        mel_dim=128,
-        enc_dim=1024,
-        enc_channels=[512, 512, 512, 512, 1536],
-        enc_kernel_sizes=[5, 3, 3, 3, 1],
-        enc_dilations=[1, 2, 3, 4, 1],
-        enc_attention_channels=128,
-        enc_res2net_scale=8,
-        enc_se_channels=128,
-        sample_rate=24000,
-    ):
-        self.mel_dim = mel_dim
-        self.enc_dim = enc_dim
-        self.enc_channels = enc_channels
-        self.enc_kernel_sizes = enc_kernel_sizes
-        self.enc_dilations = enc_dilations
-        self.enc_attention_channels = enc_attention_channels
-        self.enc_res2net_scale = enc_res2net_scale
-        self.enc_se_channels = enc_se_channels
-        self.sample_rate = sample_rate
-
-
 class Qwen3TTSTalkerCodePredictorConfig:
     model_type = "qwen3_tts_talker_code_predictor"
     keys_to_ignore_at_inference = ["past_key_values"]
@@ -240,6 +216,28 @@ class Qwen3TTSTalkerConfig:
         self.spk_id = spk_id
         self.spk_is_dialect = spk_is_dialect
 
+class Qwen3TTSSpeakerEncoderConfig:
+    def __init__(
+        self,
+        mel_dim=128,
+        enc_dim=1024,
+        enc_channels=[512, 512, 512, 512, 1536],
+        enc_kernel_sizes=[5, 3, 3, 3, 1],
+        enc_dilations=[1, 2, 3, 4, 1],
+        enc_attention_channels=128,
+        enc_res2net_scale=8,
+        enc_se_channels=128,
+        sample_rate=24000,
+    ):
+        self.mel_dim = mel_dim
+        self.enc_dim = enc_dim
+        self.enc_channels = enc_channels
+        self.enc_kernel_sizes = enc_kernel_sizes
+        self.enc_dilations = enc_dilations
+        self.enc_attention_channels = enc_attention_channels
+        self.enc_res2net_scale = enc_res2net_scale
+        self.enc_se_channels = enc_se_channels
+        self.sample_rate = sample_rate
 
 class Qwen3TTSConfig:
     model_type = "qwen3_tts"

@@ -4,7 +4,7 @@ from transformers import AutoTokenizer
 
 from .core.models.modeling_qwen3_tts import Qwen3TTSForConditionalGeneration
 from .core.models.configuration_qwen3_tts import Qwen3TTSConfig
-from .core.models.processing_qwen3_tts import Qwen3TTSProcessor
+from .core.models.modeling_qwen3_tts import Qwen3TTSProcessor
 from ...audio_encoders.qwen3_tts_tokenizer import Qwen3TTSTokenizer
 from ....model_utils.autoregressive_model_mixin import ARModelArchConfig
 from ....components.enum import Model

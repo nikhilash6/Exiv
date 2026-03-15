@@ -23,7 +23,7 @@ import librosa
 import numpy as np
 import torch
 
-from ..core.models import Qwen3TTSConfig, Qwen3TTSForConditionalGeneration, Qwen3TTSProcessor
+from ..core.models.modeling_qwen3_tts import Qwen3TTSConfig, Qwen3TTSForConditionalGeneration, Qwen3TTSProcessor
 
 AudioLike = Union[
     str,                     # wav path, URL, base64
