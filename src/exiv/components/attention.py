@@ -1,9 +1,18 @@
 import torch
+import torch.nn as nn
 from torch import Tensor
 import torch.nn.functional as F
+from typing import Optional, Tuple
 
 from ..utils.logging import app_logger
 from ..utils.device import XFORMERS_AVAILABLE, SDPA_AVAILABLE
+
+def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
+    batch, num_key_value_heads, slen, head_dim = hidden_states.shape
+    if n_rep == 1:
+        return hidden_states
+    hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
+    return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
 
 def standard_attention(q, k, v, attn_mask=None):
     # q, k, v: (batch, heads, seq, dim_head)
@@ -131,5 +140,13 @@ def eager_attention_forward(
 ):
     key_states = repeat_kv(key, module.num_key_value_groups)
     value_states = repeat_kv(value, module.num_key_value_groups)
+    
+    # query, key_states, value_states are 4D: (batch, heads, seq_len, head_dim)
+    # optimized_attention expects 3D: (batch, seq_len, dim)
+    b, h, s, d = query.shape
+    query_3d = query.transpose(1, 2).reshape(b, s, h * d)
+    key_3d = key_states.transpose(1, 2).reshape(b, s, h * d)
+    value_3d = value_states.transpose(1, 2).reshape(b, s, h * d)
+    
     # TODO: check if -inf are handled properly
-    return optimized_attention(query, key_states, value_states, heads, attention_mask)
+    return optimized_attention(query_3d, key_3d, value_3d, heads, attention_mask)

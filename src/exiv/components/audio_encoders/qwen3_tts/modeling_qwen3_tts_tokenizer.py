@@ -36,8 +36,8 @@ from .modeling_utils import (
 )
 from transformers import MimiModel
 from ....utils.logging import app_logger
+from ....model_utils.autoregressive_model_mixin import ARModelMixin
 from ...attention import eager_attention_forward
-
 
 """
    Qwen3TTSTokenizerModel  <-- The Wrapper
@@ -170,7 +170,7 @@ class Qwen3TTSTokenizerDecoderRotatoryEmbedding(nn.Module):
         super().__init__()
         self.hidden_size = config.hidden_size
         self.num_attention_heads = config.num_attention_heads
-        self.head_dim = self.hidden_size // self.num_attention_heads
+        self.head_dim = getattr(config, "head_dim", self.hidden_size // self.num_attention_heads)
         self.max_position_embeddings = config.max_position_embeddings
         self.rope_theta = config.rope_theta
         
@@ -256,6 +256,7 @@ class Qwen3TTSTokenizerDecoderAttention(nn.Module):
             query_states,
             key_states,
             value_states,
+            self.config.num_attention_heads,
             attention_mask,
             scaling=self.scaling,
             **kwargs,
@@ -558,12 +559,19 @@ class Qwen3TTSTokenizerDecoder(nn.Module):
 class Qwen3TTSTokenizerEncoder(MimiModel):
     def __init__(self, config):
         super().__init__(config)
-
-
-class Qwen3TTSTokenizerModel(nn.Module):
-    def __init__(self, config: Qwen3TTSTokenizerConfig):
-        super().__init__()
         self.config = config
+        
+        # only use Mimi for encoding, drop the decoder parts
+        self.upsample = None
+        self.decoder_transformer = None
+        self.decoder = None
+
+
+class Qwen3TTSTokenizerModel(ARModelMixin):
+    def __init__(self, config: Qwen3TTSTokenizerConfig, **kwargs):
+        super().__init__(**kwargs)
+        self.config = config
+        self.dtype = kwargs.get("dtype", torch.float32)
         self.encoder_valid_num_quantizers = config.encoder_valid_num_quantizers
         self.input_sample_rate = config.input_sample_rate
         self.output_sample_rate = config.output_sample_rate
@@ -588,7 +596,8 @@ class Qwen3TTSTokenizerModel(nn.Module):
         return self.decode_upsample_rate
     
     def encode(self, input_values: torch.Tensor, padding_mask: Optional[torch.Tensor] = None, return_dict: bool = True) -> Qwen3TTSTokenizerEncoderOutput:
-        encoded_frames = self.encoder.encode(input_values=input_values.unsqueeze(1))
+        with torch.inference_mode():
+            encoded_frames = self.encoder.encode(input_values=input_values.unsqueeze(1))
         audio_codes = encoded_frames.audio_codes[:, :self.encoder_valid_num_quantizers]
         audio_codes = [code[..., :-(-mask.sum() // self.encode_downsample_rate)].transpose(0, 1) for code, mask in zip(audio_codes, padding_mask)]
         return Qwen3TTSTokenizerEncoderOutput(audio_codes)
@@ -596,6 +605,8 @@ class Qwen3TTSTokenizerModel(nn.Module):
     def decode(self, audio_codes: torch.Tensor, return_dict: bool = True) -> Qwen3TTSTokenizerDecoderOutput:
         audio_lengths = (audio_codes[..., 0] > -1).sum(1) * self.decode_upsample_rate
         audio_codes = torch.clamp(audio_codes, min=0)
-        audio_values = self.decoder.chunked_decode(audio_codes.transpose(1, 2)).squeeze(1)
+        with torch.inference_mode():
+            audio_values = self.decoder.chunked_decode(audio_codes.transpose(1, 2)).squeeze(1)
         audio_values = [a[:l] for a, l in zip(audio_values, audio_lengths)]
         return Qwen3TTSTokenizerDecoderOutput(audio_values)
+

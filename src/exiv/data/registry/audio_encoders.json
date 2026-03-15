@@ -1,0 +1,11 @@
+{
+    "qwen3_tts_tokenizer_12hz.safetensors": {
+        "type": "audio_encoder",
+        "url": "https://huggingface.co/Qwen/Qwen3-TTS-Tokenizer-12Hz/resolve/main/model.safetensors",
+        "family": "QWEN3 TTS",
+        "variant": "QWEN3 TTS 12Hz",
+        "commercial_use": true,
+        "license": "Apache 2.0",
+        "repo": "https://github.com/QwenLM/Qwen3-TTS"
+    }
+}

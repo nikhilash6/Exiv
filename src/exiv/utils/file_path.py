@@ -7,7 +7,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# TODO: not properly tested in a multi root paths scenario
 
 # going with what everyone is using
 DEFAULT_MAPPING = {
@@ -17,6 +16,7 @@ DEFAULT_MAPPING = {
         "vae":             ["models/vae"],
         "text_encoder":    ["models/clip", "models/text_encoders"],
         "vision_encoder":  ["models/clip_vision", "models/vision_encoders"],
+        "audio_encoder":   ["models/audio_encoders"],
         "style_model":     ["models/style_models"],
         "embedding":       ["models/embeddings"],
         "hypernetwork":    ["models/hypernetworks"],

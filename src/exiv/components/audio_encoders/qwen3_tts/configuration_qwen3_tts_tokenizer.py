@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2026 The Qwen team, Alibaba Group and the HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -35,7 +34,9 @@ class Qwen3TTSTokenizerDecoderConfig(BaseConfig):
     def __init__(
         self,
         codebook_size=2048,
-        hidden_size=1024,
+        codebook_dim=512,
+        hidden_size=512,
+        head_dim=64,
         latent_dim=1024,
         max_position_embeddings=8000,
         rope_theta=10000,
@@ -43,7 +44,7 @@ class Qwen3TTSTokenizerDecoderConfig(BaseConfig):
         num_key_value_heads=16,
         attention_bias=False,
         sliding_window=72,
-        intermediate_size=3072,
+        intermediate_size=1024,
         hidden_act="silu",
         layer_scale_initial_scale=0.01,
         rms_norm_eps=1e-5,
@@ -57,7 +58,9 @@ class Qwen3TTSTokenizerDecoderConfig(BaseConfig):
     ):
         super().__init__(**kwargs)
         self.codebook_size = codebook_size
+        self.codebook_dim = codebook_dim
         self.hidden_size = hidden_size
+        self.head_dim = head_dim
         self.latent_dim = latent_dim
         self.max_position_embeddings = max_position_embeddings
         self.rope_theta = rope_theta
