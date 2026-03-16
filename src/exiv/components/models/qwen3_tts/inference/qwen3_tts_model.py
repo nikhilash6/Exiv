@@ -23,7 +23,8 @@ import librosa
 import numpy as np
 import torch
 
-from ..core.models.modeling_qwen3_tts import Qwen3TTSConfig, Qwen3TTSForConditionalGeneration, Qwen3TTSProcessor
+from ..core.models.modeling_qwen3_tts import Qwen3TTSConfig, Qwen3TTSForConditionalGeneration
+from ..core.text_prorcessor import Qwen3TTSTextProcessor
 
 AudioLike = Union[
     str,                     # wav path, URL, base64
@@ -54,17 +55,10 @@ class Qwen3TTSModel:
     It expects an already initialized model and processor.
     """
 
-    def __init__(self, model: Qwen3TTSForConditionalGeneration, processor: Qwen3TTSProcessor, generate_defaults: Optional[Dict[str, Any]] = None):
+    def __init__(self, model: Qwen3TTSForConditionalGeneration, processor: Qwen3TTSTextProcessor, generate_defaults: Optional[Dict[str, Any]] = None):
         self.model = model
         self.processor = processor
         self.generate_defaults = generate_defaults or {}
-
-        self.device = getattr(model, "device", None)
-        if self.device is None:
-            try:
-                self.device = next(model.parameters()).device
-            except StopIteration:
-                self.device = torch.device("cpu")
 
     def _supported_languages_set(self) -> Optional[set]:
         langs = getattr(self.model, "get_supported_languages", None)
@@ -177,15 +171,6 @@ class Qwen3TTSModel:
     def _ensure_list(self, x: MaybeList) -> List[Any]:
         return x if isinstance(x, list) else [x]
 
-    def _build_assistant_text(self, text: str) -> str:
-        return f"<|im_start|>assistant\n{text}<|im_end|>\n<|im_start|>assistant\n"
-
-    def _build_ref_text(self, text: str) -> str:
-        return f"<|im_start|>assistant\n{text}<|im_end|>\n"
-
-    def _build_instruct_text(self, instruct: str) -> str:
-        return f"<|im_start|>user\n{instruct}<|im_end|>\n"
-
     def _tokenize_text(self, text: str) -> torch.Tensor:
         input = self.processor(text=text, return_tensors="pt", padding=True)
         input_id = input["input_ids"].to(self.device)
@@ -243,7 +228,6 @@ class Qwen3TTSModel:
         )
         return merged
 
-    @torch.inference_mode()
     def create_voice_clone_prompt(
         self,
         ref_audio: Union[AudioLike, List[AudioLike]],
@@ -311,7 +295,6 @@ class Qwen3TTSModel:
             icl_mode=[it.icl_mode for it in items],
         )
 
-    @torch.no_grad()
     def generate_voice_clone(
         self,
         text: Union[str, List[str]],
@@ -345,7 +328,7 @@ class Qwen3TTSModel:
                 voice_clone_prompt_dict = voice_clone_prompt
                 ref_texts_for_ids = None
 
-        input_texts = [self._build_assistant_text(t) for t in texts]
+        input_texts = [self.processor.build_assistant_text(t) for t in texts]
         input_ids = self._tokenize_texts(input_texts)
 
         ref_ids = None
@@ -355,7 +338,7 @@ class Qwen3TTSModel:
                 if rt is None or rt == "":
                     ref_ids.append(None)
                 else:
-                    ref_ids.append(self._tokenize_text(self._build_ref_text(rt)))
+                    ref_ids.append(self._tokenize_text(self.processor.build_ref_text(rt)))
 
         gen_kwargs = self._merge_generate_kwargs(**kwargs)
 
@@ -391,7 +374,6 @@ class Qwen3TTSModel:
 
         return wavs_out, fs
 
-    @torch.no_grad()
     def generate_voice_design(
         self,
         text: Union[str, List[str]],
@@ -409,10 +391,10 @@ class Qwen3TTSModel:
 
         self._validate_languages(languages)
 
-        input_ids = self._tokenize_texts([self._build_assistant_text(t) for t in texts])
+        input_ids = self._tokenize_texts([self.processor.build_assistant_text(t) for t in texts])
         instruct_ids: List[Optional[torch.Tensor]] = []
         for ins in instructs:
-            instruct_ids.append(None if (ins is None or ins == "") else self._tokenize_text(self._build_instruct_text(ins)))
+            instruct_ids.append(None if (ins is None or ins == "") else self._tokenize_text(self.processor.build_instruct_text(ins)))
 
         gen_kwargs = self._merge_generate_kwargs(**kwargs)
 
@@ -427,7 +409,6 @@ class Qwen3TTSModel:
         wavs, fs = self.model.speech_tokenizer.decode([{"audio_codes": c} for c in talker_codes_list])
         return wavs, fs
 
-    @torch.no_grad()
     def generate_custom_voice(
         self,
         text: Union[str, List[str]],
@@ -448,10 +429,10 @@ class Qwen3TTSModel:
         self._validate_languages(languages)
         self._validate_speakers(speakers)
 
-        input_ids = self._tokenize_texts([self._build_assistant_text(t) for t in texts])
+        input_ids = self._tokenize_texts([self.processor.build_assistant_text(t) for t in texts])
         instruct_ids: List[Optional[torch.Tensor]] = []
         for ins in instructs:
-            instruct_ids.append(None if (ins is None or ins == "") else self._tokenize_text(self._build_instruct_text(ins)))
+            instruct_ids.append(None if (ins is None or ins == "") else self._tokenize_text(self.processor.build_instruct_text(ins)))
 
         gen_kwargs = self._merge_generate_kwargs(**kwargs)
 

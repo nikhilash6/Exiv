@@ -1,9 +1,9 @@
 import torch
 import unittest
 import warnings
-from exiv.components.models.qwen3_tts.core.models.configuration_qwen3_tts import Qwen3TTSSpeakerEncoderConfig as ExivConfig
-from exiv.components.audio_encoders.qwen3_speaker_encoder import Qwen3TTSSpeakerEncoder as ExivEncoder
-from exiv.components.audio_encoders.qwen3_speaker_encoder import mel_spectrogram as exiv_mel_spectrogram
+from exiv.components.models.qwen3_tts.core.models.configuration_qwen3_tts import Qwen3TTSSpeakerEncoderConfig
+from exiv.components.audio_encoders.qwen3_speaker_encoder import Qwen3TTSSpeakerEncoder
+from exiv.components.audio_encoders.qwen3_speaker_encoder import mel_spectrogram
 
 warnings.filterwarnings("ignore")
 
@@ -13,11 +13,11 @@ class Qwen3SpeakerEncoderTest(unittest.TestCase):
         # We don't load external weights here, we test the deterministic output 
         # of the un-trained architecture to ensure the math/forward pass hasn't broken.
         cls.device = torch.device("cpu")
-        config = ExivConfig()
+        config = Qwen3TTSSpeakerEncoderConfig()
         
         # Initialize model with a fixed seed
         torch.manual_seed(42)
-        cls.model = ExivEncoder(config)
+        cls.model = Qwen3TTSSpeakerEncoder(config)
         cls.model.eval()
         cls.model.to(cls.device)
 
@@ -36,7 +36,7 @@ class Qwen3SpeakerEncoderTest(unittest.TestCase):
             [-0.8387, -0.6024, -0.9617, -0.9294, -0.2026]
         ], dtype=torch.float32)
 
-        mel = exiv_mel_spectrogram(
+        mel = mel_spectrogram(
             fake_waveform.unsqueeze(0), 
             n_fft=1024, 
             num_mels=128, 
@@ -57,7 +57,7 @@ class Qwen3SpeakerEncoderTest(unittest.TestCase):
         torch.manual_seed(100)
         fake_waveform = torch.randn(1, 24000).squeeze(0).to(self.device)
         
-        mel = exiv_mel_spectrogram(
+        mel = mel_spectrogram(
             fake_waveform.unsqueeze(0), 
             n_fft=1024, 
             num_mels=128, 

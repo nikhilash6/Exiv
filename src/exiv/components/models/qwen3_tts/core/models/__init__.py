@@ -1,3 +1,2 @@
 from .configuration_qwen3_tts import Qwen3TTSConfig
 from .modeling_qwen3_tts import Qwen3TTSForConditionalGeneration
-from .modeling_qwen3_tts import Qwen3TTSProcessor

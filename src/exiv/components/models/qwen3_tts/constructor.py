@@ -4,7 +4,7 @@ from transformers import AutoTokenizer
 
 from .core.models.modeling_qwen3_tts import Qwen3TTSForConditionalGeneration
 from .core.models.configuration_qwen3_tts import Qwen3TTSConfig
-from .core.models.modeling_qwen3_tts import Qwen3TTSProcessor
+from .core.text_prorcessor import Qwen3TTSTextProcessor
 from ...audio_encoders.qwen3_tts_tokenizer import Qwen3TTSTokenizer
 from ....model_utils.autoregressive_model_mixin import ARModelArchConfig
 from ....components.enum import Model
@@ -39,7 +39,7 @@ def get_qwen3_tts_instance(
     # tokenizers are hardcoded during training and switching them doesn't make much sense
     try:
         text_tokenizer_backend = AutoTokenizer.from_pretrained("Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign")
-        text_tokenizer = Qwen3TTSProcessor(tokenizer=text_tokenizer_backend)
+        text_tokenizer = Qwen3TTSTextProcessor(tokenizer=text_tokenizer_backend)
     except Exception as e:
         app_logger.warning(f"Could not load text tokenizer: {e}")
         text_tokenizer = None
