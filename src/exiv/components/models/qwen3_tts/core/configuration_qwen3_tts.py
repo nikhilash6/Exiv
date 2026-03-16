@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from ......utils.logging import app_logger
+from .....utils.logging import app_logger
 
 
 class Qwen3TTSTalkerCodePredictorConfig:
@@ -50,15 +50,15 @@ class Qwen3TTSTalkerCodePredictorConfig:
         sliding_window=4096,
         # baked in params
         hidden_act="silu",
-        max_position_embeddings=32768,
+        max_position_embeddings=65536,
         rms_norm_eps=0.000001,
         tie_word_embeddings=False,
-        rope_theta=10000,
+        rope_theta=1000000,
         rope_scaling=None,
         attention_bias=False,
         max_window_layers=28,
         layer_types=None,
-        num_code_groups=32,
+        num_code_groups=16,
         # no use
         attention_dropout=0,
         initializer_range=0.02,
@@ -133,11 +133,11 @@ class Qwen3TTSTalkerConfig:
         self,
         code_predictor_config=None,
         vocab_size=3072,
-        hidden_size=1024,
-        intermediate_size=2048,
-        num_hidden_layers=20,
+        hidden_size=2048,
+        intermediate_size=6144,
+        num_hidden_layers=28,
         num_attention_heads=16,
-        num_key_value_heads=2,
+        num_key_value_heads=8,
         # configurable 
         use_cache=True,                     # KV cache 
         max_position_embeddings=32768,      # max context window length
@@ -147,19 +147,19 @@ class Qwen3TTSTalkerConfig:
         hidden_act="silu",
         rms_norm_eps=0.000001,
         tie_word_embeddings=False,
-        rope_theta=10000,
+        rope_theta=1000000,
         rope_scaling=None,
         attention_bias=False,
-        num_code_groups=32,
+        num_code_groups=16,
         text_hidden_size=2048,
         # hardcoded magic numbers 
-        codec_eos_token_id=4198,
-        codec_think_id=4202,
-        codec_nothink_id=4203,
-        codec_think_bos_id=4204,
-        codec_think_eos_id=4205,
-        codec_pad_id=4196,
-        codec_bos_id=4197,
+        codec_eos_token_id=2150,
+        codec_think_id=2154,
+        codec_nothink_id=2155,
+        codec_think_bos_id=2156,
+        codec_think_eos_id=2157,
+        codec_pad_id=2148,
+        codec_bos_id=2149,
         spk_id=None,
         spk_is_dialect=None,
         codec_language_id=None,
@@ -192,8 +192,51 @@ class Qwen3TTSTalkerConfig:
         self.attention_dropout = attention_dropout
         # Validate the correctness of rotary position embeddings parameters
         # BC: if there is a 'type' field, move it to 'rope_type'.
+        if self.rope_scaling is None:
+            self.rope_scaling = {
+              "interleaved": True,
+              "mrope_section": [24, 20, 20],
+              "rope_type": "default",
+              "type": "default"
+            }
+        
         if self.rope_scaling is not None and "type" in self.rope_scaling:
             self.rope_scaling["rope_type"] = self.rope_scaling["type"]
+
+        if codec_language_id is None:
+            self.codec_language_id = {
+                "chinese": 2055,
+                "english": 2050,
+                "german": 2053,
+                "italian": 2070,
+                "portuguese": 2071,
+                "spanish": 2054,
+                "japanese": 2058,
+                "korean": 2064,
+                "french": 2061,
+                "russian": 2069,
+                "beijing_dialect": 2074,
+                "sichuan_dialect": 2062
+            }
+        else:
+            self.codec_language_id = codec_language_id
+            
+        if spk_id is None:
+            self.spk_id = {
+                "serena": 3066, "vivian": 3065, "uncle_fu": 3010, "ryan": 3061,
+                "aiden": 2861, "ono_anna": 2873, "sohee": 2864, "eric": 2875, "dylan": 2878
+            }
+        else:
+            self.spk_id = spk_id
+            
+        if spk_is_dialect is None:
+            self.spk_is_dialect = {
+                "serena": False, "vivian": False, "uncle_fu": False, "ryan": False,
+                "aiden": False, "ono_anna": False, "sohee": False,
+                "eric": "sichuan_dialect", "dylan": "beijing_dialect"
+            }
+        else:
+            self.spk_is_dialect = spk_is_dialect
 
         if code_predictor_config is None:
             code_predictor_config = {}

@@ -245,6 +245,7 @@ class Qwen3TTSTokenizerDecoderAttention(nn.Module):
         cos, sin = position_embeddings
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
 
+        # TODO: complete the caching using a custom hook system (there should be a way to distinguish AR vs non-AR hooks)
         # Simplified caching: if past_key_values is present, it's expected to be managed externally or by a DynamicCache replacement
         if past_key_values is not None:
              # This part requires a local DynamicCache or just not using cache for now if not needed

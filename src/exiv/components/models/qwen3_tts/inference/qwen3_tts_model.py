@@ -23,7 +23,7 @@ import librosa
 import numpy as np
 import torch
 
-from ..core.models.modeling_qwen3_tts import Qwen3TTSConfig, Qwen3TTSForConditionalGeneration
+from ..core.modeling_qwen3_tts import Qwen3TTSConfig, Qwen3TTSForConditionalGeneration
 from ..core.text_prorcessor import Qwen3TTSTextProcessor
 
 AudioLike = Union[

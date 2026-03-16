@@ -26,14 +26,14 @@ from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
 from transformers.processing_utils import Unpack
 from transformers.utils import can_return_tuple
 
-from ......components.audio_encoders.qwen3_speaker_encoder import Qwen3TTSSpeakerEncoder, mel_spectrogram
-from ......components.attention import eager_attention_forward
-from ......components.models.common import AROutput
-from ......model_utils.autoregressive_model_mixin import ARModelMixin
+from ....audio_encoders.qwen3_speaker_encoder import Qwen3TTSSpeakerEncoder, mel_spectrogram
+from ....attention import eager_attention_forward
+from ...common import AROutput
+from .....model_utils.autoregressive_model_mixin import ARModelMixin
 from .configuration_qwen3_tts import (Qwen3TTSConfig,
                                       Qwen3TTSTalkerCodePredictorConfig,
                                       Qwen3TTSTalkerConfig)
-from ......utils.logging import app_logger
+from .....utils.logging import app_logger
 
 # TODO: remove all the HF bloat
 # TODO: move attention, rope and dataclasses stuff in separate files

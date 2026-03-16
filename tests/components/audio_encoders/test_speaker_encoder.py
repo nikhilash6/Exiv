@@ -1,7 +1,7 @@
 import torch
 import unittest
 import warnings
-from exiv.components.models.qwen3_tts.core.models.configuration_qwen3_tts import Qwen3TTSSpeakerEncoderConfig
+from exiv.components.models.qwen3_tts.core.configuration_qwen3_tts import Qwen3TTSSpeakerEncoderConfig
 from exiv.components.audio_encoders.qwen3_speaker_encoder import Qwen3TTSSpeakerEncoder
 from exiv.components.audio_encoders.qwen3_speaker_encoder import mel_spectrogram
 
