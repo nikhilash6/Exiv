@@ -1,45 +1,38 @@
-"""Standalone test for Qwen3TTSSubtalker - no HF dependencies."""
-import sys
-import os
 import torch
 import unittest
-
-# Add kirin to path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../")))
 
 from src.exiv.components.models.qwen3_tts.core.config import Qwen3TTSTalkerConfig, Qwen3TTSTalkerCodePredictorConfig
 from src.exiv.components.models.qwen3_tts.core.subtalker_base import Qwen3TTSTalkerCodePredictorModelForConditionalGeneration
 
 
+ROPE_SCALING = {
+    "mrope_section": [24, 20, 20],
+    "rope_type": "default",
+    "interleaved": True,
+}
+
+CP_KWARGS = dict(
+    vocab_size=3072, hidden_size=128, intermediate_size=256, num_hidden_layers=2,
+    num_attention_heads=4, num_key_value_heads=2, rope_scaling=ROPE_SCALING, num_code_groups=16
+)
+
+TALKER_KWARGS = dict(
+    vocab_size=3072, hidden_size=128, intermediate_size=256, num_hidden_layers=2,
+    num_attention_heads=4, num_key_value_heads=2, text_hidden_size=128,
+    text_vocab_size=152000, pad_token_id=0, rope_scaling=ROPE_SCALING, num_code_groups=16
+)
+
+
 class TestQwen3TTSSubtalkerStandalone(unittest.TestCase):
-    """Standalone test for Subtalker (Code Predictor) model - no HF dependencies."""
     
     def setUp(self):
-        """Initialize model with deterministic random weights."""
         self.device = "cpu"
         self.dtype = torch.float32
         torch.manual_seed(42)
         
-        self.rope_scaling = {
-            "mrope_section": [24, 20, 20],
-            "rope_type": "default",
-            "interleaved": True,
-        }
-        
-        self.cp_kwargs = dict(
-            vocab_size=3072, hidden_size=128, intermediate_size=256, num_hidden_layers=2,
-            num_attention_heads=4, num_key_value_heads=2, rope_scaling=self.rope_scaling, num_code_groups=16
-        )
-        
-        self.talker_kwargs = dict(
-            vocab_size=3072, hidden_size=128, intermediate_size=256, num_hidden_layers=2,
-            num_attention_heads=4, num_key_value_heads=2, text_hidden_size=128,
-            text_vocab_size=152000, pad_token_id=0, rope_scaling=self.rope_scaling, num_code_groups=16
-        )
-        
         # Create configs
-        cp_config = Qwen3TTSTalkerCodePredictorConfig(**self.cp_kwargs)
-        talker_config = Qwen3TTSTalkerConfig(code_predictor_config=cp_config, **self.talker_kwargs)
+        cp_config = Qwen3TTSTalkerCodePredictorConfig(**CP_KWARGS)
+        talker_config = Qwen3TTSTalkerConfig(code_predictor_config=cp_config, **TALKER_KWARGS)
         
         # Initialize model
         self.model = Qwen3TTSTalkerCodePredictorModelForConditionalGeneration(
@@ -65,46 +58,46 @@ class TestQwen3TTSSubtalkerStandalone(unittest.TestCase):
         """Test that forward pass produces correct output shape."""
         seq_len = 10
         batch_size = 1
-        num_code_groups = self.cp_kwargs['num_code_groups']
+        num_code_groups = CP_KWARGS['num_code_groups']
         
-        inputs_embeds = torch.randn(batch_size, num_code_groups, self.cp_kwargs['hidden_size'], dtype=self.dtype)
+        inputs_embeds = torch.randn(batch_size, num_code_groups, CP_KWARGS['hidden_size'], dtype=self.dtype)
         
         outputs = self.model(inputs_embeds=inputs_embeds)
         
-        expected_shape = (batch_size, num_code_groups, self.cp_kwargs['vocab_size'])
+        expected_shape = (batch_size, num_code_groups, CP_KWARGS['vocab_size'])
         self.assertEqual(outputs.logits.shape, expected_shape)
         
     def test_forward_runs_without_error(self):
         """Test that forward pass completes without errors."""
         seq_len = 10
         batch_size = 1
-        num_code_groups = self.cp_kwargs['num_code_groups']
+        num_code_groups = CP_KWARGS['num_code_groups']
         
-        inputs_embeds = torch.randn(batch_size, num_code_groups, self.cp_kwargs['hidden_size'], dtype=self.dtype)
+        inputs_embeds = torch.randn(batch_size, num_code_groups, CP_KWARGS['hidden_size'], dtype=self.dtype)
         
         outputs = self.model(inputs_embeds=inputs_embeds)
         
         # Just check that output was produced with correct shape
-        self.assertEqual(outputs.logits.shape, (batch_size, num_code_groups, self.cp_kwargs['vocab_size']))
+        self.assertEqual(outputs.logits.shape, (batch_size, num_code_groups, CP_KWARGS['vocab_size']))
         
     def test_codec_embedding_shape(self):
         """Test that codec_embedding has correct weight shape."""
         # codec_embedding is a ModuleList of Embeddings (one per code group)
-        self.assertEqual(len(self.model.model.codec_embedding), self.cp_kwargs['num_code_groups'] - 1)
+        self.assertEqual(len(self.model.model.codec_embedding), CP_KWARGS['num_code_groups'] - 1)
         for embed in self.model.model.codec_embedding:
-            expected_shape = (self.cp_kwargs['vocab_size'], self.cp_kwargs['hidden_size'])
+            expected_shape = (CP_KWARGS['vocab_size'], CP_KWARGS['hidden_size'])
             self.assertEqual(embed.weight.shape, expected_shape)
 
     def test_num_layers(self):
         """Test that model has correct number of layers."""
         num_layers = len(self.model.model.layers)
-        self.assertEqual(num_layers, self.cp_kwargs['num_hidden_layers'])
+        self.assertEqual(num_layers, CP_KWARGS['num_hidden_layers'])
 
     def test_attention_heads(self):
         """Test attention head configuration."""
         first_layer = self.model.model.layers[0]
-        self.assertEqual(first_layer.self_attn.config.num_attention_heads, self.cp_kwargs['num_attention_heads'])
-        self.assertEqual(first_layer.self_attn.config.num_key_value_heads, self.cp_kwargs['num_key_value_heads'])
+        self.assertEqual(first_layer.self_attn.config.num_attention_heads, CP_KWARGS['num_attention_heads'])
+        self.assertEqual(first_layer.self_attn.config.num_key_value_heads, CP_KWARGS['num_key_value_heads'])
 
 
 def run_test():

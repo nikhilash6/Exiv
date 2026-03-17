@@ -1,91 +1,19 @@
 import torch
 import unittest
-import warnings
+
 from exiv.components.audio_encoders.qwen3_tts.tokenizer_config import Qwen3TTSTokenizerConfig
 from exiv.components.audio_encoders.qwen3_tts.tokenizer_base import Qwen3TTSTokenizerModel
 from exiv.utils.file_path import FilePaths
 from exiv.utils.file import ensure_model_availability
 from exiv.config import global_config
 
-warnings.filterwarnings("ignore")
-
 
 class Qwen3TokenizerTest(unittest.TestCase):
-    """Test Qwen3 TTS Tokenizer with pre-trained weights."""
     
     @classmethod
     def setUpClass(cls):
-        """Load model with pre-trained weights once for all tests."""
-        # Enable auto-download for CI environments
         global_config.auto_download = True
-        
-        # Encoder config from Qwen3-TTS-Tokenizer-12Hz
-        encoder_config = {
-            "audio_channels": 1,
-            "num_filters": 64,
-            "kernel_size": 7,
-            "upsampling_ratios": [8, 6, 5, 4],
-            "num_residual_layers": 1,
-            "dilation_growth_rate": 2,
-            "hidden_size": 512,
-            "num_hidden_layers": 8,
-            "num_attention_heads": 8,
-            "num_key_value_heads": 8,
-            "num_quantizers": 32,
-            "num_semantic_quantizers": 1,
-            "codebook_size": 2048,
-            "codebook_dim": 256,
-            "frame_rate": 12.5,
-            "upsample_groups": 512,
-            "use_causal_conv": True,
-            "pad_mode": "constant",
-            "norm_eps": 1e-05,
-            "rope_theta": 10000.0,
-            "sliding_window": 250,
-            "attention_bias": False,
-            "attention_dropout": 0.0,
-            "hidden_act": "gelu",
-            "intermediate_size": 2048,
-            "layer_scale_initial_scale": 0.01,
-            "max_position_embeddings": 8000,
-            "use_conv_shortcut": False,
-            "trim_right_ratio": 1.0,
-            "vector_quantization_hidden_dimension": 256,
-        }
-        
-        decoder_config = {
-            "codebook_size": 2048,
-            "codebook_dim": 512,
-            "hidden_size": 512,
-            "head_dim": 64,
-            "latent_dim": 1024,
-            "max_position_embeddings": 8000,
-            "rope_theta": 10000,
-            "num_attention_heads": 16,
-            "num_key_value_heads": 16,
-            "attention_bias": False,
-            "sliding_window": 72,
-            "intermediate_size": 1024,
-            "hidden_act": "silu",
-            "layer_scale_initial_scale": 0.01,
-            "rms_norm_eps": 1e-5,
-            "num_hidden_layers": 8,
-            "num_quantizers": 16,
-            "upsample_rates": [8, 5, 4, 3],
-            "upsampling_ratios": [2, 2],
-            "decoder_dim": 1536,
-            "attention_dropout": 0.0,
-        }
-        
-        config = Qwen3TTSTokenizerConfig(
-            encoder_config=encoder_config,
-            decoder_config=decoder_config,
-            encoder_valid_num_quantizers=16,
-            input_sample_rate=24000,
-            output_sample_rate=24000,
-            decode_upsample_rate=1920,
-            encode_downsample_rate=1920,
-        )
+        config = Qwen3TTSTokenizerConfig.from_12hz()
         
         cls.model = Qwen3TTSTokenizerModel(config)
         

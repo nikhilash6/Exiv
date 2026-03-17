@@ -94,6 +94,65 @@ class Qwen3TTSTokenizerConfig(BaseConfig):
 
     model_type = "qwen3_tts_tokenizer_12hz"
 
+    # config for Qwen3-TTS-Tokenizer-12Hz
+    _ENCODER_CONFIG_12HZ = {
+        "audio_channels": 1,
+        "num_filters": 64,
+        "kernel_size": 7,
+        "upsampling_ratios": [8, 6, 5, 4],
+        "num_residual_layers": 1,
+        "dilation_growth_rate": 2,
+        "hidden_size": 512,
+        "num_hidden_layers": 8,
+        "num_attention_heads": 8,
+        "num_key_value_heads": 8,
+        "num_quantizers": 32,
+        "num_semantic_quantizers": 1,
+        "codebook_size": 2048,
+        "codebook_dim": 256,
+        "frame_rate": 12.5,
+        "upsample_groups": 512,
+        "use_causal_conv": True,
+        "pad_mode": "constant",
+        "norm_eps": 1e-05,
+        "rope_theta": 10000.0,
+        "sliding_window": 250,
+        "attention_bias": False,
+        "attention_dropout": 0.0,
+        "hidden_act": "gelu",
+        "intermediate_size": 2048,
+        "layer_scale_initial_scale": 0.01,
+        "max_position_embeddings": 8000,
+        "use_conv_shortcut": False,
+        "trim_right_ratio": 1.0,
+        "vector_quantization_hidden_dimension": 256,
+    }
+
+    # Hardcoded decoder config for Qwen3-TTS-Tokenizer-12Hz
+    _DECODER_CONFIG_12HZ = {
+        "codebook_size": 2048,
+        "codebook_dim": 512,
+        "hidden_size": 512,
+        "head_dim": 64,
+        "latent_dim": 1024,
+        "max_position_embeddings": 8000,
+        "rope_theta": 10000,
+        "num_attention_heads": 16,
+        "num_key_value_heads": 16,
+        "attention_bias": False,
+        "sliding_window": 72,
+        "intermediate_size": 1024,
+        "hidden_act": "silu",
+        "layer_scale_initial_scale": 0.01,
+        "rms_norm_eps": 1e-5,
+        "num_hidden_layers": 8,
+        "num_quantizers": 16,
+        "upsample_rates": [8, 5, 4, 3],
+        "upsampling_ratios": [2, 2],
+        "decoder_dim": 1536,
+        "attention_dropout": 0.0,
+    }
+
     def __init__(
         self,
         encoder_config=None,
@@ -128,4 +187,18 @@ class Qwen3TTSTokenizerConfig(BaseConfig):
         self.output_sample_rate = output_sample_rate
         self.decode_upsample_rate = decode_upsample_rate
         self.encode_downsample_rate = encode_downsample_rate
+
+    @classmethod
+    def from_12hz(cls, **kwargs):
+        """Create a config for the Qwen3-TTS-Tokenizer-12Hz model."""
+        return cls(
+            encoder_config=cls._ENCODER_CONFIG_12HZ.copy(),
+            decoder_config=cls._DECODER_CONFIG_12HZ.copy(),
+            encoder_valid_num_quantizers=16,
+            input_sample_rate=24000,
+            output_sample_rate=24000,
+            decode_upsample_rate=1920,
+            encode_downsample_rate=1920,
+            **kwargs
+        )
 

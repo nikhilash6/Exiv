@@ -22,24 +22,12 @@ from .common_modules import Qwen3TTSTalkerResizeMLP, Qwen3TTSRMSNorm, Qwen3TTSTa
 from .subtalker_base import Qwen3TTSTalkerCodePredictorModelForConditionalGeneration
 from .config import Qwen3TTSConfig, Qwen3TTSTalkerConfig
 from ...common import AROutput
-from ....attention import eager_attention_forward
+from ....attention import eager_attention_forward, repeat_kv
 from ....audio_encoders.qwen3_tts_speaker_encoder import Qwen3TTSSpeakerEncoder, mel_spectrogram
 from .....utils.logging import app_logger
 from .....components.attention import create_attention_mask
 from .....model_utils.autoregressive_model_mixin import ARModelMixin
 
-
-# main transformer
-def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
-    """
-    This is the equivalent of torch.repeat_interleave(x, dim=1, repeats=n_rep). The hidden states go from (batch,
-    num_key_value_heads, seqlen, head_dim) to (batch, num_attention_heads, seqlen, head_dim)
-    """
-    batch, num_key_value_heads, slen, head_dim = hidden_states.shape
-    if n_rep == 1:
-        return hidden_states
-    hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
-    return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
 
 def apply_multimodal_rotary_pos_emb(q, k, cos, sin, mrope_section, mrope_interleaved=False, unsqueeze_dim=1):
     # mrope_section keeps this dynamic, like text can be allocated different channel slices in different scenarios
