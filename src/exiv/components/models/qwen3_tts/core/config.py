@@ -64,10 +64,6 @@ class Qwen3TTSTalkerCodePredictorConfig:
         initializer_range=0.02,
         **kwargs,
     ):
-        super().__init__(
-            tie_word_embeddings=tie_word_embeddings,
-            **kwargs,
-        )
         self.vocab_size = vocab_size
         self.max_position_embeddings = max_position_embeddings
         self.hidden_size = hidden_size
@@ -91,7 +87,12 @@ class Qwen3TTSTalkerCodePredictorConfig:
         self.rope_theta = rope_theta
         self.rope_scaling = rope_scaling
         self.attention_bias = attention_bias
+        self.pad_token_id = kwargs.get("pad_token_id", 0)
         self.attention_dropout = attention_dropout
+        self.output_attentions = kwargs.get("output_attentions", False)
+        self.output_hidden_states = kwargs.get("output_hidden_states", False)
+        self.return_dict = kwargs.get("return_dict", True)
+        self.use_return_dict = kwargs.get("use_return_dict", True)
         # Validate the correctness of rotary position embeddings parameters
         # BC: if there is a 'type' field, move it to 'rope_type'.
         if self.rope_scaling is not None and "type" in self.rope_scaling:
@@ -106,7 +107,6 @@ class Qwen3TTSTalkerCodePredictorConfig:
                 for i in range(self.num_hidden_layers)
             ]
         self.num_code_groups = num_code_groups
-
 
 class Qwen3TTSTalkerConfig:
     model_type = "qwen3_tts_talker"
@@ -163,15 +163,13 @@ class Qwen3TTSTalkerConfig:
         spk_id=None,
         spk_is_dialect=None,
         codec_language_id=None,
+        text_vocab_size=152000,
+        pad_token_id=0,
         # no use
         attention_dropout=0,
         initializer_range=0.02,
         **kwargs,
     ):
-        super().__init__(
-            tie_word_embeddings=tie_word_embeddings,
-            **kwargs,
-        )
         self.vocab_size = vocab_size
         self.max_position_embeddings = max_position_embeddings
         self.hidden_size = hidden_size
@@ -189,7 +187,12 @@ class Qwen3TTSTalkerConfig:
         self.rope_theta = rope_theta
         self.rope_scaling = rope_scaling
         self.attention_bias = attention_bias
+        self.pad_token_id = kwargs.get("pad_token_id", 0)
         self.attention_dropout = attention_dropout
+        self.output_attentions = kwargs.get("output_attentions", False)
+        self.output_hidden_states = kwargs.get("output_hidden_states", False)
+        self.return_dict = kwargs.get("return_dict", True)
+        self.use_return_dict = kwargs.get("use_return_dict", True)
         # Validate the correctness of rotary position embeddings parameters
         # BC: if there is a 'type' field, move it to 'rope_type'.
         if self.rope_scaling is None:
@@ -256,6 +259,9 @@ class Qwen3TTSTalkerConfig:
         self.codec_think_eos_id = codec_think_eos_id
         self.codec_pad_id = codec_pad_id
         self.codec_bos_id = codec_bos_id
+
+        self.text_vocab_size = text_vocab_size
+        self.pad_token_id = pad_token_id
         self.spk_id = spk_id
         self.spk_is_dialect = spk_is_dialect
 
@@ -303,8 +309,6 @@ class Qwen3TTSConfig:
         tts_eos_token_id=151673,
         **kwargs,
     ):
-        super().__init__(**kwargs)
-
         if talker_config is None:
             talker_config = {}
             app_logger.info("talker_config is None. Initializing talker model with default values")

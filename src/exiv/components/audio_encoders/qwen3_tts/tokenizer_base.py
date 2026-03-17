@@ -23,20 +23,21 @@ from torch import nn
 from torch.nn import Parameter
 from torch.nn import functional as F
 
-from .configuration_qwen3_tts_tokenizer import (
+from .tokenizer_config import (
     Qwen3TTSTokenizerConfig,
     Qwen3TTSTokenizerDecoderConfig,
 )
-from .modeling_utils import (
+from .utils import (
     ModelOutput,
     BaseModelOutputWithPast,
     repeat_kv,
     rotate_half,
     apply_rotary_pos_emb,
 )
-from transformers import MimiModel
+from .mimi_model import MimiModel
 from ....utils.logging import app_logger
 from ....model_utils.autoregressive_model_mixin import ARModelMixin
+from ....model_utils.meta_utils import materialize_meta_buffers
 from ...attention import eager_attention_forward
 
 """
@@ -165,6 +166,12 @@ class Qwen3TTSTokenizerConvNeXtBlock(nn.Module):
         return hidden_states
 
 
+def _compute_rope_inv_freq(config, device=None):
+    base = getattr(config, "rope_theta", 10000.0)
+    head_dim = getattr(config, "head_dim", None) or config.hidden_size // config.num_attention_heads
+    inv_freq = 1.0 / (base ** (torch.arange(0, head_dim, 2, dtype=torch.int64, device=device).float() / head_dim))
+    return inv_freq, 1.0
+
 class Qwen3TTSTokenizerDecoderRotatoryEmbedding(nn.Module):
     def __init__(self, config: Qwen3TTSTokenizerDecoderConfig, device=None):
         super().__init__()
@@ -173,13 +180,14 @@ class Qwen3TTSTokenizerDecoderRotatoryEmbedding(nn.Module):
         self.head_dim = getattr(config, "head_dim", self.hidden_size // self.num_attention_heads)
         self.max_position_embeddings = config.max_position_embeddings
         self.rope_theta = config.rope_theta
+        self.config = config
         
         # Simple ROPE implementation with scaling support
         self.attention_scaling = 1.0 # Default scaling
-        inv_freq = 1.0 / (self.rope_theta ** (torch.arange(0, self.head_dim, 2).float() / self.head_dim))
+        inv_freq, _ = _compute_rope_inv_freq(config, device=device)
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
-    @torch.no_grad()
+    @materialize_meta_buffers(inv_freq=lambda self, device: _compute_rope_inv_freq(self.config, device)[0])
     def forward(self, x, position_ids):
         # position_ids: [batch, seq_len]
         # inv_freq: [head_dim // 2]
@@ -578,7 +586,9 @@ class Qwen3TTSTokenizerModel(ARModelMixin):
         self.output_sample_rate = config.output_sample_rate
         self.decode_upsample_rate = config.decode_upsample_rate
         self.encode_downsample_rate = config.encode_downsample_rate
+        
         self.encoder = Qwen3TTSTokenizerEncoder(config.encoder_config)
+            
         self.decoder = Qwen3TTSTokenizerDecoder(config.decoder_config)
     
     def get_model_type(self):

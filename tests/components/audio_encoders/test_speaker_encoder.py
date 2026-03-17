@@ -1,9 +1,9 @@
 import torch
 import unittest
 import warnings
-from exiv.components.models.qwen3_tts.core.configuration_qwen3_tts import Qwen3TTSSpeakerEncoderConfig
-from exiv.components.audio_encoders.qwen3_speaker_encoder import Qwen3TTSSpeakerEncoder
-from exiv.components.audio_encoders.qwen3_speaker_encoder import mel_spectrogram
+from exiv.components.models.qwen3_tts.core.config import Qwen3TTSSpeakerEncoderConfig
+from exiv.components.audio_encoders.qwen3_tts_speaker_encoder import Qwen3TTSSpeakerEncoder
+from exiv.components.audio_encoders.qwen3_tts_speaker_encoder import mel_spectrogram
 
 warnings.filterwarnings("ignore")
 
@@ -75,8 +75,7 @@ class Qwen3SpeakerEncoderTest(unittest.TestCase):
             dtype=torch.float32
         )
 
-        with torch.no_grad():
-            embedding = self.model(input_mel)
+        embedding = self.model(input_mel)
 
         actual_slice = embedding[0, :10]
 

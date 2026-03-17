@@ -23,10 +23,10 @@ import numpy as np
 import torch
 from torch.nn.utils.rnn import pad_sequence
 
-from .qwen3_tts.configuration_qwen3_tts_tokenizer import (
+from .qwen3_tts.tokenizer_config import (
     Qwen3TTSTokenizerConfig,
 )
-from .qwen3_tts.modeling_qwen3_tts_tokenizer import (
+from .qwen3_tts.tokenizer_base import (
     Qwen3TTSTokenizerModel,
 )
 from transformers import AutoFeatureExtractor

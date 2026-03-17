@@ -7,6 +7,26 @@ from typing import Optional, Tuple
 from ..utils.logging import app_logger
 from ..utils.device import XFORMERS_AVAILABLE, SDPA_AVAILABLE
 
+def create_attention_mask(
+      query_len: int,
+      kv_len: int,
+      device: torch.device,
+      sliding_window: int | None = None
+  ) -> torch.Tensor:
+    """
+    creates a 4D causal attention mask of shape (1, 1, query_len, kv_len)
+    returns 0 for allowed positions, -inf for masked positions
+    """
+    q_idx = torch.arange(query_len, device=device).unsqueeze(1)
+    kv_idx = torch.arange(kv_len, device=device).unsqueeze(0)
+
+    # causal: can only attend to previous positions
+    mask = kv_idx <= q_idx
+    if sliding_window is not None:
+        mask = mask & (kv_idx > q_idx - sliding_window)
+
+    return torch.where(mask, 0.0, float('-inf')).unsqueeze(0).unsqueeze(0)
+
 def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     batch, num_key_value_heads, slen, head_dim = hidden_states.shape
     if n_rep == 1:

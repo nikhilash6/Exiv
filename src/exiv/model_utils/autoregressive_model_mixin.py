@@ -18,13 +18,14 @@ class ARModuleMeta(type(nn.Module)):
         quant_type = kwargs.get("quant_type", None)
         quant_config = kwargs.get("quant_config", None)
         force_load_mode = kwargs.get("force_load_mode", None)
+        meta_device = kwargs.pop("meta_device", "meta")
         original_dtype = torch.get_default_dtype()
         
         try:
             torch.set_default_dtype(model_dtype)
             
             # zero init weight load
-            with torch.device("meta"):
+            with torch.device(meta_device):
                 instance = super().__call__(*args, **kwargs)
                 quantizer: Quantizer = get_quantizer(quant_type=quant_type, quant_config=quant_config)
                 instance.quantizer = quantizer
@@ -43,7 +44,7 @@ class ARModelArchConfig:
         self.model_type = model_type
         # TODO: add more specific attributes and methods
 
-class ARModelMixin(nn.Module):
+class ARModelMixin(nn.Module, metaclass=ARModuleMeta):
     """
     - (TODO) support quantizers
     - (TODO) support GGUF loading
@@ -122,6 +123,14 @@ class ARModelMixin(nn.Module):
             set_module_tensor_to_device(self, param_name, device, value=param, dtype=self.dtype)
         
         del state_dict
+        
+        # Clean up any leftover meta tensors (e.g. non-persistent parameters not in state_dict)
+        for name, param in self.named_parameters():
+            if param.is_meta:
+                parent_module, leaf_name = get_module_from_name(self, name)
+                if parent_module is not None:
+                    setattr(parent_module, leaf_name, torch.nn.Parameter(torch.zeros_like(param, device=device, dtype=self.dtype)))
+                    
         app_logger.info("Autoregressive Model successfully loaded to CPU.")
         
         
