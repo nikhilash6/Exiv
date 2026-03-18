@@ -44,6 +44,7 @@ class Qwen3TTSTalkerCodePredictorConfig:
         num_attention_heads=16,
         num_key_value_heads=8,
         head_dim=128,
+        text_hidden_size=2048,
         # configurable
         use_cache=True,
         use_sliding_window=False,
@@ -67,6 +68,7 @@ class Qwen3TTSTalkerCodePredictorConfig:
         self.vocab_size = vocab_size
         self.max_position_embeddings = max_position_embeddings
         self.hidden_size = hidden_size
+        self.text_hidden_size = text_hidden_size
         self.intermediate_size = intermediate_size
         self.num_hidden_layers = num_hidden_layers
         self.num_attention_heads = num_attention_heads
@@ -163,7 +165,7 @@ class Qwen3TTSTalkerConfig:
         spk_id=None,
         spk_is_dialect=None,
         codec_language_id=None,
-        text_vocab_size=152000,
+        text_vocab_size=151936,
         pad_token_id=0,
         # no use
         attention_dropout=0,
@@ -242,18 +244,20 @@ class Qwen3TTSTalkerConfig:
             self.spk_is_dialect = spk_is_dialect
 
         if code_predictor_config is None:
-            code_predictor_config = {}
-            self.code_predictor_config = Qwen3TTSTalkerCodePredictorConfig()
+            code_predictor_config = {"text_hidden_size": text_hidden_size}
+            self.code_predictor_config = Qwen3TTSTalkerCodePredictorConfig(**code_predictor_config)
             app_logger.info("code_predictor_config is None. Initializing code_predictor model with default values")
         elif isinstance(code_predictor_config, Qwen3TTSTalkerCodePredictorConfig):
             self.code_predictor_config = code_predictor_config
         else:
+            if "text_hidden_size" not in code_predictor_config:
+                code_predictor_config["text_hidden_size"] = text_hidden_size
             self.code_predictor_config = Qwen3TTSTalkerCodePredictorConfig(**code_predictor_config)
         self.num_code_groups = num_code_groups
         self.text_hidden_size = text_hidden_size
         self.codec_eos_token_id = codec_eos_token_id
         self.codec_think_id = codec_think_id
-        self.codec_language_id = codec_language_id
+        # Removed redundant self.codec_language_id = codec_language_id
         self.codec_nothink_id = codec_nothink_id
         self.codec_think_bos_id = codec_think_bos_id
         self.codec_think_eos_id = codec_think_eos_id
@@ -262,8 +266,6 @@ class Qwen3TTSTalkerConfig:
 
         self.text_vocab_size = text_vocab_size
         self.pad_token_id = pad_token_id
-        self.spk_id = spk_id
-        self.spk_is_dialect = spk_is_dialect
 
 class Qwen3TTSSpeakerEncoderConfig:
     def __init__(

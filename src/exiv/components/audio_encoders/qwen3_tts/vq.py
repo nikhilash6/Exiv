@@ -56,6 +56,9 @@ class EuclideanCodebook(nn.Module):
 
     def decode(self, codes: torch.Tensor) -> torch.Tensor:
         embedding = self.embedding_sum / self.cluster_usage.clamp(min=self.epsilon)[:, None]
+        # Ensure codes and embedding are on the same device
+        if codes.device != embedding.device:
+            codes = codes.to(embedding.device)
         return F.embedding(codes, embedding)
 
 

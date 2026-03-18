@@ -173,7 +173,7 @@ class Qwen3TTSModel:
 
     def _tokenize_text(self, text: str) -> torch.Tensor:
         input = self.processor(text=text, return_tensors="pt", padding=True)
-        input_id = input["input_ids"].to(self.device)
+        input_id = input["input_ids"].to(getattr(self.model, "gpu_device", "cpu"))
         return input_id if input_id.dim() > 1 else input_id.unsqueeze(0)
 
     def _tokenize_texts(self, texts: List[str]) -> List[torch.Tensor]:
@@ -191,6 +191,7 @@ class Qwen3TTSModel:
         subtalker_top_p: Optional[float] = None,
         subtalker_temperature: Optional[float] = None,
         max_new_tokens: Optional[int] = None,
+        eos_token_id: Optional[int] = None,
         **kwargs,
     ) -> Dict[str, Any]:
         hard_defaults = dict(
@@ -203,7 +204,7 @@ class Qwen3TTSModel:
             subtalker_top_k=50,
             subtalker_top_p=1.0,
             subtalker_temperature=0.9,
-            max_new_tokens=2048,
+            max_new_tokens=8192,  # original
         )
 
         def pick(name: str, user_val: Any) -> Any:
@@ -212,6 +213,8 @@ class Qwen3TTSModel:
             if name in self.generate_defaults:
                 return self.generate_defaults[name]
             return hard_defaults[name]
+
+        codec_eos_token_id = self.model.config.talker_config.codec_eos_token_id
 
         merged = dict(kwargs)
         merged.update(
@@ -225,6 +228,7 @@ class Qwen3TTSModel:
             subtalker_top_p=pick("subtalker_top_p", subtalker_top_p),
             subtalker_temperature=pick("subtalker_temperature", subtalker_temperature),
             max_new_tokens=pick("max_new_tokens", max_new_tokens),
+            eos_token_id=eos_token_id if eos_token_id is not None else codec_eos_token_id,
         )
         return merged
 
@@ -435,7 +439,6 @@ class Qwen3TTSModel:
             instruct_ids.append(None if (ins is None or ins == "") else self._tokenize_text(self.processor.build_instruct_text(ins)))
 
         gen_kwargs = self._merge_generate_kwargs(**kwargs)
-
         talker_codes_list, _ = self.model.generate(
             input_ids=input_ids,
             instruct_ids=instruct_ids,

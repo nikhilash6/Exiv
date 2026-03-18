@@ -9,6 +9,12 @@ def cast_to(t: Tensor, dtype=None, device=None, non_blocking=False):
     no_dtype_change = dtype is None or t.dtype == dtype
     
     if no_device_change and no_dtype_change: return t
+    
+    # Don't cast integer tensors (like input_ids) to float dtype
+    if dtype is not None and t.dtype in (torch.int64, torch.int32, torch.int16, torch.int8, torch.long, torch.int):
+        if device is not None and t.device != device:
+            return t.to(device=device, non_blocking=non_blocking)
+        return t
 
     r = torch.empty_like(t, dtype=dtype, device=device)
     r.copy_(t, non_blocking=non_blocking)

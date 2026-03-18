@@ -11,7 +11,8 @@ def create_attention_mask(
       query_len: int,
       kv_len: int,
       device: torch.device,
-      sliding_window: int | None = None
+      sliding_window: int | None = None,
+      dtype: torch.dtype = None,
   ) -> torch.Tensor:
     """
     creates a 4D causal attention mask of shape (1, 1, query_len, kv_len)
@@ -25,7 +26,9 @@ def create_attention_mask(
     if sliding_window is not None:
         mask = mask & (kv_idx > q_idx - sliding_window)
 
-    return torch.where(mask, 0.0, float('-inf')).unsqueeze(0).unsqueeze(0)
+    mask_dtype = dtype if dtype is not None else torch.float32
+    return torch.where(mask, torch.tensor(0.0, dtype=mask_dtype, device=device), 
+                       torch.tensor(float('-inf'), dtype=mask_dtype, device=device)).unsqueeze(0).unsqueeze(0)
 
 def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     batch, num_key_value_heads, slen, head_dim = hidden_states.shape
@@ -163,10 +166,14 @@ def eager_attention_forward(
     
     # query, key_states, value_states are 4D: (batch, heads, seq_len, head_dim)
     # optimized_attention expects 3D: (batch, seq_len, dim)
-    b, h, s, d = query.shape
-    query_3d = query.transpose(1, 2).reshape(b, s, h * d)
-    key_3d = key_states.transpose(1, 2).reshape(b, s, h * d)
-    value_3d = value_states.transpose(1, 2).reshape(b, s, h * d)
+    # Note: key/value may have different seq_len than query when using KV cache
+    b, h, s_q, d = query.shape
+    _, _, s_k, _ = key_states.shape  # key sequence length may be longer due to cache
+    _, _, s_v, _ = value_states.shape  # value should match key
+    
+    query_3d = query.transpose(1, 2).reshape(b, s_q, h * d)
+    key_3d = key_states.transpose(1, 2).reshape(b, s_k, h * d)
+    value_3d = value_states.transpose(1, 2).reshape(b, s_v, h * d)
     
     # TODO: check if -inf are handled properly
     return optimized_attention(query_3d, key_3d, value_3d, heads, attention_mask)

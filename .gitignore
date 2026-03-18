@@ -69,4 +69,5 @@ profile_data/*
 *.npy
 zombie*
 *.pkl
-preview_grid_*.png
+preview_grid_*.png# Generated audio files from tests
+tests/components/models/qwen3_tts/output_audio/

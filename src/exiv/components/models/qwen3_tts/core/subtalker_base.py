@@ -131,10 +131,11 @@ class Qwen3TTSDecoderLayer(nn.Module):
         outputs = (hidden_states,)
         return outputs
 
+# Subtalker base model: transformer backbone for residual code prediction (codes 1-15)
 class Qwen3TTSTalkerCodePredictorModel(ARModelMixin):
 
-    def __init__(self, config: Qwen3TTSTalkerCodePredictorConfig, talker_hidden_size=None, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, config: Qwen3TTSTalkerCodePredictorConfig, talker_hidden_size=None, dtype=torch.float32, **kwargs):
+        super().__init__(dtype=dtype, **kwargs)
         self.config = config
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
@@ -145,8 +146,12 @@ class Qwen3TTSTalkerCodePredictorModel(ARModelMixin):
         self.rotary_emb = Qwen3TTSRotaryEmbedding(config=config)
         self.gradient_checkpointing = False
         self.has_sliding_layers = "sliding_attention" in self.config.layer_types
+        # TODO: look into this, added during dev
+        # use text_hidden_size for codec_embedding (matches talker's hidden size)
+        # the codec_embedding projects from talker's hidden size to code predictor's input
+        embed_dim = getattr(config, "text_hidden_size", config.hidden_size)
         self.codec_embedding = nn.ModuleList(
-            [nn.Embedding(config.vocab_size, config.hidden_size) for _ in range(config.num_code_groups - 1)]
+            [nn.Embedding(config.vocab_size, embed_dim) for _ in range(config.num_code_groups - 1)]
         )
 
         # Initialize weights and apply final processing
@@ -155,8 +160,16 @@ class Qwen3TTSTalkerCodePredictorModel(ARModelMixin):
     def get_input_embeddings(self):
         return self.codec_embedding
 
-    def set_input_embeddings(self, value):
+    @property
+    def embed_tokens(self):
+        return self.codec_embedding
+    
+    @embed_tokens.setter
+    def embed_tokens(self, value):
         self.codec_embedding = value
+
+    def set_input_embeddings(self, value):
+        self.embed_tokens = value
 
     def forward(
         self,
@@ -215,12 +228,12 @@ class Qwen3TTSTalkerCodePredictorModel(ARModelMixin):
 
             # Create the masks
             causal_mask_mapping = {
-                "full_attention": create_attention_mask(query_len, kv_len, device),
+                "full_attention": create_attention_mask(query_len, kv_len, device, dtype=inputs_embeds.dtype),
             }
             # The sliding window alternating layers are not always activated depending on the config
             if self.has_sliding_layers:
                 causal_mask_mapping["sliding_attention"] = create_attention_mask(
-                    query_len, kv_len, device, sliding_window=self.config.sliding_window
+                    query_len, kv_len, device, sliding_window=self.config.sliding_window, dtype=inputs_embeds.dtype
                 )
 
         hidden_states = inputs_embeds
@@ -269,6 +282,7 @@ class Qwen3TTSTalkerCodePredictorModel(ARModelMixin):
             }
         )
 
+# Subtalker: predicts residual VQ codes (codes 1-15), wraps the base model with output heads
 class Qwen3TTSTalkerCodePredictorModelForConditionalGeneration(ARModelMixin):
     _tied_weights_keys = ["lm_head.weight"]
     _tp_plan = {"lm_head": "colwise_rep"}
@@ -276,10 +290,10 @@ class Qwen3TTSTalkerCodePredictorModelForConditionalGeneration(ARModelMixin):
     config_class = Qwen3TTSTalkerCodePredictorConfig
     base_model_prefix = "talker.code_predictor"
 
-    def __init__(self, config: Qwen3TTSTalkerCodePredictorConfig, talker_config: Qwen3TTSTalkerConfig, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, config: Qwen3TTSTalkerCodePredictorConfig, talker_config: Qwen3TTSTalkerConfig, dtype=torch.float32, **kwargs):
+        super().__init__(dtype=dtype, **kwargs)
         self.config = config
-        self.model = Qwen3TTSTalkerCodePredictorModel(config, talker_config.hidden_size, **kwargs)
+        self.model = Qwen3TTSTalkerCodePredictorModel(config, talker_hidden_size=talker_config.hidden_size, dtype=dtype, **kwargs)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.ModuleList(
             [nn.Linear(config.hidden_size, config.vocab_size, bias=False) for _ in range(config.num_code_groups - 1)]
@@ -296,8 +310,16 @@ class Qwen3TTSTalkerCodePredictorModelForConditionalGeneration(ARModelMixin):
     def get_input_embeddings(self):
         return self.model.get_input_embeddings()
 
+    @property
+    def embed_tokens(self):
+        return self.model.codec_embedding
+    
+    @embed_tokens.setter  
+    def embed_tokens(self, value):
+        self.model.codec_embedding = value
+        
     def set_input_embeddings(self, value):
-        self.model.embed_tokens = value
+        self.embed_tokens = value
 
     def get_output_embeddings(self):
         return self.lm_head
@@ -397,6 +419,8 @@ class Qwen3TTSTalkerCodePredictorModelForConditionalGeneration(ARModelMixin):
             generation_steps = inputs_embeds.shape[1] - 2  # hidden & layer 0
         # Generation stage
         else:
+            # NOTE: generation_steps is passed from GenerationMixin via model_kwargs
+            # It represents the current step index (0 to num_code_groups-2)
             inputs_embeds = self.model.get_input_embeddings()[generation_steps - 1](input_ids)
         inputs_embeds = self.small_to_mtp_projection(inputs_embeds)
 
@@ -415,6 +439,7 @@ class Qwen3TTSTalkerCodePredictorModelForConditionalGeneration(ARModelMixin):
         )
 
         hidden_states = outputs.extra.get("last_hidden_state")
+        # TODO: lm_head indexing (look into this)
         logits = self.lm_head[generation_steps](hidden_states)
 
         loss = None
@@ -426,8 +451,90 @@ class Qwen3TTSTalkerCodePredictorModelForConditionalGeneration(ARModelMixin):
             past_key_values=outputs.extra.get("past_key_values"),
             extra={
                 "loss": loss,
+                "last_hidden_state": hidden_states,
                 "hidden_states": outputs.extra.get("hidden_states"),
                 "attentions": outputs.extra.get("attentions"),
                 "generation_steps": generation_steps + 1,
             }
         )
+
+    def generate(
+        self,
+        inputs_embeds: torch.FloatTensor,
+        max_new_tokens: int,
+        do_sample: bool = True,
+        temperature: float = 0.9,
+        top_k: int = 50,
+        top_p: float = 1.0,
+        **kwargs
+    ) -> torch.Tensor:
+        """
+        Custom generation for code predictor.
+        
+        Unlike standard AR models, this uses a different lm_head at each step
+        (indexed by generation_steps) to predict residual codes.
+        
+        Args:
+            inputs_embeds: Input embeddings [batch, seq_len, hidden_dim]
+            max_new_tokens: Number of residual codes to generate
+            do_sample: Whether to use sampling
+            temperature: Sampling temperature
+            top_k: Top-k filtering
+            top_p: Top-p filtering
+            
+        Returns:
+            Generated token IDs [batch, max_new_tokens]
+        """
+        batch_size = inputs_embeds.shape[0]
+        device = inputs_embeds.device
+        
+        generated_tokens = []
+        current_embeds = inputs_embeds
+        generation_steps = 0
+        
+        for i in range(max_new_tokens):
+            # Forward pass through code_predictor
+            output = self(
+                inputs_embeds=current_embeds,
+                use_cache=False,
+                output_hidden_states=False,
+                generation_steps=generation_steps,
+            )
+            
+            # Get logits for last position
+            last_logits = output.logits[:, -1, :]
+            
+            # Apply temperature
+            if temperature != 1.0:
+                last_logits = last_logits / temperature
+            
+            # Sample
+            if do_sample:
+                if top_k > 0:
+                    indices_to_remove = last_logits < torch.topk(last_logits, top_k)[0][..., -1, None]
+                    last_logits[indices_to_remove] = float('-inf')
+                
+                if top_p < 1.0:
+                    sorted_logits, sorted_indices = torch.sort(last_logits, descending=True)
+                    cumulative_probs = torch.cumsum(torch.softmax(sorted_logits, dim=-1), dim=-1)
+                    sorted_indices_to_remove = cumulative_probs > top_p
+                    sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                    sorted_indices_to_remove[..., 0] = False
+                    indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
+                    last_logits[indices_to_remove] = float('-inf')
+                
+                probs = torch.softmax(last_logits, dim=-1)
+                next_token = torch.multinomial(probs, num_samples=1)
+            else:
+                next_token = torch.argmax(last_logits, dim=-1, keepdim=True)
+            
+            generated_tokens.append(next_token)
+            
+            # Prepare embedding for next step
+            next_embed = self.get_input_embeddings()[i](next_token)
+            current_embeds = torch.cat([current_embeds, next_embed], dim=1)
+            
+            # Update generation_steps
+            generation_steps = output.extra.get("generation_steps", generation_steps + 1)
+        
+        return torch.cat(generated_tokens, dim=-1)

@@ -187,10 +187,15 @@ class Qwen3TTSTokenizerDecoderRotatoryEmbedding(nn.Module):
         inv_freq, _ = _compute_rope_inv_freq(config, device=device)
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
-    @materialize_meta_buffers(inv_freq=lambda self, device: _compute_rope_inv_freq(self.config, device)[0])
     def forward(self, x, position_ids):
         # position_ids: [batch, seq_len]
         # inv_freq: [head_dim // 2]
+        
+        # Lazy initialization: if inv_freq is zeros, recompute it
+        if self.inv_freq.abs().max() == 0:
+            device = self.inv_freq.device
+            self.inv_freq = _compute_rope_inv_freq(self.config, device=device)[0].to(device)
+        
         inv_freq_expanded = self.inv_freq[None, :, None].float().expand(position_ids.shape[0], -1, 1).to(x.device)
         position_ids_expanded = position_ids[:, None, :].float()
 
@@ -414,7 +419,7 @@ class Qwen3TTSTokenizerDecoderTransformerModel(nn.Module):
         # Simple causal mask creation
         if attention_mask is None:
             seq_len = hidden_states.shape[1]
-            attention_mask = torch.triu(torch.full((seq_len, seq_len), float("-inf"), device=hidden_states.device), diagonal=1)
+            attention_mask = torch.triu(torch.full((seq_len, seq_len), float("-inf"), device=hidden_states.device, dtype=hidden_states.dtype), diagonal=1)
             attention_mask = attention_mask.unsqueeze(0).unsqueeze(0)
 
         # create position embeddings to be shared across the decoder layers

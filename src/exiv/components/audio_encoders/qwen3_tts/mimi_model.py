@@ -577,7 +577,7 @@ class MimiTransformerModel(nn.Module):
 
         seq_len = hidden_states.shape[1]
         device = hidden_states.device
-        causal_mask = create_attention_mask(seq_len, seq_len, device, sliding_window=getattr(self.config, 'sliding_window', None))
+        causal_mask = create_attention_mask(seq_len, seq_len, device, sliding_window=getattr(self.config, 'sliding_window', None), dtype=hidden_states.dtype)
 
         all_hidden_states = () if output_hidden_states else None
         all_self_attns = () if output_attentions else None

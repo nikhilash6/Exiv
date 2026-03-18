@@ -123,7 +123,9 @@ class Qwen3TTSTalkerAttention(nn.Module):
         if past_key_values is not None:
             # sin and cos are specific to RoPE models; cache_position needed for the static cache
             cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
+            
             key_states, value_states = past_key_values.update(key_states, value_states, self.layer_idx, cache_kwargs)
+            
 
         attn_output = eager_attention_forward(
             self,
@@ -208,10 +210,11 @@ class Qwen3TTSTalkerDecoderLayer(nn.Module):
         outputs = (hidden_states,)
         return outputs
 
+# Talker base model: transformer backbone for main speech generation
 class Qwen3TTSTalkerModel(ARModelMixin):
 
-    def __init__(self, config, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, config, dtype=torch.float32, **kwargs):
+        super().__init__(dtype=dtype, **kwargs)
         self.config = config
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
@@ -233,8 +236,16 @@ class Qwen3TTSTalkerModel(ARModelMixin):
     def get_text_embeddings(self):
         return self.text_embedding
 
-    def set_input_embeddings(self, value):
+    @property
+    def embed_tokens(self):
+        return self.codec_embedding
+    
+    @embed_tokens.setter
+    def embed_tokens(self, value):
         self.codec_embedding = value
+
+    def set_input_embeddings(self, value):
+        self.embed_tokens = value
 
     def forward(
         self,
@@ -277,11 +288,13 @@ class Qwen3TTSTalkerModel(ARModelMixin):
                 past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device
             )
 
+
         # the hard coded `3` is for temporal, height and width.
         if position_ids is None:
             position_ids = cache_position.view(1, 1, -1).expand(3, inputs_embeds.shape[0], -1)
         elif position_ids.ndim == 2:
             position_ids = position_ids[None, ...].expand(3, position_ids.shape[0], -1)
+        
 
         if position_ids.ndim == 3 and position_ids.shape[0] == 4:
             text_position_ids = position_ids[0]
@@ -295,12 +308,26 @@ class Qwen3TTSTalkerModel(ARModelMixin):
         kv_len = kv_offset + query_len
         device = inputs_embeds.device
         
-        causal_mask = create_attention_mask(
-            query_len, 
-            kv_len, 
-            device,
-            sliding_window=self.config.sliding_window
-        )
+        # TODO: look into this, added during dev
+        # For generation with KV cache, we need a mask that allows the query to see all cached positions
+        # The query position is offset by kv_offset (the cache length before this query)
+        if query_len == 1 and kv_offset > 0:
+            # Single token generation with cache - allow seeing all cached positions
+            # Create mask of shape [1, 1, query_len, kv_len]
+            # All cached positions (0 to kv_offset-1) should be visible (0)
+            # The query itself should also be visible
+            mask = torch.zeros(1, 1, query_len, kv_len, device=device, dtype=inputs_embeds.dtype)
+            causal_mask = mask
+        else:
+            causal_mask = create_attention_mask(
+                query_len, 
+                kv_len, 
+                device,
+                sliding_window=self.config.sliding_window,
+                dtype=inputs_embeds.dtype
+            )
+        
+        
 
         hidden_states = inputs_embeds
 
@@ -348,10 +375,12 @@ class Qwen3TTSTalkerModel(ARModelMixin):
             }
         )
 
+# Talker: generates first VQ codebook (code 0), calls subtalker for residual codes (1-15)
 class Qwen3TTSTalkerForConditionalGeneration(ARModelMixin):
-    def __init__(self, config: Qwen3TTSTalkerConfig, **kwargs):
-        super().__init__(**kwargs)
-        self.model = Qwen3TTSTalkerModel(config, **kwargs)
+    def __init__(self, config: Qwen3TTSTalkerConfig, dtype=torch.float32, **kwargs):
+        super().__init__(dtype=dtype, **kwargs)
+        self.config = config
+        self.model = Qwen3TTSTalkerModel(config, dtype=dtype, **kwargs)
         self.vocab_size = config.vocab_size
         self.text_projection = Qwen3TTSTalkerResizeMLP(
             config.text_hidden_size, config.text_hidden_size, config.hidden_size, config.hidden_act, bias=True
@@ -361,6 +390,7 @@ class Qwen3TTSTalkerForConditionalGeneration(ARModelMixin):
         self.code_predictor = Qwen3TTSTalkerCodePredictorModelForConditionalGeneration(
             config=config.code_predictor_config,
             talker_config=config,
+            dtype=dtype,
             **kwargs
         )
         self.rope_deltas = None
@@ -376,8 +406,16 @@ class Qwen3TTSTalkerForConditionalGeneration(ARModelMixin):
     def get_text_embeddings(self):
         return self.model.get_text_embeddings()
     
-    def set_input_embeddings(self, value):
+    @property
+    def embed_tokens(self):
+        return self.model.codec_embedding
+
+    @embed_tokens.setter
+    def embed_tokens(self, value):
         self.model.codec_embedding = value
+        
+    def set_input_embeddings(self, value):
+        self.embed_tokens = value
 
     def get_output_embeddings(self):
         return self.codec_head
@@ -416,61 +454,40 @@ class Qwen3TTSTalkerForConditionalGeneration(ARModelMixin):
 
     def forward(
         self,
-        input_ids=None,
-        attention_mask=None,
-        position_ids=None,
-        past_key_values=None,
-        inputs_embeds=None,
-        labels=None,
-        use_cache=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        cache_position=None,
-        past_hidden=None,
-        trailing_text_hidden=None,
-        tts_pad_embed=None,
-        generation_step=None,
-        subtalker_dosample=None,
-        subtalker_top_p=None,
-        subtalker_top_k=None,
-        subtalker_temperature=None,
+        input_ids: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_values: Optional[list[torch.FloatTensor]] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        labels: Optional[torch.LongTensor] = None,
+        use_cache: Optional[bool] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        cache_position: Optional[torch.LongTensor] = None,
         **kwargs,
     ) -> AROutput:
-        r"""
-        labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
-            Labels for computing the masked language modeling loss. Indices should either be in `[0, ...,
-            config.vocab_size]` or -100 (see `input_ids` docstring). Tokens with indices set to `-100` are ignored
-            (masked), the loss is only computed for the tokens with labels in `[0, ..., config.vocab_size]`.
         """
-        # Prefill
-        if inputs_embeds is not None and inputs_embeds.shape[1] > 1:
-            generation_step = -1
-            codec_ids = None
-        # Generate
-        else:
-            last_id_hidden = self.get_input_embeddings()(input_ids)
-            predictor_result = self.code_predictor.generate(
-                inputs_embeds=torch.cat((past_hidden, last_id_hidden), dim=1),
-                max_new_tokens=self.config.num_code_groups - 1,
-                do_sample=subtalker_dosample,
-                top_p=subtalker_top_p,
-                top_k=subtalker_top_k,
-                temperature=subtalker_temperature,
-                output_hidden_states=True,
-                return_dict_in_generate=True,
-            )
-            codec_ids = torch.cat((input_ids, predictor_result.sequences), dim=-1)
-            codec_hiddens = torch.cat(
-                [last_id_hidden]
-                + [self.code_predictor.get_input_embeddings()[i](predictor_result.sequences[..., i:i+1]) for i in range(self.config.num_code_groups - 1)],
-                dim=1,
-            )
-            inputs_embeds = codec_hiddens.sum(1, keepdim=True)
-
-            if generation_step < trailing_text_hidden.shape[1]:
-                inputs_embeds = inputs_embeds + trailing_text_hidden[:, generation_step].unsqueeze(1)
-            else:
-                inputs_embeds = inputs_embeds + tts_pad_embed
+        Single forward pass through the talker model.
+        
+        This is a pure forward pass - no generation loop, no code_predictor calls.
+        For generation, use generate() instead.
+        
+        Args:
+            inputs_embeds: Input embeddings [batch, seq_len, hidden_size]
+            attention_mask: Attention mask
+            past_key_values: Cached KV states
+            use_cache: Whether to return updated KV cache
+            
+        Returns:
+            AROutput with logits, past_key_values, and last_hidden_state
+        """
+        if (input_ids is None) and (inputs_embeds is None):
+            raise ValueError("You must specify either input_ids or inputs_embeds")
+        
+        if inputs_embeds is None:
+            inputs_embeds = self.get_input_embeddings()(input_ids)
+        
+        # Handle position_ids/rope for the first call
         if attention_mask is not None:
             if (
                 cache_position is None
@@ -478,15 +495,13 @@ class Qwen3TTSTalkerForConditionalGeneration(ARModelMixin):
                 or self.rope_deltas is None
             ):
                 delta0 = (1 - attention_mask).sum(dim=-1).unsqueeze(1)
-                position_ids, rope_deltas = self.get_rope_index(
-                    attention_mask,
-                )
+                position_ids, rope_deltas = self.get_rope_index(attention_mask)
                 rope_deltas = rope_deltas - delta0
                 self.rope_deltas = rope_deltas
             else:
-                batch_size, seq_length = input_ids.shape
+                batch_size, seq_length = inputs_embeds.shape[0], inputs_embeds.shape[1]
                 delta = cache_position[0] + self.rope_deltas if cache_position is not None else 0
-                position_ids = torch.arange(seq_length, device=input_ids.device)
+                position_ids = torch.arange(seq_length, device=inputs_embeds.device)
                 position_ids = position_ids.view(1, -1).expand(batch_size, -1)
                 position_ids = position_ids.add(delta)
                 position_ids = position_ids.unsqueeze(0).expand(3, -1, -1)
@@ -511,20 +526,168 @@ class Qwen3TTSTalkerForConditionalGeneration(ARModelMixin):
         if labels is not None:
             loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.vocab_size, **kwargs)
 
-
         return AROutput(
             logits=logits,
             past_key_values=outputs.extra.get("past_key_values"),
+            hidden_states=outputs.extra.get("hidden_states"),
             extra={
                 "loss": loss,
-                "hidden_states": (outputs.extra.get("hidden_states"), codec_ids),
                 "attentions": outputs.extra.get("attentions"),
-                "past_hidden": hidden_states[:, -1:, :],
-                "generation_step": generation_step + 1,
-                "trailing_text_hidden": trailing_text_hidden,
-                "tts_pad_embed": tts_pad_embed,
+                "last_hidden_state": hidden_states,
             }
         )
+
+    def generate(
+        self,
+        inputs_embeds: torch.FloatTensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        trailing_text_hidden: Optional[torch.Tensor] = None,
+        tts_pad_embed: Optional[torch.Tensor] = None,
+        max_new_tokens: int = 2048,
+        min_new_tokens: int = 2,
+        do_sample: bool = True,
+        temperature: float = 0.9,
+        top_k: int = 50,
+        top_p: float = 1.0,
+        eos_token_id: Optional[int] = None,
+        repetition_penalty: float = 1.05,
+        subtalker_dosample: bool = True,
+        subtalker_top_k: int = 50,
+        subtalker_top_p: float = 1.0,
+        subtalker_temperature: float = 0.9,
+        **kwargs,
+    ) -> torch.Tensor:
+        """
+        Generate codec tokens autoregressively.
+        
+        This coordinates the talker (generates first codebook) with code_predictor
+        (generates residual codebooks) at each step.
+        
+        Args:
+            inputs_embeds: Initial input embeddings [batch, seq_len, hidden_size]
+            attention_mask: Attention mask for initial sequence
+            trailing_text_hidden: Text embeddings to add at each step
+            tts_pad_embed: Padding embedding to use when trailing_text_hidden is exhausted
+            max_new_tokens: Maximum number of codec tokens to generate
+            min_new_tokens: Minimum tokens before allowing EOS
+            do_sample, temperature, top_k, top_p, repetition_penalty: Sampling parameters
+            subtalker_*: Parameters for code_predictor sampling
+            eos_token_id: Token ID that stops generation
+            
+        Returns:
+            Generated codec token IDs [batch, num_generated_tokens, num_code_groups]
+        """
+        batch_size = inputs_embeds.shape[0]
+        device = inputs_embeds.device
+        
+        # Set default EOS token
+        if eos_token_id is None:
+            eos_token_id = self.config.codec_eos_token_id
+        
+        # Ensure trailing_text_hidden and tts_pad_embed are provided
+        if trailing_text_hidden is None:
+            trailing_text_hidden = torch.zeros(batch_size, 1, self.config.hidden_size, device=device, dtype=self.dtype)
+        if tts_pad_embed is None:
+            tts_pad_embed = torch.zeros(batch_size, 1, self.config.hidden_size, device=device, dtype=self.dtype)
+        
+        # Track generated codec sequences
+        all_codec_ids = []
+        
+        # Initialize generation state
+        past_key_values = None
+        current_embeds = inputs_embeds
+        current_seq_len = inputs_embeds.shape[1]
+        
+        for step in range(max_new_tokens):
+            # Calculate cache_position for proper RoPE encoding
+            if step == 0:
+                cache_position = None  # First step uses full sequence
+            else:
+                cache_position = torch.tensor([current_seq_len + step - 1], device=device, dtype=torch.long)
+            
+            # Forward pass through talker (single step)
+            outputs = self(
+                inputs_embeds=current_embeds,
+                attention_mask=attention_mask,
+                past_key_values=past_key_values,
+                use_cache=True,
+                cache_position=cache_position,
+            )
+            
+            logits = outputs.logits
+            past_key_values = outputs.past_key_values
+            past_hidden = outputs.extra["last_hidden_state"][:, -1:, :]  # [batch, 1, hidden]
+            
+            # Get logits for last position
+            next_token_logits = logits[:, -1, :].clone()
+            
+            # Apply repetition penalty
+            if repetition_penalty != 1.0 and all_codec_ids:
+                prev_ids = all_codec_ids[-1][:, 0]  # First codebook from previous step
+                for b in range(batch_size):
+                    next_token_logits[b, prev_ids[b]] /= repetition_penalty
+            
+            # Sample next token for first codebook
+            if do_sample:
+                next_token_logits = next_token_logits / temperature
+                if top_p < 1.0:
+                    sorted_logits, sorted_indices = torch.sort(next_token_logits, descending=True)
+                    cumulative_probs = torch.cumsum(torch.softmax(sorted_logits, dim=-1), dim=-1)
+                    sorted_indices_to_remove = cumulative_probs > top_p
+                    sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                    sorted_indices_to_remove[..., 0] = 0
+                    indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
+                    next_token_logits[indices_to_remove] = -float('inf')
+                
+                if top_k > 0:
+                    indices_to_remove = next_token_logits < torch.topk(next_token_logits, top_k)[0][..., -1, None]
+                    next_token_logits[indices_to_remove] = -float('inf')
+                
+                probs = torch.softmax(next_token_logits, dim=-1)
+                next_token = torch.multinomial(probs, num_samples=1)
+            else:
+                next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+            
+            # Get embedding for the predicted first code
+            last_id_hidden = self.get_input_embeddings()(next_token)
+            
+            # Run code predictor to get remaining 15 codes
+            generated_ids = self.code_predictor.generate(
+                inputs_embeds=torch.cat((past_hidden, last_id_hidden), dim=1),
+                max_new_tokens=self.config.num_code_groups - 1,
+                do_sample=subtalker_dosample,
+                top_p=subtalker_top_p,
+                top_k=subtalker_top_k,
+                temperature=subtalker_temperature,
+            )
+            
+            # Combine predicted first code + generated residual codes
+            codec_ids = torch.cat((next_token, generated_ids), dim=-1)
+            all_codec_ids.append(codec_ids)
+            
+            # Check for EOS (on first codebook)
+            if step >= min_new_tokens:
+                if (next_token == eos_token_id).all():
+                    break
+            
+            # Prepare embeddings for next iteration
+            codec_hiddens = torch.cat(
+                [last_id_hidden]
+                + [self.code_predictor.get_input_embeddings()[i](generated_ids[..., i:i+1]) for i in range(self.config.num_code_groups - 1)],
+                dim=1,
+            )
+            next_embeds = codec_hiddens.sum(1, keepdim=True)
+            
+            # Add trailing text embedding
+            if step < trailing_text_hidden.shape[1]:
+                next_embeds = next_embeds + trailing_text_hidden[:, step:step+1, :]
+            else:
+                next_embeds = next_embeds + tts_pad_embed
+            
+            current_embeds = next_embeds
+        
+        # Stack all generated codec IDs
+        return torch.stack(all_codec_ids, dim=1)  # [batch, seq_len, num_code_groups]
 
     def get_rope_index(
         self,
@@ -538,13 +701,14 @@ class Qwen3TTSTalkerForConditionalGeneration(ARModelMixin):
 
         return position_ids, mrope_position_deltas
 
+# Main TTS model: orchestrates text-to-speech generation, manages speaker/language prompts
 class Qwen3TTSForConditionalGeneration(ARModelMixin):
 
-    def __init__(self, config: Qwen3TTSConfig):
-        super().__init__(config)
+    def __init__(self, config: Qwen3TTSConfig, **kwargs):
+        super().__init__(**kwargs)
         self.config = config
 
-        self.talker = Qwen3TTSTalkerForConditionalGeneration(self.config.talker_config)
+        self.talker = Qwen3TTSTalkerForConditionalGeneration(self.config.talker_config, **kwargs)
 
         if config.tts_model_type == "base":
             self.speaker_encoder = Qwen3TTSSpeakerEncoder(self.config.speaker_encoder_config)
@@ -564,8 +728,6 @@ class Qwen3TTSForConditionalGeneration(ARModelMixin):
         self.tokenizer_type = self.config.tokenizer_type
         self.tts_model_size = self.config.tts_model_size
         self.tts_model_type = self.config.tts_model_type
-
-        self.post_init()
     
     def load_speech_tokenizer(self, speech_tokenizer):
         self.speech_tokenizer = speech_tokenizer
@@ -600,7 +762,7 @@ class Qwen3TTSForConditionalGeneration(ARModelMixin):
     ):
         voice_clone_spk_embeds = []
         for index in range(len(voice_clone_prompt['ref_spk_embedding'])):
-            ref_spk_embedding = voice_clone_prompt["ref_spk_embedding"][index].to(self.talker.device).to(self.talker.dtype)            
+            ref_spk_embedding = voice_clone_prompt["ref_spk_embedding"][index].to(self.gpu_device).to(self.talker.dtype)            
             voice_clone_spk_embeds.append(ref_spk_embedding)
         
         return voice_clone_spk_embeds
@@ -632,7 +794,7 @@ class Qwen3TTSForConditionalGeneration(ARModelMixin):
                                         [[
                                             self.config.talker_config.codec_bos_id,
                                         ]],
-                                        device=self.talker.device,
+                                        device=self.gpu_device,
                                         dtype=text_id.dtype,
                                     )
                                 ), codec_embed], dim=1)
@@ -645,7 +807,7 @@ class Qwen3TTSForConditionalGeneration(ARModelMixin):
                                                     [[
                                                         self.config.talker_config.codec_pad_id,
                                                     ] * text_lens],
-                                                    device=self.talker.device,
+                                                    device=self.gpu_device,
                                                     dtype=text_id.dtype,
                                                 )
                                             )
@@ -700,8 +862,8 @@ class Qwen3TTSForConditionalGeneration(ARModelMixin):
                 for i in range(self.config.talker_config.vocab_size - 1024, self.config.talker_config.vocab_size)
                 if i not in (self.config.talker_config.codec_eos_token_id,)
             ],
-            "output_hidden_states": kwargs.get("output_hidden_states", True),
-            "return_dict_in_generate": kwargs.get("return_dict_in_generate", True)
+            "output_hidden_states": getattr(kwargs, "output_hidden_states", True),
+            "return_dict_in_generate": getattr(kwargs, "return_dict_in_generate", True)
         }
         
         talker_input_embeds = [[] for _ in range(len(input_ids))]
@@ -734,7 +896,7 @@ class Qwen3TTSForConditionalGeneration(ARModelMixin):
                         speaker_embed = self.talker.get_input_embeddings()(
                                             torch.tensor(
                                                 spk_id,
-                                                device=self.talker.device,
+                                                device=self.gpu_device,
                                                 dtype=input_id.dtype,
                                             )
                                         )
@@ -764,7 +926,7 @@ class Qwen3TTSForConditionalGeneration(ARModelMixin):
                 self.talker.get_text_embeddings()(
                     torch.tensor(
                         [[self.config.tts_bos_token_id, self.config.tts_eos_token_id, self.config.tts_pad_token_id]],
-                        device=self.talker.device,
+                        device=self.gpu_device,
                         dtype=input_id.dtype,
                     )
                 )
@@ -785,30 +947,30 @@ class Qwen3TTSForConditionalGeneration(ARModelMixin):
                                         self.config.talker_config.codec_think_eos_id,
                                     ]]
 
-            codec_input_embedding_0 = self.talker.get_input_embeddings()(
+            codec_input_emebdding_0 = self.talker.get_input_embeddings()(
                                                     torch.tensor(
                                                         codec_prefill_list,
-                                                        device=self.talker.device,
+                                                        device=self.gpu_device,
                                                         dtype=input_id.dtype,
                                                     )
                                                 )
-            codec_input_embedding_1 = self.talker.get_input_embeddings()(
+            codec_input_emebdding_1 = self.talker.get_input_embeddings()(
                                                     torch.tensor(
                                                         [[
                                                             self.config.talker_config.codec_pad_id,
                                                             self.config.talker_config.codec_bos_id,
                                                         ]],
-                                                        device=self.talker.device,
+                                                        device=self.gpu_device,
                                                         dtype=input_id.dtype,
                                                     )
                                                 )
             if speaker_embed is None:
-                codec_input_embedding = torch.cat([codec_input_embedding_0,
-                                                   codec_input_embedding_1], dim=1)
+                codec_input_emebdding = torch.cat([codec_input_emebdding_0,
+                                                   codec_input_emebdding_1], dim=1)
             else:
-                codec_input_embedding = torch.cat([codec_input_embedding_0,
+                codec_input_emebdding = torch.cat([codec_input_emebdding_0,
                                                    speaker_embed.view(1, 1, -1),
-                                                   codec_input_embedding_1], dim=1)
+                                                   codec_input_emebdding_1], dim=1)
 
             # '<|im_start|>assistant\n我叫通义千问，是阿里云的开源大模型。<|im_end|>\n<|im_start|>assistant\n'
 
@@ -818,9 +980,9 @@ class Qwen3TTSForConditionalGeneration(ARModelMixin):
                                         )
 
             # tts_pad * 4 + tts_bos
-            _talker_input_embed = torch.cat((tts_pad_embed.expand(-1, codec_input_embedding.shape[1] - 2, -1),
+            _talker_input_embed = torch.cat((tts_pad_embed.expand(-1, codec_input_emebdding.shape[1] - 2, -1),
                                             tts_bos_embed,
-                                            ), dim=1) + codec_input_embedding[:, :-1]
+                                            ), dim=1) + codec_input_emebdding[:, :-1]
 
             talker_input_embed = torch.cat((_talker_input_embed_role, _talker_input_embed), dim=1)
 
@@ -828,7 +990,7 @@ class Qwen3TTSForConditionalGeneration(ARModelMixin):
                 icl_input_embed, trailing_text_hidden = self.generate_icl_prompt(
                     text_id=input_id[:, 3:-5],
                     ref_id=ref_ids[index][:, 3:-2],
-                    ref_code=voice_clone_prompt["ref_code"][index].to(self.talker.device),
+                    ref_code=voice_clone_prompt["ref_code"][index].to(self.gpu_device),
                     tts_pad_embed=tts_pad_embed,
                     tts_eos_embed=tts_eos_embed,
                     non_streaming_mode=non_streaming_mode,
@@ -837,7 +999,7 @@ class Qwen3TTSForConditionalGeneration(ARModelMixin):
             else:
                 #  tts_text_first_token
                 talker_input_embed = torch.cat([talker_input_embed, 
-                                                self.talker.text_projection(self.talker.get_text_embeddings()(input_id[:, 3:4])) + codec_input_embedding[:, -1:]], 
+                                                self.talker.text_projection(self.talker.get_text_embeddings()(input_id[:, 3:4])) + codec_input_emebdding[:, -1:]], 
                                                 dim=1)
                 if non_streaming_mode:
                     talker_input_embed = talker_input_embed[:, :-1] # 去掉原本放进去的text
@@ -849,7 +1011,7 @@ class Qwen3TTSForConditionalGeneration(ARModelMixin):
                                                             [[
                                                                 self.config.talker_config.codec_pad_id,
                                                             ] * (input_id[:, 3:-5].shape[1] + 1)],
-                                                            device=self.talker.device,
+                                                            device=self.gpu_device,
                                                             dtype=input_id.dtype,
                                                         )
                                                     ), 
@@ -858,7 +1020,7 @@ class Qwen3TTSForConditionalGeneration(ARModelMixin):
                                                             [[
                                                                 self.config.talker_config.codec_bos_id,
                                                             ]],
-                                                            device=self.talker.device,
+                                                            device=self.gpu_device,
                                                             dtype=input_id.dtype,
                                                         )
                                                     ) 
@@ -907,26 +1069,28 @@ class Qwen3TTSForConditionalGeneration(ARModelMixin):
         padded_hiddens[padding_mask] = pad_embedding_vector
         trailing_text_hiddens = padded_hiddens
 
-        # forward
-        talker_result = self.talker.generate(
+        # Generate using talker
+        talker_codes = self.talker.generate(
             inputs_embeds=talker_input_embeds,
             attention_mask=talker_attention_mask,
             trailing_text_hidden=trailing_text_hiddens,
             tts_pad_embed=tts_pad_embed,
             **talker_kwargs,
-        )
-
-        talker_codes = torch.stack([hid[-1] for hid in talker_result.hidden_states if hid[-1] is not None], dim=1)
-        talker_hidden_states = torch.cat([hid[0][-1][:, -1:] for hid in talker_result.hidden_states], dim=1)[:, :-1]
+        )  # [batch, seq_len, num_code_groups]
         
+        # Find stop tokens and trim
         first_codebook = talker_codes[:, :, 0]
-        is_stop_token = (first_codebook ==  self.config.talker_config.codec_eos_token_id)
+        eos_token_id = talker_kwargs.get('eos_token_id', self.config.talker_config.codec_eos_token_id)
+        is_stop_token = (first_codebook == eos_token_id)
         stop_indices = torch.argmax(is_stop_token.int(), dim=1)
         has_stop_token = is_stop_token.any(dim=1)
-        effective_lengths = torch.where(has_stop_token, stop_indices, talker_codes.shape[1])
+        min_new_tokens = talker_kwargs.get('min_new_tokens', 2)
         
-        talker_codes_list = [talker_codes[i, :length, ] for i, length in enumerate(effective_lengths)]
-        talker_hidden_states_list = [talker_hidden_states[i, :length, :] for i, length in enumerate(effective_lengths)]
+        talker_codes_list = []
+        for i in range(talker_codes.shape[0]):
+            if has_stop_token[i] and stop_indices[i] >= min_new_tokens:
+                talker_codes_list.append(talker_codes[i, :stop_indices[i]])
+            else:
+                talker_codes_list.append(talker_codes[i])
         
-        return talker_codes_list, talker_hidden_states_list
-    
+        return talker_codes_list, None

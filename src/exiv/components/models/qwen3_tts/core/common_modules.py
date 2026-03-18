@@ -61,8 +61,15 @@ class Qwen3TTSTalkerRotaryEmbedding(nn.Module):
         inv_freq, self.attention_scaling = _compute_rope_inv_freq(self.config, device)
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
-    @materialize_meta_buffers(inv_freq=lambda self, device: _compute_rope_inv_freq(self.config, device)[0])
+    # TODO: add back this decorator
+    # @materialize_meta_buffers(inv_freq=lambda self, device: _compute_rope_inv_freq(self.config, device)[0])
     def forward(self, x, position_ids):
+        # TODO: fix this
+        # lazy initialization: if inv_freq is zeros, recompute it
+        if self.inv_freq.abs().max() == 0:
+            device = self.inv_freq.device
+            self.inv_freq = _compute_rope_inv_freq(self.config, device)[0].to(device)
+        
         # In contrast to other models, Qwen3TTSThinkerText has different position ids for the grids
         # So we expand the inv_freq to shape (3, ...)
         inv_freq_expanded = self.inv_freq[None, None, :, None].float().expand(3, position_ids.shape[1], -1, 1)
@@ -85,8 +92,14 @@ class Qwen3TTSRotaryEmbedding(nn.Module):
         inv_freq, self.attention_scaling = _compute_rope_inv_freq(self.config, device)
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
-    @materialize_meta_buffers(inv_freq=lambda self, device: _compute_rope_inv_freq(self.config, device)[0])
+    # @materialize_meta_buffers(inv_freq=lambda self, device: _compute_rope_inv_freq(self.config, device)[0])
     def forward(self, x, position_ids):
+        # TODO: fix this
+        # lazy initialization: if inv_freq is zeros, recompute it
+        if self.inv_freq.abs().max() == 0:
+            device = self.inv_freq.device
+            self.inv_freq = _compute_rope_inv_freq(self.config, device)[0].to(device)
+        
         inv_freq_expanded = self.inv_freq[None, :, None].float().expand(position_ids.shape[0], -1, 1).to(x.device)
         position_ids_expanded = position_ids[:, None, :].float()
 
