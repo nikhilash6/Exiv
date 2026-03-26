@@ -24,7 +24,6 @@ from .config import Qwen3TTSConfig, Qwen3TTSTalkerConfig
 from ...common import AROutput
 from ....attention import eager_attention_forward, repeat_kv
 from ....audio_encoders.qwen3_tts_speaker_encoder import Qwen3TTSSpeakerEncoder, mel_spectrogram
-from .....utils.logging import app_logger
 from .....components.attention import create_attention_mask
 from .....model_utils.autoregressive_model_mixin import ARModelMixin
 
@@ -75,7 +74,6 @@ class Qwen3TTSTalkerAttention(nn.Module):
         self.head_dim = getattr(config, "head_dim", config.hidden_size // config.num_attention_heads)
         self.num_key_value_groups = config.num_attention_heads // config.num_key_value_heads
         self.scaling = self.head_dim**-0.5
-        self.attention_dropout = config.attention_dropout
         self.is_causal = True
 
         self.q_proj = nn.Linear(
@@ -223,29 +221,14 @@ class Qwen3TTSTalkerModel(ARModelMixin):
         )
         self.norm = Qwen3TTSRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.rotary_emb = Qwen3TTSTalkerRotaryEmbedding(config)
-        self.gradient_checkpointing = False
         self.codec_embedding = nn.Embedding(config.vocab_size, config.hidden_size)
         self.text_embedding = nn.Embedding(config.text_vocab_size, config.text_hidden_size)
-
-        # Initialize weights and apply final processing
-        # removed post_init() as it's not present in ARModelMixin
 
     def get_input_embeddings(self):
         return self.codec_embedding
     
     def get_text_embeddings(self):
         return self.text_embedding
-
-    @property
-    def embed_tokens(self):
-        return self.codec_embedding
-    
-    @embed_tokens.setter
-    def embed_tokens(self, value):
-        self.codec_embedding = value
-
-    def set_input_embeddings(self, value):
-        self.embed_tokens = value
 
     def forward(
         self,
@@ -268,13 +251,6 @@ class Qwen3TTSTalkerModel(ARModelMixin):
 
         if (input_ids is None) ^ (inputs_embeds is not None):
             raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
-
-        if self.gradient_checkpointing and self.training:
-            if use_cache:
-                app_logger.warning_once(
-                    "`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`..."
-                )
-                use_cache = False
 
         if use_cache and past_key_values is None:
             past_key_values = DynamicCache()
@@ -405,52 +381,6 @@ class Qwen3TTSTalkerForConditionalGeneration(ARModelMixin):
 
     def get_text_embeddings(self):
         return self.model.get_text_embeddings()
-    
-    @property
-    def embed_tokens(self):
-        return self.model.codec_embedding
-
-    @embed_tokens.setter
-    def embed_tokens(self, value):
-        self.model.codec_embedding = value
-        
-    def set_input_embeddings(self, value):
-        self.embed_tokens = value
-
-    def get_output_embeddings(self):
-        return self.codec_head
-
-    def set_output_embeddings(self, new_embeddings):
-        self.codec_head = new_embeddings
-
-    def set_decoder(self, decoder):
-        self.model = decoder
-
-    def get_decoder(self):
-        return self.model
-    
-    def forward_sub_talker_finetune(self, codec_ids, talker_hidden_states):
-        assert len(codec_ids.shape) == 2
-        assert len(talker_hidden_states.shape) == 2
-        assert codec_ids.shape[0] == talker_hidden_states.shape[0]
-        assert talker_hidden_states.shape[1] == self.config.hidden_size
-        assert codec_ids.shape[1] == self.config.num_code_groups
-
-        sub_talker_inputs_embeds = [talker_hidden_states.unsqueeze(1)]
-
-        for i in range(self.config.num_code_groups - 1):
-            if i == 0:
-                sub_talker_inputs_embeds.append(self.get_input_embeddings()(codec_ids[:, :1]))
-            else:
-                sub_talker_inputs_embeds.append(self.code_predictor.get_input_embeddings()[i-1](codec_ids[:, i:i+1]))
-        sub_talker_inputs_embeds = torch.cat(sub_talker_inputs_embeds, dim=1)
-        
-        sub_talker_outputs = self.code_predictor.forward_finetune(inputs_embeds=sub_talker_inputs_embeds,
-                                                                 labels=codec_ids[:, 1:])
-        
-        sub_talker_logits = sub_talker_outputs.logits
-        sub_talker_loss = sub_talker_outputs.extra.get("loss")
-        return sub_talker_logits, sub_talker_loss
 
     def forward(
         self,
@@ -459,7 +389,6 @@ class Qwen3TTSTalkerForConditionalGeneration(ARModelMixin):
         position_ids: Optional[torch.LongTensor] = None,
         past_key_values: Optional[list[torch.FloatTensor]] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
         use_cache: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -522,16 +451,11 @@ class Qwen3TTSTalkerForConditionalGeneration(ARModelMixin):
         hidden_states = outputs.extra.get("last_hidden_state")
         logits = self.codec_head(hidden_states)
 
-        loss = None
-        if labels is not None:
-            loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.vocab_size, **kwargs)
-
         return AROutput(
             logits=logits,
             past_key_values=outputs.extra.get("past_key_values"),
             hidden_states=outputs.extra.get("hidden_states"),
             extra={
-                "loss": loss,
                 "attentions": outputs.extra.get("attentions"),
                 "last_hidden_state": hidden_states,
             }
@@ -753,7 +677,7 @@ class Qwen3TTSForConditionalGeneration(ARModelMixin):
             fmin=0, 
             fmax=12000
         ).transpose(1, 2)
-        speaker_embedding = self.speaker_encoder(mels.to(self.device).to(self.dtype))[0]
+        speaker_embedding = self.speaker_encoder(mels.to(self.gpu_device).to(self.dtype))[0]
         return speaker_embedding
     
     def generate_speaker_prompt(

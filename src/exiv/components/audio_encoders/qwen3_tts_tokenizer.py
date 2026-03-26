@@ -202,7 +202,7 @@ class Qwen3TTSTokenizer:
         )
         inputs = inputs.to(self.device).to(self.model.dtype)
 
-        with torch.inference_mode():
+        with torch.no_grad():
             # model.encode expects (B, T) and (B, T)
             enc = self.model.encode(
                 inputs["input_values"].squeeze(1),
@@ -270,7 +270,7 @@ class Qwen3TTSTokenizer:
             audio_codes_list = [_to_tensor(c, dtype=torch.long) for c in audio_codes_list]
             audio_codes_padded = pad_sequence(audio_codes_list, batch_first=True, padding_value=-1).to(self.device)
 
-        with torch.inference_mode():
+        with torch.no_grad():
             # Ensure model and inputs are on the same device
             model_device = next(self.model.parameters()).device
             audio_codes_padded = audio_codes_padded.to(model_device)

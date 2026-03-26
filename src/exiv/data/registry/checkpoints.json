@@ -26,6 +26,15 @@
         "license": "Apache 2.0",
         "repo": "https://github.com/QwenLM/Qwen3-TTS"
     },
+    "qwen3_tts_12hz_base_1_7b.safetensors": {
+        "type": "checkpoint",
+        "url": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base/resolve/main/model.safetensors?download=true",
+        "family": "Qwen3 TTS",
+        "variant": "1.7B Base 12Hz",
+        "commercial_use": true,
+        "license": "Apache 2.0",
+        "repo": "https://github.com/QwenLM/Qwen3-TTS"
+    },
     "wan21_1_3B.safetensors": {
         "type": "checkpoint",
         "url": "https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B/resolve/main/diffusion_pytorch_model.safetensors?download=true",

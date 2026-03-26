@@ -170,7 +170,7 @@ class ModelMixin(nn.Module, LoraMixin, ConditioningMixin, metaclass=ModuleMeta):
                 enable_efficient_loading(self)
 
         def original_call(*args, **kwargs):
-            with torch.inference_mode():
+            with torch.no_grad():
                 # moving the inputs to GPU
                 # TODO: FIX THIS !!!! this is a work around for now (only converting dtype of idx == 0)
                 app_logger.debug(f"moving the inputs to {self.gpu_device} and dtype {self.dtype}")

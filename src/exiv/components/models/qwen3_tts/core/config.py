@@ -17,23 +17,6 @@ from .....utils.logging import app_logger
 
 class Qwen3TTSTalkerCodePredictorConfig:
     model_type = "qwen3_tts_talker_code_predictor"
-    keys_to_ignore_at_inference = ["past_key_values"]
-
-    # for tensor parallelism, not in use right now
-    base_model_tp_plan = {
-        "layers.*.self_attn.q_proj": "colwise",
-        "layers.*.self_attn.k_proj": "colwise",
-        "layers.*.self_attn.v_proj": "colwise",
-        "layers.*.self_attn.o_proj": "rowwise",
-        "layers.*.mlp.gate_proj": "colwise",
-        "layers.*.mlp.up_proj": "colwise",
-        "layers.*.mlp.down_proj": "rowwise",
-    }
-    base_model_pp_plan = {
-        "embed_tokens": (["input_ids"], ["inputs_embeds"]),
-        "layers": (["hidden_states", "attention_mask"], ["hidden_states"]),
-        "norm": (["hidden_states"], ["hidden_states"]),
-    }
 
     def __init__(
         self,
@@ -60,9 +43,6 @@ class Qwen3TTSTalkerCodePredictorConfig:
         max_window_layers=28,
         layer_types=None,
         num_code_groups=16,
-        # no use
-        attention_dropout=0,
-        initializer_range=0.02,
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -83,18 +63,14 @@ class Qwen3TTSTalkerCodePredictorConfig:
         self.num_key_value_heads = num_key_value_heads
         self.head_dim = head_dim
         self.hidden_act = hidden_act
-        self.initializer_range = initializer_range
         self.rms_norm_eps = rms_norm_eps
         self.use_cache = use_cache
         self.rope_theta = rope_theta
         self.rope_scaling = rope_scaling
         self.attention_bias = attention_bias
         self.pad_token_id = kwargs.get("pad_token_id", 0)
-        self.attention_dropout = attention_dropout
         self.output_attentions = kwargs.get("output_attentions", False)
         self.output_hidden_states = kwargs.get("output_hidden_states", False)
-        self.return_dict = kwargs.get("return_dict", True)
-        self.use_return_dict = kwargs.get("use_return_dict", True)
         # Validate the correctness of rotary position embeddings parameters
         # BC: if there is a 'type' field, move it to 'rope_type'.
         if self.rope_scaling is not None and "type" in self.rope_scaling:
@@ -112,23 +88,6 @@ class Qwen3TTSTalkerCodePredictorConfig:
 
 class Qwen3TTSTalkerConfig:
     model_type = "qwen3_tts_talker"
-    keys_to_ignore_at_inference = ["past_key_values"]
-
-    # for tensor parallelism (not is use right now)
-    base_model_tp_plan = {
-        "layers.*.self_attn.q_proj": "colwise",
-        "layers.*.self_attn.k_proj": "colwise",
-        "layers.*.self_attn.v_proj": "colwise",
-        "layers.*.self_attn.o_proj": "rowwise",
-        "layers.*.mlp.gate_proj": "colwise",
-        "layers.*.mlp.up_proj": "colwise",
-        "layers.*.mlp.down_proj": "rowwise",
-    }
-    base_model_pp_plan = {
-        "embed_tokens": (["input_ids"], ["inputs_embeds"]),
-        "layers": (["hidden_states", "attention_mask"], ["hidden_states"]),
-        "norm": (["hidden_states"], ["hidden_states"]),
-    }
     sub_configs = {"code_predictor_config": Qwen3TTSTalkerCodePredictorConfig}
 
     def __init__(
@@ -167,9 +126,6 @@ class Qwen3TTSTalkerConfig:
         codec_language_id=None,
         text_vocab_size=151936,
         pad_token_id=0,
-        # no use
-        attention_dropout=0,
-        initializer_range=0.02,
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -183,18 +139,14 @@ class Qwen3TTSTalkerConfig:
 
         self.num_key_value_heads = num_key_value_heads
         self.hidden_act = hidden_act
-        self.initializer_range = initializer_range
         self.rms_norm_eps = rms_norm_eps
         self.use_cache = use_cache
         self.rope_theta = rope_theta
         self.rope_scaling = rope_scaling
         self.attention_bias = attention_bias
         self.pad_token_id = kwargs.get("pad_token_id", 0)
-        self.attention_dropout = attention_dropout
         self.output_attentions = kwargs.get("output_attentions", False)
         self.output_hidden_states = kwargs.get("output_hidden_states", False)
-        self.return_dict = kwargs.get("return_dict", True)
-        self.use_return_dict = kwargs.get("use_return_dict", True)
         # Validate the correctness of rotary position embeddings parameters
         # BC: if there is a 'type' field, move it to 'rope_type'.
         if self.rope_scaling is None:

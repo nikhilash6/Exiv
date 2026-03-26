@@ -45,6 +45,12 @@ def get_qwen3_tts_instance(
         config.model_type = Model.QWEN3_TTS_CUSTOM_VOICE.value
         config.tts_model_type = "custom_voice"
         model_arch_config = ARModelArchConfig(model_type=Model.QWEN3_TTS_CUSTOM_VOICE.value)
+    elif "base" in model_path_lower:
+        config.model_type = Model.QWEN3_TTS_BASE.value
+        config.tts_model_type = "base"
+        # NOTE: base model uses larger speaker encoder (enc_dim=2048)
+        config.speaker_encoder_config.enc_dim = 2048
+        model_arch_config = ARModelArchConfig(model_type=Model.QWEN3_TTS_BASE.value)
     elif "voice_design" in model_path_lower:
         config.model_type = Model.QWEN3_TTS_VOICE_DESIGN.value
         config.tts_model_type = "voice_design"

@@ -9,7 +9,6 @@ from .common_modules import Qwen3TTSRMSNorm, Qwen3TTSRotaryEmbedding, Qwen3TTSTa
 from ...common import AROutput
 from ....attention import eager_attention_forward
 from .....model_utils.autoregressive_model_mixin import ARModelMixin
-from .....utils.logging import app_logger
 from .....components.attention import create_attention_mask
 
 
@@ -23,7 +22,6 @@ class Qwen3TTSAttention(nn.Module):
         self.head_dim = getattr(config, "head_dim", config.hidden_size // config.num_attention_heads)
         self.num_key_value_groups = config.num_attention_heads // config.num_key_value_heads
         self.scaling = self.head_dim**-0.5
-        self.attention_dropout = config.attention_dropout
         self.is_causal = True
 
         self.q_proj = nn.Linear(
@@ -144,7 +142,6 @@ class Qwen3TTSTalkerCodePredictorModel(ARModelMixin):
         )
         self.norm = Qwen3TTSRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.rotary_emb = Qwen3TTSRotaryEmbedding(config=config)
-        self.gradient_checkpointing = False
         self.has_sliding_layers = "sliding_attention" in self.config.layer_types
         # TODO: look into this, added during dev
         # use text_hidden_size for codec_embedding (matches talker's hidden size)
@@ -159,17 +156,6 @@ class Qwen3TTSTalkerCodePredictorModel(ARModelMixin):
 
     def get_input_embeddings(self):
         return self.codec_embedding
-
-    @property
-    def embed_tokens(self):
-        return self.codec_embedding
-    
-    @embed_tokens.setter
-    def embed_tokens(self, value):
-        self.codec_embedding = value
-
-    def set_input_embeddings(self, value):
-        self.embed_tokens = value
 
     def forward(
         self,
@@ -195,12 +181,6 @@ class Qwen3TTSTalkerCodePredictorModel(ARModelMixin):
 
         if inputs_embeds is None:
             raise ValueError("`inputs_embeds` must be provided since `input_ids` is expected to be None")
-
-        if self.gradient_checkpointing and self.training and use_cache:
-            app_logger.warning_once(
-                "`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`."
-            )
-            use_cache = False
 
         # TODO (joao): remove this exception in v4.56 -- it exists for users that try to pass a legacy cache
         if not isinstance(past_key_values, (type(None), Cache)):
@@ -284,9 +264,6 @@ class Qwen3TTSTalkerCodePredictorModel(ARModelMixin):
 
 # Subtalker: predicts residual VQ codes (codes 1-15), wraps the base model with output heads
 class Qwen3TTSTalkerCodePredictorModelForConditionalGeneration(ARModelMixin):
-    _tied_weights_keys = ["lm_head.weight"]
-    _tp_plan = {"lm_head": "colwise_rep"}
-    _pp_plan = {"lm_head": (["hidden_states"], ["logits"])}
     config_class = Qwen3TTSTalkerCodePredictorConfig
     base_model_prefix = "talker.code_predictor"
 
@@ -310,84 +287,6 @@ class Qwen3TTSTalkerCodePredictorModelForConditionalGeneration(ARModelMixin):
     def get_input_embeddings(self):
         return self.model.get_input_embeddings()
 
-    @property
-    def embed_tokens(self):
-        return self.model.codec_embedding
-    
-    @embed_tokens.setter  
-    def embed_tokens(self, value):
-        self.model.codec_embedding = value
-        
-    def set_input_embeddings(self, value):
-        self.embed_tokens = value
-
-    def get_output_embeddings(self):
-        return self.lm_head
-
-    def set_output_embeddings(self, new_embeddings):
-        self.lm_head = new_embeddings
-
-    def set_decoder(self, decoder):
-        self.model = decoder
-
-    def get_decoder(self):
-        return self.model
-    
-    def forward_finetune(
-        self,
-        input_ids=None,
-        attention_mask=None,
-        position_ids=None,
-        past_key_values=None,
-        inputs_embeds=None,
-        labels=None,
-        use_cache=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        cache_position=None,
-        generation_steps=None,
-        **kwargs,
-    ):
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
-
-        inputs_embeds = self.small_to_mtp_projection(inputs_embeds)
-
-        # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
-        outputs = self.model(
-            input_ids=None,
-            attention_mask=attention_mask,
-            position_ids=position_ids,
-            past_key_values=past_key_values,
-            inputs_embeds=inputs_embeds,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            cache_position=cache_position,
-            **kwargs,
-        )
-
-        hidden_states = outputs.extra.get("last_hidden_state")
-        
-        logits = []
-        for i in range(1, self.config.num_code_groups):
-            logits.append(self.lm_head[i-1](hidden_states[:, i]))
-        logits = torch.stack(logits, dim=1)
-
-        loss = None
-        if labels is not None:
-            loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.vocab_size, **kwargs)
-
-        return AROutput(
-            logits=logits,
-            past_key_values=outputs.extra.get("past_key_values"),
-            extra={
-                "loss": loss,
-            }
-        )
-
     def forward(
         self,
         input_ids=None,
@@ -395,7 +294,6 @@ class Qwen3TTSTalkerCodePredictorModelForConditionalGeneration(ARModelMixin):
         position_ids=None,
         past_key_values=None,
         inputs_embeds=None,
-        labels=None,
         use_cache=None,
         output_attentions=None,
         output_hidden_states=None,
@@ -403,12 +301,6 @@ class Qwen3TTSTalkerCodePredictorModelForConditionalGeneration(ARModelMixin):
         generation_steps=None,
         **kwargs,
     ):
-        r"""
-        labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
-            Labels for computing the masked language modeling loss. Indices should either be in `[0, ...,
-            config.vocab_size]` or -100 (see `input_ids` docstring). Tokens with indices set to `-100` are ignored
-            (masked), the loss is only computed for the tokens with labels in `[0, ..., config.vocab_size]`.
-        """
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -442,15 +334,10 @@ class Qwen3TTSTalkerCodePredictorModelForConditionalGeneration(ARModelMixin):
         # TODO: lm_head indexing (look into this)
         logits = self.lm_head[generation_steps](hidden_states)
 
-        loss = None
-        if labels is not None:
-            loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.vocab_size, **kwargs)
-
         return AROutput(
             logits=logits,
             past_key_values=outputs.extra.get("past_key_values"),
             extra={
-                "loss": loss,
                 "last_hidden_state": hidden_states,
                 "hidden_states": outputs.extra.get("hidden_states"),
                 "attentions": outputs.extra.get("attentions"),

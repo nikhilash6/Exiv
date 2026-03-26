@@ -612,7 +612,7 @@ class Qwen3TTSTokenizerModel(ARModelMixin):
         return self.decode_upsample_rate
     
     def encode(self, input_values: torch.Tensor, padding_mask: Optional[torch.Tensor] = None, return_dict: bool = True) -> Qwen3TTSTokenizerEncoderOutput:
-        with torch.inference_mode():
+        with torch.no_grad():
             encoded_frames = self.encoder.encode(input_values=input_values.unsqueeze(1))
         audio_codes = encoded_frames.audio_codes[:, :self.encoder_valid_num_quantizers]
         audio_codes = [code[..., :-(-mask.sum() // self.encode_downsample_rate)].transpose(0, 1) for code, mask in zip(audio_codes, padding_mask)]
@@ -621,7 +621,7 @@ class Qwen3TTSTokenizerModel(ARModelMixin):
     def decode(self, audio_codes: torch.Tensor, return_dict: bool = True) -> Qwen3TTSTokenizerDecoderOutput:
         audio_lengths = (audio_codes[..., 0] > -1).sum(1) * self.decode_upsample_rate
         audio_codes = torch.clamp(audio_codes, min=0)
-        with torch.inference_mode():
+        with torch.no_grad():
             audio_values = self.decoder.chunked_decode(audio_codes.transpose(1, 2)).squeeze(1)
         audio_values = [a[:l] for a, l in zip(audio_values, audio_lengths)]
         return Qwen3TTSTokenizerDecoderOutput(audio_values)

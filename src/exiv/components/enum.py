@@ -120,6 +120,7 @@ class Model(ExtendedEnum):
     QWEN_IMAGE = "qwen_image"
     QWEN3_TTS_VOICE_DESIGN = "qwen3_tts_voice_design"
     QWEN3_TTS_CUSTOM_VOICE = "qwen3_tts_custom_voice"
+    QWEN3_TTS_BASE = "qwen3_tts_base"
     
 class VAEType(ExtendedEnum):
     WAN21 = "wan21"

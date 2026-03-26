@@ -126,7 +126,7 @@ class ARModelMixin(nn.Module, metaclass=ARModuleMeta):
         """
         raise NotImplementedError(f"{self.__class__.__name__} must implement forward()")
     
-    @torch.inference_mode()
+    @torch.no_grad()
     def generate(
         self,
         input_ids: Optional[torch.LongTensor] = None,
