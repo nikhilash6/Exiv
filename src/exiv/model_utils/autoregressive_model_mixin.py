@@ -4,6 +4,12 @@ from abc import abstractmethod
 from typing import Optional, Tuple, Dict, Any
 
 from .helper_methods import get_state_dict, set_module_tensor_to_device
+from .autoregressive_generation_utils import (
+    ARSampler,
+    LogitsProcessor,
+    StoppingCriteria,
+    build_generation_components,
+)
 from ..utils.common import get_module_from_name
 from ..utils.dtype import cast_to
 from ..utils.device import VRAM_DEVICE, ProcDevice
@@ -141,6 +147,10 @@ class ARModelMixin(nn.Module, metaclass=ARModuleMeta):
         eos_token_id: Optional[int] = None,
         pad_token_id: Optional[int] = None,
         attention_mask: Optional[torch.Tensor] = None,
+        # Modular components (optional - for customization)
+        logits_processors: list[LogitsProcessor] | None = None,
+        stopping_criteria: list[StoppingCriteria] | None = None,
+        sampler: Optional[ARSampler] = None,
         **kwargs
     ) -> torch.LongTensor:
         """
@@ -162,6 +172,9 @@ class ARModelMixin(nn.Module, metaclass=ARModuleMeta):
             eos_token_id: Token ID that stops generation
             pad_token_id: Token ID for padding
             attention_mask: Attention mask for initial sequence
+            logits_processors: Custom logits processors list (overrides temperature/top_k/top_p/repetition_penalty)
+            stopping_criteria: Custom stopping criteria list (overrides max_new_tokens/eos_token_id/min_new_tokens)
+            sampler: Custom sampler (overrides do_sample)
             
         Returns:
             Generated token IDs [batch, seq_len + generated]
@@ -172,7 +185,24 @@ class ARModelMixin(nn.Module, metaclass=ARModuleMeta):
         
         # Track generated tokens
         generated_ids = input_ids.clone() if input_ids is not None else None
+        prompt_length = generated_ids.shape[1] if generated_ids is not None else 0
         past_key_values = None
+        
+        if logits_processors is None or stopping_criteria is None or sampler is None:
+            default_processors, default_criteria, default_sampler = build_generation_components(
+                max_new_tokens=max_new_tokens,
+                min_new_tokens=min_new_tokens,
+                prompt_length=prompt_length,
+                do_sample=do_sample,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                repetition_penalty=repetition_penalty,
+                eos_token_id=eos_token_id,
+            )
+            logits_processors = logits_processors or default_processors
+            stopping_criteria = stopping_criteria or default_criteria
+            sampler = sampler or default_sampler
         
         # Generation loop
         for step in range(max_new_tokens):
@@ -203,36 +233,10 @@ class ARModelMixin(nn.Module, metaclass=ARModuleMeta):
             next_token_logits = outputs.logits[:, -1, :].clone()
             past_key_values = outputs.past_key_values
             
-            # Apply repetition penalty
-            if repetition_penalty != 1.0 and generated_ids is not None:
-                for token_id in set(generated_ids[0].tolist()):
-                    next_token_logits[0, token_id] /= repetition_penalty
+            next_token_logits = logits_processors(generated_ids, next_token_logits)
             
-            # Apply temperature
-            if temperature != 1.0:
-                next_token_logits = next_token_logits / temperature
-            
-            # Top-k filtering
-            if top_k > 0:
-                indices_to_remove = next_token_logits < torch.topk(next_token_logits, top_k)[0][..., -1, None]
-                next_token_logits[indices_to_remove] = float('-inf')
-            
-            # Top-p filtering
-            if top_p < 1.0:
-                sorted_logits, sorted_indices = torch.sort(next_token_logits, descending=True)
-                cumulative_probs = torch.cumsum(torch.softmax(sorted_logits, dim=-1), dim=-1)
-                sorted_indices_to_remove = cumulative_probs > top_p
-                sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
-                sorted_indices_to_remove[..., 0] = False
-                indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
-                next_token_logits[indices_to_remove] = float('-inf')
-            
-            # Sample
-            if do_sample:
-                probs = torch.softmax(next_token_logits, dim=-1)
-                next_token = torch.multinomial(probs, num_samples=1)
-            else:
-                next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+            # Sample next token
+            next_token = sampler(next_token_logits)
             
             # Append to sequence
             if generated_ids is None:
@@ -240,10 +244,10 @@ class ARModelMixin(nn.Module, metaclass=ARModuleMeta):
             else:
                 generated_ids = torch.cat([generated_ids, next_token], dim=1)
             
-            # Check for EOS (after min_new_tokens)
-            if step >= min_new_tokens and eos_token_id is not None:
-                if (next_token == eos_token_id).all():
-                    break
+            # Check stopping criteria
+            should_stop = stopping_criteria(generated_ids, step=step)
+            if should_stop.all():
+                break
         
         return generated_ids
     

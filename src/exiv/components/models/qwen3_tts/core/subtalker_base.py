@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from typing import Optional
+from typing import List, Optional
 from transformers.cache_utils import Cache, DynamicCache
 
 from .config import Qwen3TTSConfig, Qwen3TTSTalkerCodePredictorConfig, Qwen3TTSTalkerConfig
@@ -9,6 +9,7 @@ from .common_modules import Qwen3TTSRMSNorm, Qwen3TTSRotaryEmbedding, Qwen3TTSTa
 from ...common import AROutput
 from ....attention import eager_attention_forward
 from .....model_utils.autoregressive_model_mixin import ARModelMixin
+from .....model_utils.autoregressive_generation_utils import ARSampler, LogitsProcessor, apply_logits_processors, build_generation_components
 from .....components.attention import create_attention_mask
 
 
@@ -353,6 +354,8 @@ class Qwen3TTSTalkerCodePredictorModelForConditionalGeneration(ARModelMixin):
         temperature: float = 0.9,
         top_k: int = 50,
         top_p: float = 1.0,
+        logits_processors: Optional[List[LogitsProcessor]] = None,
+        sampler: Optional[ARSampler] = None,
         **kwargs
     ) -> torch.Tensor:
         """
@@ -368,6 +371,8 @@ class Qwen3TTSTalkerCodePredictorModelForConditionalGeneration(ARModelMixin):
             temperature: Sampling temperature
             top_k: Top-k filtering
             top_p: Top-p filtering
+            logits_processors: Custom logits processors list (overrides temp/top_k/top_p)
+            sampler: Custom sampler (overrides do_sample)
             
         Returns:
             Generated token IDs [batch, max_new_tokens]
@@ -376,8 +381,20 @@ class Qwen3TTSTalkerCodePredictorModelForConditionalGeneration(ARModelMixin):
         device = inputs_embeds.device
         
         generated_tokens = []
+        generated_input_ids = None
         current_embeds = inputs_embeds
         generation_steps = 0
+        
+        if logits_processors is None or sampler is None:
+            default_processors, _, default_sampler = build_generation_components(
+                max_new_tokens=max_new_tokens,
+                do_sample=do_sample,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+            )
+            logits_processors = logits_processors or default_processors
+            sampler = sampler or default_sampler
         
         for i in range(max_new_tokens):
             # Forward pass through code_predictor
@@ -389,33 +406,20 @@ class Qwen3TTSTalkerCodePredictorModelForConditionalGeneration(ARModelMixin):
             )
             
             # Get logits for last position
-            last_logits = output.logits[:, -1, :]
+            last_logits = output.logits[:, -1, :].clone()
             
-            # Apply temperature
-            if temperature != 1.0:
-                last_logits = last_logits / temperature
+            # Apply logits processors
+            last_logits = apply_logits_processors(logits_processors, generated_input_ids, last_logits)
             
             # Sample
-            if do_sample:
-                if top_k > 0:
-                    indices_to_remove = last_logits < torch.topk(last_logits, top_k)[0][..., -1, None]
-                    last_logits[indices_to_remove] = float('-inf')
-                
-                if top_p < 1.0:
-                    sorted_logits, sorted_indices = torch.sort(last_logits, descending=True)
-                    cumulative_probs = torch.cumsum(torch.softmax(sorted_logits, dim=-1), dim=-1)
-                    sorted_indices_to_remove = cumulative_probs > top_p
-                    sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
-                    sorted_indices_to_remove[..., 0] = False
-                    indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
-                    last_logits[indices_to_remove] = float('-inf')
-                
-                probs = torch.softmax(last_logits, dim=-1)
-                next_token = torch.multinomial(probs, num_samples=1)
-            else:
-                next_token = torch.argmax(last_logits, dim=-1, keepdim=True)
+            next_token = sampler(last_logits)
             
             generated_tokens.append(next_token)
+            
+            if generated_input_ids is None:
+                generated_input_ids = next_token
+            else:
+                generated_input_ids = torch.cat([generated_input_ids, next_token], dim=1)
             
             # Prepare embedding for next step
             next_embed = self.get_input_embeddings()[i](next_token)

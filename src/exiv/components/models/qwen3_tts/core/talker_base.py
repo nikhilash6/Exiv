@@ -26,6 +26,14 @@ from ....attention import eager_attention_forward, repeat_kv
 from ....audio_encoders.qwen3_tts_speaker_encoder import Qwen3TTSSpeakerEncoder, mel_spectrogram
 from .....components.attention import create_attention_mask
 from .....model_utils.autoregressive_model_mixin import ARModelMixin
+from .....model_utils.autoregressive_generation_utils import (
+    ARSampler,
+    LogitsProcessor,
+    StoppingCriteria,
+    apply_logits_processors,
+    build_generation_components,
+    check_stopping_criteria,
+)
 
 
 def apply_multimodal_rotary_pos_emb(q, k, cos, sin, mrope_section, mrope_interleaved=False, unsqueeze_dim=1):
@@ -479,6 +487,12 @@ class Qwen3TTSTalkerForConditionalGeneration(ARModelMixin):
         subtalker_top_k: int = 50,
         subtalker_top_p: float = 1.0,
         subtalker_temperature: float = 0.9,
+        # optional
+        logits_processors: list[LogitsProcessor] | None = None,
+        stopping_criteria: list[StoppingCriteria] | None = None,
+        sampler: Optional[ARSampler] = None,
+        subtalker_logits_processors: list[LogitsProcessor] | None = None,
+        subtalker_sampler: Optional[ARSampler] = None,
         **kwargs,
     ) -> torch.Tensor:
         """
@@ -497,6 +511,11 @@ class Qwen3TTSTalkerForConditionalGeneration(ARModelMixin):
             do_sample, temperature, top_k, top_p, repetition_penalty: Sampling parameters
             subtalker_*: Parameters for code_predictor sampling
             eos_token_id: Token ID that stops generation
+            logits_processors: Custom logits processors list for talker (overrides temp/top_k/top_p/penalty)
+            stopping_criteria: Custom stopping criteria list (overrides max_new_tokens/eos/min_new_tokens)
+            sampler: Custom sampler for talker (overrides do_sample)
+            subtalker_logits_processors: Custom logits processors list for subtalker
+            subtalker_sampler: Custom sampler for subtalker
             
         Returns:
             Generated codec token IDs [batch, num_generated_tokens, num_code_groups]
@@ -516,11 +535,30 @@ class Qwen3TTSTalkerForConditionalGeneration(ARModelMixin):
         
         # Track generated codec sequences
         all_codec_ids = []
+        prompt_length = 0
         
         # Initialize generation state
         past_key_values = None
         current_embeds = inputs_embeds
         current_seq_len = inputs_embeds.shape[1]
+        
+        # default generation components
+        if logits_processors is None or stopping_criteria is None or sampler is None:
+            default_processors, default_criteria, default_sampler = build_generation_components(
+                max_new_tokens=max_new_tokens,
+                min_new_tokens=min_new_tokens,
+                prompt_length=prompt_length,
+                do_sample=do_sample,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                repetition_penalty=repetition_penalty,
+                eos_token_id=eos_token_id,
+                use_last_token_repetition_penalty=True,  # Qwen3-TTS style: only penalize last token
+            )
+            logits_processors = logits_processors or default_processors
+            stopping_criteria = stopping_criteria or default_criteria
+            sampler = sampler or default_sampler
         
         for step in range(max_new_tokens):
             # Calculate cache_position for proper RoPE encoding
@@ -545,54 +583,52 @@ class Qwen3TTSTalkerForConditionalGeneration(ARModelMixin):
             # Get logits for last position
             next_token_logits = logits[:, -1, :].clone()
             
-            # Apply repetition penalty
-            if repetition_penalty != 1.0 and all_codec_ids:
-                prev_ids = all_codec_ids[-1][:, 0]  # First codebook from previous step
-                for b in range(batch_size):
-                    next_token_logits[b, prev_ids[b]] /= repetition_penalty
+            # Build first codebook history for repetition penalty (before generating new token)
+            prev_first_codes = None
+            if all_codec_ids:
+                prev_first_codes = torch.stack([ids[:, 0] for ids in all_codec_ids], dim=1)
+            
+            next_token_logits = apply_logits_processors(logits_processors, prev_first_codes, next_token_logits)
             
             # Sample next token for first codebook
-            if do_sample:
-                next_token_logits = next_token_logits / temperature
-                if top_p < 1.0:
-                    sorted_logits, sorted_indices = torch.sort(next_token_logits, descending=True)
-                    cumulative_probs = torch.cumsum(torch.softmax(sorted_logits, dim=-1), dim=-1)
-                    sorted_indices_to_remove = cumulative_probs > top_p
-                    sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
-                    sorted_indices_to_remove[..., 0] = 0
-                    indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
-                    next_token_logits[indices_to_remove] = -float('inf')
-                
-                if top_k > 0:
-                    indices_to_remove = next_token_logits < torch.topk(next_token_logits, top_k)[0][..., -1, None]
-                    next_token_logits[indices_to_remove] = -float('inf')
-                
-                probs = torch.softmax(next_token_logits, dim=-1)
-                next_token = torch.multinomial(probs, num_samples=1)
-            else:
-                next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+            next_token = sampler(next_token_logits)
             
             # Get embedding for the predicted first code
             last_id_hidden = self.get_input_embeddings()(next_token)
+            
+            if subtalker_logits_processors is None or subtalker_sampler is None:
+                st_processors, _, st_sampler = build_generation_components(
+                    max_new_tokens=self.config.num_code_groups - 1,
+                    do_sample=subtalker_dosample,
+                    temperature=subtalker_temperature,
+                    top_k=subtalker_top_k,
+                    top_p=subtalker_top_p,
+                )
+                subtalker_logits_processors = subtalker_logits_processors or st_processors
+                subtalker_sampler = subtalker_sampler or st_sampler
             
             # Run code predictor to get remaining 15 codes
             generated_ids = self.code_predictor.generate(
                 inputs_embeds=torch.cat((past_hidden, last_id_hidden), dim=1),
                 max_new_tokens=self.config.num_code_groups - 1,
-                do_sample=subtalker_dosample,
-                top_p=subtalker_top_p,
-                top_k=subtalker_top_k,
-                temperature=subtalker_temperature,
+                logits_processors=subtalker_logits_processors,
+                sampler=subtalker_sampler,
             )
             
             # Combine predicted first code + generated residual codes
             codec_ids = torch.cat((next_token, generated_ids), dim=-1)
             all_codec_ids.append(codec_ids)
             
-            # Check for EOS (on first codebook)
-            if step >= min_new_tokens:
-                if (next_token == eos_token_id).all():
-                    break
+            # Build current sequence for stopping criteria (include newly generated token)
+            if prev_first_codes is not None:
+                current_sequence = torch.cat([prev_first_codes, next_token], dim=1)
+            else:
+                current_sequence = next_token
+            
+            # stopping criteria
+            should_stop = check_stopping_criteria(stopping_criteria, current_sequence, step=step)
+            if should_stop.all():
+                break
             
             # Prepare embeddings for next iteration
             codec_hiddens = torch.cat(
