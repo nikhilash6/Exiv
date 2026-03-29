@@ -3,7 +3,7 @@ import torch
 import unittest
 
 from src.exiv.components.models.qwen3_tts.core.config import Qwen3TTSTalkerConfig, Qwen3TTSTalkerCodePredictorConfig
-from src.exiv.components.models.qwen3_tts.core.talker_base import Qwen3TTSTalkerForConditionalGeneration
+from src.exiv.components.models.qwen3_tts.core.talker_base import Qwen3TTSTalker
 
 
 ROPE_SCALING = {
@@ -36,7 +36,7 @@ class TestQwen3TTSTalkerStandalone(unittest.TestCase):
         config = Qwen3TTSTalkerConfig(code_predictor_config=cp_config, **TALKER_KWARGS)
         
         # Initialize model
-        self.model = Qwen3TTSTalkerForConditionalGeneration(config, dtype=self.dtype, device=self.device)
+        self.model = Qwen3TTSTalker(config, dtype=self.dtype, device=self.device)
         self.model.to_empty(device=self.device)
         
         # Initialize with deterministic random weights

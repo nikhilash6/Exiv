@@ -19,7 +19,7 @@ from typing import Optional
 from transformers.cache_utils import Cache, DynamicCache
 
 from .common_modules import Qwen3TTSTalkerResizeMLP, Qwen3TTSRMSNorm, Qwen3TTSTalkerConfig, Qwen3TTSTalkerRotaryEmbedding, Qwen3TTSTalkerTextMLP, rotate_half
-from .subtalker_base import Qwen3TTSTalkerCodePredictorModelForConditionalGeneration
+from .subtalker_base import Qwen3TTSSubTalker
 from .config import Qwen3TTSConfig, Qwen3TTSTalkerConfig
 from ...common import AROutput
 from ....attention import eager_attention_forward, repeat_kv
@@ -359,8 +359,8 @@ class Qwen3TTSTalkerModel(ARModelMixin):
             }
         )
 
-# Talker: generates first VQ codebook (code 0), calls subtalker for residual codes (1-15)
-class Qwen3TTSTalkerForConditionalGeneration(ARModelMixin):
+# generates first VQ codebook (code 0), calls subtalker for residual codes (1-15)
+class Qwen3TTSTalker(ARModelMixin):
     def __init__(self, config: Qwen3TTSTalkerConfig, dtype=torch.float32, **kwargs):
         super().__init__(dtype=dtype, **kwargs)
         self.config = config
@@ -371,18 +371,13 @@ class Qwen3TTSTalkerForConditionalGeneration(ARModelMixin):
         )
 
         self.codec_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
-        self.code_predictor = Qwen3TTSTalkerCodePredictorModelForConditionalGeneration(
+        self.code_predictor = Qwen3TTSSubTalker(
             config=config.code_predictor_config,
             talker_config=config,
             dtype=dtype,
             **kwargs
         )
         self.rope_deltas = None
-
-        # Initialize weights and apply final processing
-        # removed post_init() as it's not present in ARModelMixin
-
-        # TODO: hack, modular cannot inherit multiple classes
 
     def get_input_embeddings(self):
         return self.model.get_input_embeddings()
@@ -662,13 +657,13 @@ class Qwen3TTSTalkerForConditionalGeneration(ARModelMixin):
         return position_ids, mrope_position_deltas
 
 # Main TTS model: orchestrates text-to-speech generation, manages speaker/language prompts
-class Qwen3TTSForConditionalGeneration(ARModelMixin):
+class Qwen3TTSBase(ARModelMixin):
 
     def __init__(self, config: Qwen3TTSConfig, **kwargs):
         super().__init__(**kwargs)
         self.config = config
 
-        self.talker = Qwen3TTSTalkerForConditionalGeneration(self.config.talker_config, **kwargs)
+        self.talker = Qwen3TTSTalker(self.config.talker_config, **kwargs)
 
         if config.tts_model_type == "base":
             self.speaker_encoder = Qwen3TTSSpeakerEncoder(self.config.speaker_encoder_config)
@@ -700,6 +695,11 @@ class Qwen3TTSForConditionalGeneration(ARModelMixin):
     
     def get_supported_languages(self):
         return self.supported_languages
+    
+    @property
+    def eos_token_id(self) -> int:
+        """Return the codec EOS token ID used to stop audio generation."""
+        return self.config.talker_config.codec_eos_token_id
     
     def extract_speaker_embedding(self, audio, sr):
         assert sr == 24000, "Only support 24kHz audio"
@@ -802,6 +802,7 @@ class Qwen3TTSForConditionalGeneration(ARModelMixin):
         repetition_penalty: float = 1.05,
         **kwargs,
     ):
+        eos_token_id = eos_token_id or self.eos_token_id
         talker_kwargs = {
             "max_new_tokens": max_new_tokens,
             "min_new_tokens": 2,

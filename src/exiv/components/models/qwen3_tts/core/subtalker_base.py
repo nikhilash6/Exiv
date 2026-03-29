@@ -264,7 +264,7 @@ class Qwen3TTSTalkerCodePredictorModel(ARModelMixin):
         )
 
 # Subtalker: predicts residual VQ codes (codes 1-15), wraps the base model with output heads
-class Qwen3TTSTalkerCodePredictorModelForConditionalGeneration(ARModelMixin):
+class Qwen3TTSSubTalker(ARModelMixin):
     config_class = Qwen3TTSTalkerCodePredictorConfig
     base_model_prefix = "talker.code_predictor"
 

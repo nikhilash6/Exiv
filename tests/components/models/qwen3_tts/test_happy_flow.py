@@ -8,7 +8,7 @@ import numpy as np
 import os
 
 from exiv.components.models.qwen3_tts.constructor import get_qwen3_tts_instance
-from exiv.components.models.qwen3_tts.inference.qwen3_tts_model import Qwen3TTSModel
+from exiv.components.models.qwen3_tts.inference.qwen3_tts_model import Qwen3TTSPipeline
 from exiv.config import global_config
 
 
@@ -59,7 +59,7 @@ class TestQwen3TTSHappyFlow(unittest.TestCase):
             force_dtype=torch.float16 if cls.device == "cuda" else torch.float32
         )
         
-        cls.model = Qwen3TTSModel(model=raw_model, processor=text_tokenizer)
+        cls.model = Qwen3TTSPipeline(model=raw_model, processor=text_tokenizer)
         cls.model.model.to(cls.device)
         print(f"=== Model loaded on {cls.device} ===")
     

@@ -23,7 +23,7 @@ import librosa
 import numpy as np
 import torch
 
-from ..core.talker_base import Qwen3TTSConfig, Qwen3TTSForConditionalGeneration
+from ..core.talker_base import Qwen3TTSConfig, Qwen3TTSBase
 from ..core.text_prorcessor import Qwen3TTSTextProcessor
 
 AudioLike = Union[
@@ -48,14 +48,26 @@ class VoiceClonePromptItem:
     icl_mode: bool
     ref_text: Optional[str] = None
 
+DEFAULT_QWEN3_CONFIG = dict(
+        do_sample=True,
+        top_k=50,
+        top_p=1.0,
+        temperature=0.9,
+        repetition_penalty=1.05,
+        subtalker_dosample=True,
+        subtalker_top_k=50,
+        subtalker_top_p=1.0,
+        subtalker_temperature=0.9,
+        max_new_tokens=8192,  # original
+    )
 
-class Qwen3TTSModel:
+class Qwen3TTSPipeline:
     """
     A standalone wrapper for Qwen3 TTS models (CustomVoice/VoiceDesign/Base) that provides high-level generation APIs.
     It expects an already initialized model and processor.
     """
 
-    def __init__(self, model: Qwen3TTSForConditionalGeneration, processor: Qwen3TTSTextProcessor, generate_defaults: Optional[Dict[str, Any]] = None):
+    def __init__(self, model: Qwen3TTSBase, processor: Qwen3TTSTextProcessor, generate_defaults: Optional[Dict[str, Any]] = None):
         self.model = model
         self.processor = processor
         self.generate_defaults = generate_defaults or {}
@@ -214,8 +226,6 @@ class Qwen3TTSModel:
                 return self.generate_defaults[name]
             return hard_defaults[name]
 
-        codec_eos_token_id = self.model.config.talker_config.codec_eos_token_id
-
         merged = dict(kwargs)
         merged.update(
             do_sample=pick("do_sample", do_sample),
@@ -228,7 +238,7 @@ class Qwen3TTSModel:
             subtalker_top_p=pick("subtalker_top_p", subtalker_top_p),
             subtalker_temperature=pick("subtalker_temperature", subtalker_temperature),
             max_new_tokens=pick("max_new_tokens", max_new_tokens),
-            eos_token_id=eos_token_id if eos_token_id is not None else codec_eos_token_id,
+            eos_token_id=eos_token_id if eos_token_id is not None else self.model.eos_token_id,
         )
         return merged
 
