@@ -802,7 +802,6 @@ class Qwen3TTSBase(ARModelMixin):
         repetition_penalty: float = 1.05,
         **kwargs,
     ):
-        eos_token_id = eos_token_id or self.eos_token_id
         talker_kwargs = {
             "max_new_tokens": max_new_tokens,
             "min_new_tokens": 2,
@@ -814,9 +813,7 @@ class Qwen3TTSBase(ARModelMixin):
             "subtalker_top_k": subtalker_top_k,
             "subtalker_top_p": subtalker_top_p,
             "subtalker_temperature": subtalker_temperature,
-            "eos_token_id": eos_token_id
-            if eos_token_id is not None
-            else self.config.talker_config.codec_eos_token_id,
+            "eos_token_id": eos_token_id if eos_token_id is not None else self.eos_token_id,
             "repetition_penalty": repetition_penalty,
             "suppress_tokens": [
                 i

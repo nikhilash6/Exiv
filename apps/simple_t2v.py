@@ -109,7 +109,7 @@ def main(**params):
     video_out = wan_vae.decode(out, (width, height, frame_count))
     
     # 6. Save
-    output_paths = MediaProcessor.save_latents_to_media(video_out)
+    output_paths = MediaProcessor.save_outputs(video_out)
     app_logger.info(f"Video saved to: {output_paths[0]}")
     
     return {"1": output_paths[0]}

@@ -137,7 +137,7 @@ class TestMediaProcessorIntegration(unittest.TestCase):
             "name": "latent_abc",
             "age": 42
         }
-        output_paths = MediaProcessor.save_latents_to_media(video_tensor, metadata=metadata_in)
+        output_paths = MediaProcessor.save_outputs(video_tensor, metadata=metadata_in)
         self.assertEqual(len(output_paths), 1)
         full_path = os.path.join(self.test_dir, output_paths[0])
         self.assertTrue(os.path.exists(full_path))
