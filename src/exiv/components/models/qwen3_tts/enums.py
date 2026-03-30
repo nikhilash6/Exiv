@@ -1,8 +1,7 @@
-# Copyright 2026 The Alibaba Qwen team.
-# SPDX-License-Identifier: Apache-2.0
-
 from enum import Enum
 from typing import Dict, Optional
+
+from ....utils.enum import ExtendedEnum
 
 
 class Qwen3TTSSpeaker(Enum):
@@ -29,7 +28,7 @@ class Qwen3TTSSpeaker(Enum):
         raise ValueError(f"Unknown speaker: {name}. Supported: {[s.value for s in cls]}")
 
 
-class Qwen3TTSLanguage(Enum):
+class Qwen3TTSLanguage(ExtendedEnum):
     """Supported languages for Qwen3-TTS."""
     AUTO = "auto"
     CHINESE = "chinese"
