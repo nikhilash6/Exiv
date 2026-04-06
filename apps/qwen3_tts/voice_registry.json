@@ -1,10 +1,4 @@
 {
-  "anger_male.wav": {
-    "text": "child, I've abandoned my child, I've abandoned my boy",
-    "tags": "Angry, Male, Middle aged",
-    "language": "English",
-    "url": "https://huggingface.co/buckets/lonesamurai/sample_voices/resolve/anger_male.wav"
-  },
   "calm_male.wav": {
     "text": "Hello! I'm an AI assistant created to help you with various tasks. How can I assist you today?",
     "tags": "Male, 30s, calm and soothing voice, gentle tone, professional, relaxed",
@@ -46,5 +40,12 @@
     "tags": "Young male, teens, casual gamer voice, relaxed, friendly, slightly informal",
     "language": "English",
     "url": "https://huggingface.co/buckets/lonesamurai/sample_voices/resolve/young_male.wav"
+  },
+  "r": {
+    "url": "",
+    "filepath": "/root/exiv-private/apps/qwen3_tts/wavs/r.wav",
+    "text": "",
+    "tags": "r",
+    "language": "English"
   }
 }

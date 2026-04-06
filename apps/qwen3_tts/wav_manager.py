@@ -42,9 +42,9 @@ class VoiceWavManager:
         else:
             raise "voice registry missing"
 
-    def _save_registry(self, registry: Dict) -> None:
+    def _save_registry(self) -> None:
         with open(self.registry_path, "w", encoding="utf-8") as f:
-            json.dump(registry, f, indent=2, ensure_ascii=False)
+            json.dump(self._registry, f, indent=2, ensure_ascii=False)
 
     # ------------------------------------------------------------------
     # Metadata helpers
@@ -82,7 +82,8 @@ class VoiceWavManager:
             "language": language,
             "url": url,
         }
-        sf.write(filepath, audio_array, sample_rate, info={"comment": json.dumps(metadata)})
+        # Write WAV file - metadata is stored in registry, not embedded in file
+        sf.write(filepath, audio_array, sample_rate)
 
     # ------------------------------------------------------------------
     # Public API
@@ -92,13 +93,16 @@ class VoiceWavManager:
         Return the local filesystem path for *audio_id*.
         Downloads from the registered URL if the file is missing.
         """
-        audio_id = self._normalize_id(audio_id)
-        entry = self._registry.get(audio_id)
+        entry = self._get_registry_entry(audio_id)
         if entry is None:
             raise KeyError(f"No registry entry for audio_id '{audio_id}'")
 
-        # audio_id already has .wav extension, so use it directly
-        filepath = Path(entry.get("filepath", self.wavs_dir / audio_id))
+        # Determine the actual key used in registry
+        normalized = self._normalize_id(audio_id)
+        base_id = audio_id.rsplit('.wav', 1)[0] if audio_id.endswith('.wav') else audio_id
+        actual_key = normalized if normalized in self._registry else base_id
+
+        filepath = Path(entry.get("filepath", self.wavs_dir / f"{actual_key}.wav"))
 
         if not filepath.exists():
             url = entry.get("url", "")
@@ -117,13 +121,14 @@ class VoiceWavManager:
         1. Read from the WAV file's metadata.
         2. Fall back to the registry dict.
         """
-        audio_id = self._normalize_id(audio_id)
         filepath = self.get_path(audio_id)
         metadata = self._read_metadata(filepath)
         if metadata and metadata.get("text"):
             return metadata["text"]
 
-        entry = self._registry.get(audio_id, {})
+        entry = self._get_registry_entry(audio_id)
+        if entry is None:
+            raise ValueError(f"No registry entry for '{audio_id}'")
         text = entry.get("text", "")
         if not text:
             raise ValueError(f"No transcript found in metadata or registry for '{audio_id}'")
@@ -131,13 +136,16 @@ class VoiceWavManager:
 
     def get_tags(self, audio_id: str) -> str:
         """Return the tags/description for *audio_id*."""
-        audio_id = self._normalize_id(audio_id)
-        entry = self._registry.get(audio_id, {})
+        entry = self._get_registry_entry(audio_id)
+        if entry is None:
+            return ""
         return entry.get("tags", "")
 
     def get_language(self, audio_id: str) -> str:
         """Return the language for *audio_id*."""
-        entry = self._registry.get(audio_id, {})
+        entry = self._get_registry_entry(audio_id)
+        if entry is None:
+            return "English"
         return entry.get("language", "English")
 
     def save_wav(
@@ -197,8 +205,20 @@ class VoiceWavManager:
         base_id = audio_id.rsplit('.wav', 1)[0] if audio_id.endswith('.wav') else audio_id
         return base_id + '.wav'
 
+    def _get_registry_entry(self, audio_id: str) -> Optional[Dict[str, str]]:
+        """Get registry entry for audio_id, trying both normalized and base forms."""
+        # Try normalized (with .wav) first
+        normalized = self._normalize_id(audio_id)
+        if normalized in self._registry:
+            return self._registry[normalized]
+        # Try base (without .wav)
+        base_id = audio_id.rsplit('.wav', 1)[0] if audio_id.endswith('.wav') else audio_id
+        if base_id in self._registry:
+            return self._registry[base_id]
+        return None
+
     def has_voice(self, audio_id: str) -> bool:
-        return self._normalize_id(audio_id) in self._registry
+        return self._get_registry_entry(audio_id) is not None
 
     def add_voice(self, audio_id: str, url: str, text: str, tags: str = "", language: str = "English") -> None:
         audio_id = self._normalize_id(audio_id)
