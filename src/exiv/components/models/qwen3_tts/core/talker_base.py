@@ -928,7 +928,7 @@ class Qwen3TTSBase(ARModelMixin):
                     app_logger.info(f"[TTS Chunked] Generating chunk {chunk_idx+1}/{total_chunks}...")
                     
                     # Estimate max tokens for this chunk
-                    chunk_max_tokens = min(max_new_tokens // total_chunks + 100, 500)
+                    chunk_max_tokens = max_new_tokens // total_chunks + 100
                     
                     chunk_code, _ = self.generate(
                         input_ids=[chunk],

@@ -213,10 +213,10 @@ def handle_generate(
     # Get voice reference
     voice_clone_prompt_dict, ref_ids = pipeline.get_voice_ref(None, ref_path, ref_text)
     
-    # formula: words / 2.5 words/sec * 12.5 tokens/sec * 1.2 margin
+    # formula: words / 2.5 words/sec * 12.5 tokens/sec * 1.5 margin
     word_count = len(text.split())
-    estimated_audio_tokens = int(word_count / 2.5 * 12.5 * 1.2)
-    calculated_max_tokens = max(500, min(4096, estimated_audio_tokens))
+    estimated_audio_tokens = int(word_count / 2.5 * 12.5 * 1.5)
+    calculated_max_tokens = max(500, min(8192, estimated_audio_tokens))
     generation_config = DEFAULT_QWEN3_CONFIG.copy()
     generation_config['max_new_tokens'] = calculated_max_tokens
     
