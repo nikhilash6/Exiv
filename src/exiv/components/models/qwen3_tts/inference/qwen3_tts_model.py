@@ -369,6 +369,7 @@ class Qwen3TTSPipeline:
         x_vector_only_mode: Union[bool, List[bool]] = False,
         voice_clone_prompt: Optional[Union[Dict[str, Any], List[VoiceClonePromptItem]]] = None,
         non_streaming_mode: bool = False,
+        enable_chunking: bool = True,
         **kwargs,
     ) -> Tuple[List[np.ndarray], int]:
         if self.model.tts_model_type != "base":
@@ -391,6 +392,7 @@ class Qwen3TTSPipeline:
             voice_clone_prompt=voice_clone_prompt_dict,
             languages=languages,
             non_streaming_mode=non_streaming_mode,
+            enable_chunking=enable_chunking,
             **gen_kwargs,
         )
 

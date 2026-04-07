@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+
+from functools import partial
 from abc import abstractmethod
 from typing import Optional, Tuple, Dict, Any
 
@@ -178,6 +180,56 @@ class ARModelMixin(nn.Module, metaclass=ARModuleMeta):
             
         Returns:
             Generated token IDs [batch, seq_len + generated]
+        """
+        original_call = partial(
+            self._generate,
+            model=self,
+            input_ids=input_ids,
+            inputs_embeds=inputs_embeds,
+            max_new_tokens=max_new_tokens,
+            min_new_tokens=min_new_tokens,
+            do_sample=do_sample,
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
+            eos_token_id=eos_token_id,
+            pad_token_id=pad_token_id,
+            attention_mask=attention_mask,
+            logits_processors=logits_processors,
+            stopping_criteria=stopping_criteria,
+            sampler=sampler,
+            **kwargs
+        )
+        registry = getattr(self, "hook_registry", None)
+        if registry and registry.head.next_hook != registry.tail:
+            wrapped_call = registry.get_wrapped_fn(original_call, location=HookLocation.AR_GENERATE.value)
+            return wrapped_call()
+        else:
+            return original_call()
+
+    
+    def _generate(
+        self,
+        input_ids: Optional[torch.LongTensor] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        max_new_tokens: int = 100,
+        min_new_tokens: int = 0,
+        do_sample: bool = True,
+        temperature: float = 1.0,
+        top_k: int = 0,
+        top_p: float = 1.0,
+        repetition_penalty: float = 1.0,
+        eos_token_id: Optional[int] = None,
+        pad_token_id: Optional[int] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        logits_processors: list[LogitsProcessor] | None = None,
+        stopping_criteria: list[StoppingCriteria] | None = None,
+        sampler: Optional[ARSampler] = None,
+        **kwargs
+    ) -> torch.LongTensor:
+        """
+        Internal generation implementation. Subclasses can override this
         """
         # Initialize
         batch_size = inputs_embeds.shape[0] if inputs_embeds is not None else input_ids.shape[0]

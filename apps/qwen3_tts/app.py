@@ -229,6 +229,7 @@ def handle_generate(
         languages=[language],
         speakers=[None],
         non_streaming_mode=True,
+        enable_chunking=True,
         **generation_config,
     )
     

@@ -223,7 +223,7 @@ class Qwen3TTSSpeakerEncoderConfig:
     def __init__(
         self,
         mel_dim=128,
-        enc_dim=1024,
+        enc_dim=2048,
         enc_channels=[512, 512, 512, 512, 1536],
         enc_kernel_sizes=[5, 3, 3, 3, 1],
         enc_dilations=[1, 2, 3, 4, 1],
