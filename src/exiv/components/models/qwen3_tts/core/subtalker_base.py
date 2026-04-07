@@ -398,9 +398,11 @@ class Qwen3TTSSubTalker(ARModelMixin):
         
         for i in range(max_new_tokens):
             # Forward pass through code_predictor
+            # NOTE: use_cache=False for subtalker since it only generates 15 tokens
+            # The KV cache overhead outweighs the benefit for such short sequences
             output = self(
                 inputs_embeds=current_embeds,
-                use_cache=False,
+                use_cache=False,  # Disabled for subtalker - not worth it for 15 tokens
                 output_hidden_states=False,
                 generation_steps=generation_steps,
             )

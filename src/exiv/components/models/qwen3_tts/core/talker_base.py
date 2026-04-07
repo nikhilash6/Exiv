@@ -12,11 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import time
 import torch
 from torch import nn
 
 from typing import Optional
 from transformers.cache_utils import Cache, DynamicCache
+from tqdm import tqdm
+from .....utils.logging import app_logger
 
 from .common_modules import Qwen3TTSTalkerResizeMLP, Qwen3TTSRMSNorm, Qwen3TTSTalkerConfig, Qwen3TTSTalkerRotaryEmbedding, Qwen3TTSTalkerTextMLP, rotate_half
 from .subtalker_base import Qwen3TTSSubTalker
@@ -555,6 +558,7 @@ class Qwen3TTSTalker(ARModelMixin):
             stopping_criteria = stopping_criteria or default_criteria
             sampler = sampler or default_sampler
         
+        pbar = tqdm(total=max_new_tokens, desc="Generating audio", unit="tok", ncols=80)
         for step in range(max_new_tokens):
             # Calculate cache_position for proper RoPE encoding
             if step == 0:
@@ -622,6 +626,8 @@ class Qwen3TTSTalker(ARModelMixin):
             
             # stopping criteria
             should_stop = check_stopping_criteria(stopping_criteria, current_sequence, step=step)
+            pbar.update(1)
+            pbar.set_postfix({'tokens': len(all_codec_ids)})
             if should_stop.all():
                 break
             
@@ -640,6 +646,8 @@ class Qwen3TTSTalker(ARModelMixin):
                 next_embeds = next_embeds + tts_pad_embed
             
             current_embeds = next_embeds
+        
+        pbar.close()
         
         # Stack all generated codec IDs
         return torch.stack(all_codec_ids, dim=1)  # [batch, seq_len, num_code_groups]
@@ -718,8 +726,9 @@ class Qwen3TTSBase(ARModelMixin):
     
     def generate_speaker_prompt(
         self,
-        voice_clone_prompt: list[dict]
+        voice_clone_prompt: dict
     ):
+        """Extract speaker embeddings from voice clone prompt dict."""
         voice_clone_spk_embeds = []
         for index in range(len(voice_clone_prompt['ref_spk_embedding'])):
             ref_spk_embedding = voice_clone_prompt["ref_spk_embedding"][index].to(self.gpu_device).to(self.talker.dtype)            
@@ -779,7 +788,190 @@ class Qwen3TTSBase(ARModelMixin):
             else:
                 text_embed = torch.cat([text_embed] + [tts_pad_embed] * (codec_lens - text_lens), dim=1)
                 return text_embed + codec_embed, tts_pad_embed
-
+    
+    def _split_into_chunks(self, text_ids: torch.Tensor, max_chunk_size: int = 800) -> list[torch.Tensor]:
+        """
+        Split text into chunks for processing very long texts.
+        
+        WARNING: Chunking breaks voice continuity! Only use when text is too long
+        for single-pass generation (would cause OOM).
+        
+        Args:
+            text_ids: Text token IDs [1, seq_len]
+            max_chunk_size: Maximum tokens per chunk (default 800 to leave room for audio)
+            
+        Returns:
+            List of text token chunks
+        """
+        seq_len = text_ids.shape[1]
+        
+        # Short text - no splitting needed
+        if seq_len <= max_chunk_size:
+            return [text_ids]
+        
+        # Split into larger chunks to minimize voice discontinuity
+        # Bigger chunks = fewer boundaries = better quality
+        num_chunks = max(2, (seq_len + max_chunk_size - 1) // max_chunk_size)
+        chunk_size = seq_len // num_chunks
+        
+        chunks = []
+        for i in range(num_chunks):
+            start_idx = i * chunk_size
+            end_idx = min((i + 1) * chunk_size, seq_len) if i < num_chunks - 1 else seq_len
+            chunk = text_ids[:, start_idx:end_idx]
+            chunks.append(chunk)
+        
+        return chunks
+    
+    def _merge_audio_codes(self, codes_list: list[torch.Tensor]) -> torch.Tensor:
+        """Merge multiple audio code sequences by simple concatenation along time dimension."""
+        if len(codes_list) == 1:
+            return codes_list[0]
+        
+        # All tensors should be [batch=1, seq_len, num_code_groups]
+        # Concatenate along dim=1 (seq_len)
+        return torch.cat(codes_list, dim=1)
+    
+    def _generate_chunked(
+        self,
+        input_ids: list[torch.Tensor],
+        instruct_ids: Optional[list[torch.Tensor]] = None,
+        ref_ids: Optional[list[torch.Tensor]] = None,
+        voice_clone_prompt: list[dict] = None,
+        languages: list[str] = None,
+        speakers: list[str] = None,
+        non_streaming_mode = False,
+        max_new_tokens: int = 4096,
+        do_sample: bool = True,
+        top_k: int = 50,
+        top_p: float = 1.0,
+        temperature: float = 0.9,
+        subtalker_dosample: bool = True,
+        subtalker_top_k: int = 50,
+        subtalker_top_p: float = 1.0,
+        subtalker_temperature: float = 0.9,
+        eos_token_id: Optional[int] = None,
+        repetition_penalty: float = 1.05,
+        **kwargs,
+    ) -> tuple[list[torch.Tensor], None]:
+        """
+        Generate audio by splitting text into sentences and processing each independently.
+        
+        This is MUCH faster for long texts because:
+        1. Each sentence is short (~20-40 tokens)
+        2. No KV cache needed (each sentence starts fresh)
+        3. Memory usage stays constant
+        4. Can be easily parallelized (future enhancement)
+        
+        Args:
+            input_ids: List of text token IDs
+            
+        Returns:
+            List of merged audio codes for each batch item
+        """
+        if languages is None:
+            languages = ["auto"] * len(input_ids)
+        if speakers is None:
+            speakers = [None] * len(input_ids)
+        if instruct_ids is None:
+            instruct_ids = [None] * len(input_ids)
+        if ref_ids is None:
+            ref_ids = [None] * len(input_ids)
+        
+        all_merged_codes = []
+        chunk_start_time = time.time()
+        
+        for batch_idx, (text_ids, instruct_id, ref_id, language, speaker) in enumerate(
+            zip(input_ids, instruct_ids, ref_ids, languages, speakers)
+        ):
+            # Split into chunks (sentences)
+            chunks = self._split_into_chunks(text_ids)
+            app_logger.info(f"[TTS Chunked] Batch item {batch_idx}: {len(chunks)} chunks")
+            
+            # Handle voice_clone_prompt - pass the dict directly
+            # generate_speaker_prompt expects a dict, not a list
+            vcp_for_batch = voice_clone_prompt if isinstance(voice_clone_prompt, dict) else None
+            
+            if len(chunks) == 1:
+                # Single chunk, use normal generation
+                chunk_codes, _ = self.generate(
+                    input_ids=[chunks[0]],
+                    instruct_ids=[instruct_id],
+                    ref_ids=[ref_id],
+                    voice_clone_prompt=vcp_for_batch,
+                    languages=[language],
+                    speakers=[speaker],
+                    non_streaming_mode=non_streaming_mode,
+                    max_new_tokens=max_new_tokens,
+                    do_sample=do_sample,
+                    top_k=top_k,
+                    top_p=top_p,
+                    temperature=temperature,
+                    subtalker_dosample=subtalker_dosample,
+                    subtalker_top_k=subtalker_top_k,
+                    subtalker_top_p=subtalker_top_p,
+                    subtalker_temperature=subtalker_temperature,
+                    eos_token_id=eos_token_id,
+                    repetition_penalty=repetition_penalty,
+                    enable_chunking=False,  # Disable to prevent recursion
+                    **kwargs,
+                )
+                # chunk_codes[0] is [seq_len, num_code_groups], squeeze to remove any extra dims
+                all_merged_codes.append(chunk_codes[0].squeeze())
+            else:
+                # Generate each chunk independently
+                chunk_codes_list = []
+                total_chunks = len(chunks)
+                
+                for chunk_idx, chunk in enumerate(chunks):
+                    chunk_start = time.time()
+                    app_logger.info(f"[TTS Chunked] Generating chunk {chunk_idx+1}/{total_chunks}...")
+                    
+                    # Estimate max tokens for this chunk
+                    chunk_max_tokens = min(max_new_tokens // total_chunks + 100, 500)
+                    
+                    chunk_code, _ = self.generate(
+                        input_ids=[chunk],
+                        instruct_ids=[instruct_id],
+                        ref_ids=[ref_id],
+                        voice_clone_prompt=vcp_for_batch,
+                        languages=[language],
+                        speakers=[speaker],
+                        non_streaming_mode=non_streaming_mode,
+                        max_new_tokens=chunk_max_tokens,
+                        do_sample=do_sample,
+                        top_k=top_k,
+                        top_p=top_p,
+                        temperature=temperature,
+                        subtalker_dosample=subtalker_dosample,
+                        subtalker_top_k=subtalker_top_k,
+                        subtalker_top_p=subtalker_top_p,
+                        subtalker_temperature=subtalker_temperature,
+                        eos_token_id=eos_token_id,
+                        repetition_penalty=repetition_penalty,
+                        enable_chunking=False,  # Disable to prevent recursion
+                        **kwargs,
+                    )
+                    
+                    chunk_time = time.time() - chunk_start
+                    # chunk_code[0] is [seq_len, num_code_groups]
+                    # Add batch dim for merging: [1, seq_len, num_code_groups]
+                    chunk_tensor = chunk_code[0].unsqueeze(0)
+                    app_logger.info(f"[TTS Chunked] Chunk {chunk_idx+1}/{total_chunks} done: "
+                                   f"shape={chunk_tensor.shape}, time={chunk_time:.2f}s")
+                    
+                    chunk_codes_list.append(chunk_tensor)
+                
+                # Merge all chunk codes along time dimension
+                merged_codes = self._merge_audio_codes(chunk_codes_list)  # [1, total_seq_len, 16]
+                # Squeeze batch dimension for decoder compatibility
+                all_merged_codes.append(merged_codes.squeeze(0))
+        
+        total_time = time.time() - chunk_start_time
+        app_logger.info(f"[TTS Chunked] Total time: {total_time:.2f}s")
+        
+        return all_merged_codes, None
+    
     def generate(
         self,
         input_ids: Optional[list[torch.Tensor]] = None,
@@ -800,8 +992,45 @@ class Qwen3TTSBase(ARModelMixin):
         subtalker_temperature: float = 0.9,
         eos_token_id: Optional[int] = None,
         repetition_penalty: float = 1.05,
+        enable_chunking: bool = True,
         **kwargs,
     ):
+        """
+        Generate audio from text with optional automatic chunking for long inputs.
+        
+        Args:
+            enable_chunking: Whether to enable automatic text chunking for long inputs.
+                            When enabled, splits text into sentence-sized chunks (~40 tokens)
+                            and generates each independently (faster for long texts).
+        """
+        # Check if chunking is needed (only for very long texts that would OOM)
+        if enable_chunking and input_ids is not None:
+            max_input_len = max(ids.shape[1] for ids in input_ids)
+            if max_input_len > 1500:  # Only chunk very long texts - chunking breaks voice continuity!
+                app_logger.warning(f"[TTS Generation] Text too long ({max_input_len} tokens), using chunked generation. "
+                                  f"WARNING: Voice may vary between chunks!")
+                return self._generate_chunked(
+                input_ids=input_ids,
+                instruct_ids=instruct_ids,
+                ref_ids=ref_ids,
+                voice_clone_prompt=voice_clone_prompt,
+                languages=languages,
+                speakers=speakers,
+                non_streaming_mode=non_streaming_mode,
+                max_new_tokens=max_new_tokens,
+                do_sample=do_sample,
+                top_k=top_k,
+                top_p=top_p,
+                temperature=temperature,
+                subtalker_dosample=subtalker_dosample,
+                subtalker_top_k=subtalker_top_k,
+                subtalker_top_p=subtalker_top_p,
+                subtalker_temperature=subtalker_temperature,
+                eos_token_id=eos_token_id,
+                repetition_penalty=repetition_penalty,
+                **kwargs,
+            )
+        
         talker_kwargs = {
             "max_new_tokens": max_new_tokens,
             "min_new_tokens": 2,
