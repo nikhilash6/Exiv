@@ -31,8 +31,11 @@ from exiv.server.app_core import App, AppOutputType, Input, Output
 from exiv.utils.enum import ExtendedEnum
 
 from exiv.components.models.qwen3_tts.constructor import get_qwen3_tts_instance
-from exiv.components.models.qwen3_tts.inference.qwen3_tts_model import DEFAULT_QWEN3_CONFIG, Qwen3TTSPipeline
 from exiv.components.models.qwen3_tts import (
+    VoiceClonePromptItem,
+    get_voice_ref,
+    tokenizer_decode,
+    DEFAULT_QWEN3_CONFIG,
     Qwen3TTSSpeaker,
     Qwen3TTSLanguage,
     SPEAKER_INFO,
@@ -45,27 +48,27 @@ wav_manager = get_wav_manager()
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Device: {device}")
 
-_pipeline = None
+_model = None
 _text_tokenizer = None
 
 
-def _get_pipeline(model_path=None):
-    """Get or initialize the TTS pipeline."""
+def _get_model(model_path=None):
+    """Get or initialize the TTS model."""
     if not model_path:
         model_path = "qwen3_tts_12hz_base_1_7b.safetensors"
-    global _pipeline, _text_tokenizer
-    if _pipeline is None:
+    global _model, _text_tokenizer
+    if _model is None:
         raw_model, text_tokenizer, _ = get_qwen3_tts_instance(
             model_path=model_path,
             force_dtype=torch.float16 if device == "cuda" else torch.float32
         )
         _text_tokenizer = text_tokenizer
-        _pipeline = Qwen3TTSPipeline(model=raw_model, processor=text_tokenizer)
-        _pipeline.model.to(device)
-        if _pipeline.model.speech_tokenizer is not None:
-            _pipeline.model.speech_tokenizer.model.to(device)
-            _pipeline.model.speech_tokenizer.device = device
-    return _pipeline, _text_tokenizer
+        _model = raw_model
+        _model.to(device)
+        if _model.speech_tokenizer is not None:
+            _model.speech_tokenizer.model.to(device)
+            _model.speech_tokenizer.device = device
+    return _model, _text_tokenizer
 
 
 # =============================================================================
@@ -201,8 +204,7 @@ def handle_generate(
     
     print(f"Text: {text}")
     
-    # Get pipeline
-    pipeline, text_tokenizer = _get_pipeline()
+    model, text_tokenizer = _get_model()
     
     # Tokenize input text
     assistant_text = text_tokenizer.build_assistant_text(text)
@@ -211,7 +213,8 @@ def handle_generate(
     input_id = input_id if input_id.dim() > 1 else input_id.unsqueeze(0)
     
     # Get voice reference
-    voice_clone_prompt_dict, ref_ids = pipeline.get_voice_ref(None, ref_path, ref_text)
+    voice_clone_prompt, ref_ids = get_voice_ref(model, text_tokenizer, None, ref_path, ref_text)
+    voice_clone_prompt_dict = VoiceClonePromptItem.to_batched_dict(voice_clone_prompt)
     
     # formula: words / 2.5 words/sec * 12.5 tokens/sec * 1.5 margin
     word_count = len(text.split())
@@ -221,7 +224,7 @@ def handle_generate(
     generation_config['max_new_tokens'] = calculated_max_tokens
     
     # Generate
-    talker_codes_list, _ = pipeline.model.generate(
+    talker_codes_list, _ = model.generate(
         input_ids=[input_id],
         ref_ids=ref_ids,
         voice_clone_prompt=voice_clone_prompt_dict,
@@ -234,7 +237,7 @@ def handle_generate(
     )
     
     # Decode
-    wavs, sample_rate = pipeline.tokenizer_decode(talker_codes_list, voice_clone_prompt_dict)
+    wavs, sample_rate = tokenizer_decode(model, talker_codes_list, voice_clone_prompt_dict)
     
     # Save output
     audio_tensor = torch.from_numpy(wavs[0]).unsqueeze(0).unsqueeze(0)

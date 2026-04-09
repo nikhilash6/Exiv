@@ -44,19 +44,12 @@ def chunk_text_by_sentences(
         sentence_tokens = estimate_tokens(sentence)
         
         # handle case where single sentence exceeds max_token_chunk_size
-        if sentence_tokens > max_token_chunk_size:
-            # first, flush any accumulated sentences
-            if current_chunk:
-                chunks.append(" ".join(current_chunk))
-                current_chunk = []
-                current_token_count = 0
-            
-            # split this long sentence by words
-            sentence_chunks = _chunk_sentence_by_words(
-                sentence, max_token_chunk_size, estimate_tokens
-            )
-            chunks.extend(sentence_chunks)
-            continue
+        # just let the complete sentence through as its own chunk
+        if sentence_tokens > max_token_chunk_size and current_chunk:
+            # flush current chunk first
+            chunks.append(" ".join(current_chunk))
+            current_chunk = []
+            current_token_count = 0
         
         # check if adding this sentence would exceed limit
         if current_token_count + sentence_tokens > max_token_chunk_size and current_chunk:

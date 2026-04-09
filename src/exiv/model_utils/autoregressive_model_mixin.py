@@ -1,3 +1,5 @@
+import itertools
+
 import torch
 import torch.nn as nn
 
@@ -93,7 +95,6 @@ class ARModelMixin(nn.Module, metaclass=ARModuleMeta):
         """
         def original_call(*args, **kwargs):
             with torch.no_grad():
-                app_logger.debug(f"moving the inputs to {self.gpu_device} and dtype {self.dtype}")
                 new_args = tuple(cast_to(a, device=self.gpu_device, dtype=self.dtype) if torch.is_tensor(a) and idx == 0 else a for idx, a in enumerate(args))
                 new_kwargs = {k: (cast_to(v, device=self.gpu_device, dtype=self.dtype) if torch.is_tensor(v) else v) for k, v in kwargs.items()}
                 
@@ -137,7 +138,7 @@ class ARModelMixin(nn.Module, metaclass=ARModuleMeta):
     @torch.no_grad()
     def generate(
         self,
-        input_ids: Optional[torch.LongTensor] = None,
+        input_ids: Optional[torch.LongTensor] | Optional[list[torch.LongTensor]] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         max_new_tokens: int = 100,
         min_new_tokens: int = 0,
@@ -181,32 +182,33 @@ class ARModelMixin(nn.Module, metaclass=ARModuleMeta):
         Returns:
             Generated token IDs [batch, seq_len + generated]
         """
-        original_call = partial(
-            self._generate,
-            model=self,
-            input_ids=input_ids,
-            inputs_embeds=inputs_embeds,
-            max_new_tokens=max_new_tokens,
-            min_new_tokens=min_new_tokens,
-            do_sample=do_sample,
-            temperature=temperature,
-            top_k=top_k,
-            top_p=top_p,
-            repetition_penalty=repetition_penalty,
-            eos_token_id=eos_token_id,
-            pad_token_id=pad_token_id,
-            attention_mask=attention_mask,
-            logits_processors=logits_processors,
-            stopping_criteria=stopping_criteria,
-            sampler=sampler,
+
+        original_call = partial(self._generate, model=self)
+        call_kwargs = {
+            'input_ids': input_ids,
+            'inputs_embeds': inputs_embeds,
+            'max_new_tokens': max_new_tokens,
+            'min_new_tokens': min_new_tokens,
+            'do_sample': do_sample,
+            'temperature': temperature,
+            'top_k': top_k,
+            'top_p': top_p,
+            'repetition_penalty': repetition_penalty,
+            'eos_token_id': eos_token_id,
+            'pad_token_id': pad_token_id,
+            'attention_mask': attention_mask,
+            'logits_processors': logits_processors,
+            'stopping_criteria': stopping_criteria,
+            'sampler': sampler,
             **kwargs
-        )
+        }
+        
         registry = getattr(self, "hook_registry", None)
         if registry and registry.head.next_hook != registry.tail:
             wrapped_call = registry.get_wrapped_fn(original_call, location=HookLocation.AR_GENERATE.value)
-            return wrapped_call()
+            return wrapped_call(**call_kwargs)
         else:
-            return original_call()
+            return original_call(**call_kwargs)
 
     
     def _generate(

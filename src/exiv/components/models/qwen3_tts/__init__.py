@@ -2,7 +2,18 @@
 qwen_tts: Qwen-TTS package.
 """
 
-from .inference.qwen3_tts_model import Qwen3TTSPipeline, VoiceClonePromptItem
+from .utils import (
+    VoiceClonePromptItem,
+    create_voice_clone_prompt,
+    get_voice_ref,
+    tokenizer_decode,
+    merge_generate_kwargs,
+    load_audio_to_np,
+    normalize_audio_inputs,
+    tokenize_text,
+    tokenize_texts,
+    DEFAULT_QWEN3_CONFIG,
+)
 from .enums import (
     Qwen3TTSSpeaker,
     Qwen3TTSLanguage,
@@ -15,8 +26,18 @@ from .enums import (
 )
 
 __all__ = [
-    "Qwen3TTSPipeline",
+    # Utils
     "VoiceClonePromptItem",
+    "create_voice_clone_prompt",
+    "get_voice_ref",
+    "tokenizer_decode",
+    "merge_generate_kwargs",
+    "load_audio_to_np",
+    "normalize_audio_inputs",
+    "tokenize_text",
+    "tokenize_texts",
+    "DEFAULT_QWEN3_CONFIG",
+    # Enums
     "Qwen3TTSSpeaker",
     "Qwen3TTSLanguage",
     "SPEAKER_INFO",

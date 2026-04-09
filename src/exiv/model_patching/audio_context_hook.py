@@ -1,248 +1,199 @@
 import torch
 import torch.nn as nn
-
+from functools import partial
 import math
-from typing import Optional, Dict, Any, Callable, Tuple
+
+from typing import Optional, Dict, Any, Callable, List
 
 from .hook_registry import FeatureType, HookLocation, HookType, ModelHook, HookRegistry, register_hook_method
 from ..utils.logging import app_logger
-from ..utils.text_chunking import chunk_text_by_sentences
-
-
-# audio tokens per text token (empirical estimate for TTS)
-# ~12.5 audio tok/s at ~2.5 words/s = ~5 audio tokens per word
-# with BPE ~1.3 tokens per word, so ~4 audio tokens per text token
-AUDIO_TOKENS_PER_TEXT_TOKEN = 4.0
-MAX_AUDIO_TOKENS_MARGIN = 1.5
 
 
 class AudioContextHook(ModelHook):
     
-    DEFAULT_OVERLAP_LENGTH = 50     # number of audio tokens overlapping
-    DEFAULT_MAX_CHUNK_SIZE = 700    # max text tokens per chunk
+    DEFAULT_MAX_CHUNK_SIZE = 100
     
-    def __init__(
-        self,
-        max_chunk_size: int = DEFAULT_MAX_CHUNK_SIZE,
-        prefix_length: int = DEFAULT_OVERLAP_LENGTH
-    ):
+    def __init__(self, max_chunk_size: int = DEFAULT_MAX_CHUNK_SIZE):
         super().__init__()
         self.hook_type = HookType.AUDIO_KV_MIXING.value
         self.hook_location = HookLocation.AR_GENERATE.value
         self.max_chunk_size = max_chunk_size
-        self.prefix_length = prefix_length
         
-        # Store prefix audio token IDs (not embeddings) for next chunk
-        self._prefix_audio_ids: Optional[torch.LongTensor] = None
-        self._all_outputs: list[torch.LongTensor] = []
+    def _uniform_chunk_input_ids(self, input_ids: torch.Tensor, max_chunk_size: int) -> List[torch.Tensor]:
+        """
+        uniformly split input_ids tensor into chunks along the sequence dimension.
         
-        # Track cumulative position offset for continuity
-        self._position_offset: int = 0
-        
-    def execute(
-        self,
-        model: 'ARModelMixin',
-        original_fn: Callable,      # this is the 'generate' method
-        **kwargs
-    ) -> torch.LongTensor:
-        inputs_embeds = kwargs.get('inputs_embeds', None)
-        if inputs_embeds is None:
-            app_logger.warning("AudioContextHook: No inputs_embeds found, using single-chunk generation")
-            return original_fn(**kwargs)
-        
-        seq_len = inputs_embeds.shape[1]
-        
-        if seq_len <= self.max_chunk_size:
-            app_logger.debug(f"AudioContextHook: Input length {seq_len} <= {self.max_chunk_size}, no chunking needed")
-            return original_fn(**kwargs)
-        
-        # Get text for sentence-aware chunking if available
-        text = kwargs.get('text', None)
-        
-        # Split into chunks with their estimated token counts
-        chunks_with_tokens = self._split_into_chunks(inputs_embeds, text)
-        app_logger.info(f"AudioContextHook: Splitting input of {seq_len} tokens into {len(chunks_with_tokens)} chunks")
-        
-        self._prefix_audio_ids = None
-        self._all_outputs = []
-        self._position_offset = 0
-        
-        for i, (chunk_embeds, chunk_text_tokens) in enumerate(chunks_with_tokens):
-            is_first = (i == 0)
-            is_last = (i == len(chunks_with_tokens) - 1)
+        args:
+            input_ids: input token ids tensor [batch, seq_len]
+            max_chunk_size: maximum size per chunk
             
-            # Calculate max_new_tokens for this chunk based on text length
-            # This ensures EOS works correctly - model stops when text is fully spoken
-            estimated_audio_tokens = int(chunk_text_tokens * AUDIO_TOKENS_PER_TEXT_TOKEN * MAX_AUDIO_TOKENS_MARGIN)
-            # Add prefix length since we're prepending audio context
-            if not is_first:
-                estimated_audio_tokens += self.prefix_length
-            
-            app_logger.info(f"AudioContextHook: Generating chunk {i+1}/{len(chunks_with_tokens)} "
-                           f"({chunk_embeds.shape[1]} text tokens, ~{estimated_audio_tokens} max audio tokens)")
-            
-            chunk_output = self._generate_chunk(
-                model, original_fn, chunk_embeds, kwargs, is_first, is_last, 
-                max_new_tokens=estimated_audio_tokens
-            )
-            
-            # Store output (excluding prefix audio which is from previous chunk)
-            new_audio = self._extract_new_audio(chunk_output, is_first)
-            self._all_outputs.append(new_audio)
-            
-            if not is_last:
-                self._prefix_audio_ids = chunk_output[:, -self.prefix_length:].detach()
-                self._position_offset += new_audio.shape[1]
-                app_logger.debug(f"AudioContextHook: Extracted {self.prefix_length} prefix tokens for next chunk, position_offset={self._position_offset}")
+        returns:
+            list of input_ids tensors
+        """
+        batch_size, seq_len = input_ids.shape
         
-        # Concatenate all outputs
-        final_output = torch.cat(self._all_outputs, dim=1)
-        app_logger.info(f"AudioContextHook: Generated {final_output.shape[1]} total tokens across {len(chunks_with_tokens)} chunks")
+        if seq_len <= max_chunk_size:
+            return [input_ids]
         
-        # Convert from [batch, seq_len, num_code_groups] to list of [seq_len, num_code_groups]
-        # This matches the expected format of the pipeline's tokenizer_decode
-        talker_codes_list = [final_output[i] for i in range(final_output.shape[0])]
-        
-        return talker_codes_list
-    
-    def _split_into_chunks(self, input_tensor: torch.Tensor) -> list[torch.Tensor]:
-        """Split input into roughly equal chunks."""
-        seq_len = input_tensor.shape[1]
-        
-        # Calculate number of chunks
-        num_chunks = max(2, math.ceil(seq_len / self.max_chunk_size))
-        chunk_size = seq_len // num_chunks
+        # calculate number of chunks needed
+        num_chunks = math.ceil(seq_len / max_chunk_size)
+        # try to make chunks roughly equal size
+        base_chunk_size = seq_len // num_chunks
+        remainder = seq_len % num_chunks
         
         chunks = []
+        start_idx = 0
+        
         for i in range(num_chunks):
-            start_idx = i * chunk_size
-            if i == num_chunks - 1:
-                end_idx = seq_len
-            else:
-                end_idx = (i + 1) * chunk_size
+            # distribute remainder across first chunks
+            chunk_size = base_chunk_size + (1 if i < remainder else 0)
+            end_idx = start_idx + chunk_size
+            chunks.append(input_ids[:, start_idx:end_idx])
+            start_idx = end_idx
             
-            chunk = input_tensor[:, start_idx:end_idx]
-            chunks.append(chunk)
-        
         return chunks
-    
-    def _generate_chunk(
-        self,
-        model: nn.Module,
-        generate_fn: Callable,
-        chunk_embeds: torch.Tensor,
-        kwargs: Dict,
-        is_first: bool,
-        is_last: bool
-    ) -> torch.LongTensor:
-        """Generate audio for a single text chunk with proper MROPE handling."""
-        chunk_kwargs = dict(kwargs)
         
-        batch_size = chunk_embeds.shape[0]
-        chunk_len = chunk_embeds.shape[1]
-        device = chunk_embeds.device
+    def execute(self, model: 'ARModelMixin', original_fn: Callable, **kwargs) -> torch.LongTensor:
+        """
+        handle audio generation with optional chunking support.
         
-        # If we have prefix audio from previous chunk, we need to:
-        # 1. Get embeddings for prefix audio tokens
-        # 2. Concatenate with current chunk embeddings
-        # 3. Create proper attention mask and position_ids for MROPE
-        if self._prefix_audio_ids is not None:
-            prefix_len = self._prefix_audio_ids.shape[1]
-            total_len = prefix_len + chunk_len
-            
-            # Get embeddings for prefix audio
-            # Try different possible locations for the embedding layer
-            embed_layer = None
-            if hasattr(model, 'embed_tokens'):
-                embed_layer = model.embed_tokens
-            elif hasattr(model, 'get_input_embeddings'):
-                embed_layer = model.get_input_embeddings()
-            elif hasattr(model, 'model'):
-                if hasattr(model.model, 'embed_tokens'):
-                    embed_layer = model.model.embed_tokens
-                elif hasattr(model.model, 'get_input_embeddings'):
-                    embed_layer = model.model.get_input_embeddings()
-            
-            if embed_layer is None:
-                raise RuntimeError("Could not find embedding layer in model")
-            
-            with torch.no_grad():
-                # Audio tokens may have shape [batch, seq_len, num_code_groups]
-                # We only use the first codebook for the prefix continuation
-                if self._prefix_audio_ids.dim() == 3:
-                    # [batch, seq_len, num_code_groups] -> use first codebook
-                    prefix_ids_2d = self._prefix_audio_ids[:, :, 0].to(device)
-                else:
-                    # [batch, seq_len] 
-                    prefix_ids_2d = self._prefix_audio_ids.to(device)
+        behavior based on chunking_enabled and input_ids:
+        - chunking_enabled=true + list of input_ids -> process each chunk, concatenate
+        - chunking_enabled=true + single input_ids -> auto-chunk with warning, process, concatenate
+        - chunking_enabled=false + list of input_ids -> merge input_ids, process as single
+        - chunking_enabled=false + single input_ids -> pass through (default behavior)
+        """
+        input_ids = kwargs.get('input_ids')
+        chunking_enabled = getattr(model, '_chunking_enabled', True)
+        
+        # case 1: chunking_enabled = true
+        if chunking_enabled:
+            # case 1a: already chunked (list of tensors)
+            if isinstance(input_ids, list):
+                if len(input_ids) == 1:
+                    # single chunk, wrap in list as _generate expects list[torch.Tensor]
+                    kwargs['input_ids'] = input_ids
+                    return original_fn(**kwargs)
                 
-                prefix_embeds = embed_layer(prefix_ids_2d)
+                app_logger.info(f"AudioContextHook: Processing {len(input_ids)} independent chunks")
+                all_outputs = []
+                
+                for i, chunk_ids in enumerate(input_ids):
+                    app_logger.info(f"AudioContextHook: Chunk {i+1}/{len(input_ids)} ({chunk_ids.shape[1]} tokens)")
+                    
+                    chunk_kwargs = dict(kwargs)
+                    chunk_kwargs['input_ids'] = chunk_ids
+                    
+                    # generate independently
+                    chunk_output = self._generate_chunk(model, original_fn, chunk_kwargs)
+                    all_outputs.append(chunk_output[0][0])  # extract tensor from tuple (and from list)
+                
+                # concatenate outputs along sequence dimension (dim=0 for talker codes)
+                final_output = torch.cat(all_outputs, dim=0)
+                app_logger.info(f"AudioContextHook: Final output {final_output.shape[0]} tokens")
+                
+                # return as tuple (talker_codes_list, _) matching model.generate() format
+                return ([final_output], None)
             
-            # Concatenate prefix + current chunk
-            combined_embeds = torch.cat([prefix_embeds, chunk_embeds], dim=1)
-            chunk_kwargs['inputs_embeds'] = combined_embeds
-            
-            # Create attention mask: all 1s since all tokens are valid
-            chunk_kwargs['attention_mask'] = torch.ones(
-                (batch_size, total_len),
-                dtype=torch.int64,
-                device=device
-            )
-            
-            # For MROPE, position_ids should be [3, batch, seq_len]
-            # We need continuous positions across chunks
-            # Create position_ids that continue from previous chunk
-            base_positions = torch.arange(
-                self._position_offset, 
-                self._position_offset + total_len,
-                device=device
-            )
-            # Expand to [3, batch, seq_len] for MROPE
-            position_ids = base_positions.unsqueeze(0).unsqueeze(0).expand(3, batch_size, -1)
-            chunk_kwargs['position_ids'] = position_ids
-            
-            # Clear cache_position to use our position_ids
-            if 'cache_position' in chunk_kwargs:
-                chunk_kwargs['cache_position'] = None
-            
-            app_logger.debug(f"Chunk with prefix: prefix_len={prefix_len}, chunk_len={chunk_len}, total_len={total_len}, position_offset={self._position_offset}")
-        else:
-            chunk_kwargs['inputs_embeds'] = chunk_embeds
-            chunk_kwargs['attention_mask'] = torch.ones(
-                (batch_size, chunk_len),
-                dtype=torch.int64,
-                device=device
-            )
-            
-            # let model compute position_ids for first chunk
-            if 'position_ids' in chunk_kwargs:
-                del chunk_kwargs['position_ids']
-            if 'cache_position' in chunk_kwargs:
-                chunk_kwargs['cache_position'] = None
+            # case 1b: not chunked (single tensor) - auto-chunk with warning
+            elif torch.is_tensor(input_ids):
+                if input_ids.shape[1] > self.max_chunk_size:
+                    app_logger.warning(
+                        f"AudioContextHook: Auto-chunking single tensor of size {input_ids.shape[1]} "
+                        f"into chunks of max size {self.max_chunk_size}. "
+                        f"This will NOT be exactly sentence-wise split and can lead to unexpected outputs. "
+                        f"Consider pre-chunking your input using sentence boundaries."
+                    )
+                    
+                    chunks = self._uniform_chunk_input_ids(input_ids, self.max_chunk_size)
+                    app_logger.info(f"AudioContextHook: Auto-created {len(chunks)} chunks")
+                    
+                    all_outputs = []
+                    for i, chunk_ids in enumerate(chunks):
+                        app_logger.info(f"AudioContextHook: Auto-chunk {i+1}/{len(chunks)} ({chunk_ids.shape[1]} tokens)")
+                        
+                        chunk_kwargs = dict(kwargs)
+                        chunk_kwargs['input_ids'] = chunk_ids
+                        
+                        chunk_output = self._generate_chunk(model, original_fn, chunk_kwargs)
+                        all_outputs.append(chunk_output[0][0])  # extract tensor from tuple (and from list)
+                    
+                    # concatenate outputs along sequence dimension (dim=0 for talker codes)
+                    final_output = torch.cat(all_outputs, dim=0)
+                    app_logger.info(f"AudioContextHook: Final output {final_output.shape[0]} tokens")
+                    
+                    # return as tuple (talker_codes_list, _) matching model.generate() format
+                    return ([final_output], None)
+                else:
+                    # single tensor smaller than max_chunk_size, pass through
+                    return original_fn(**kwargs)
+            else:
+                # no input_ids provided, pass through
+                return original_fn(**kwargs)
         
-        # Reset rope_deltas on model to ensure fresh computation
+        # case 2: chunking_enabled = false
+        else:
+            # if received chunked input_ids, merge them first
+            if isinstance(input_ids, list):
+                if len(input_ids) == 1:
+                    # keep as list, _generate expects list[torch.Tensor]
+                    kwargs['input_ids'] = input_ids
+                else:
+                    # merge along sequence dimension (dim=1)
+                    merged_ids = torch.cat(input_ids, dim=1)
+                    app_logger.info(f"AudioContextHook: Merged {len(input_ids)} chunks into single tensor of size {merged_ids.shape[1]}")
+                    kwargs['input_ids'] = merged_ids
+                
+                # clear position-related state for merged input
+                if 'position_ids' in kwargs:
+                    del kwargs['position_ids']
+                if 'cache_position' in kwargs:
+                    kwargs['cache_position'] = None
+                if 'past_key_values' in kwargs:
+                    kwargs['past_key_values'] = None
+                if hasattr(model, 'rope_deltas'):
+                    model.rope_deltas = None
+                
+                return original_fn(**kwargs)
+            else:
+                # already single tensor or none, pass through
+                return original_fn(**kwargs)
+    
+    def _generate_chunk(self, model: nn.Module, generate_fn: Callable, chunk_kwargs: Dict) -> torch.LongTensor:
+        """generate a single chunk with fresh state."""
+        # ensure input_ids is 2D [batch, seq_len]
+        if chunk_kwargs['input_ids'].dim() == 1:
+            chunk_kwargs['input_ids'] = chunk_kwargs['input_ids'].unsqueeze(0)
+        
+        # wrap in list as model expects iterable of sequences
+        chunk_kwargs['input_ids'] = [chunk_kwargs['input_ids']]
+        
+        batch_size = chunk_kwargs['input_ids'][0].shape[0]
+        chunk_len = chunk_kwargs['input_ids'][0].shape[1]
+        device = chunk_kwargs['input_ids'][0].device
+        
+        chunk_kwargs['attention_mask'] = torch.ones((batch_size, chunk_len), dtype=torch.int64, device=device)
+        
+        # clear position-related state
+        if 'position_ids' in chunk_kwargs:
+            del chunk_kwargs['position_ids']
+        if 'cache_position' in chunk_kwargs:
+            chunk_kwargs['cache_position'] = None
+        if 'past_key_values' in chunk_kwargs:
+            chunk_kwargs['past_key_values'] = None
         if hasattr(model, 'rope_deltas'):
             model.rope_deltas = None
         
-        # Clear any past_key_values to start fresh for each chunk
-        if 'past_key_values' in chunk_kwargs:
-            chunk_kwargs['past_key_values'] = None
+        # handle partial functions
+        if isinstance(generate_fn, partial):
+            new_keywords = dict(generate_fn.keywords) if generate_fn.keywords else {}
+            new_keywords.pop('inputs_embeds', None)
+            new_keywords.pop('attention_mask', None)
+            new_keywords.pop('input_ids', None)
+            new_partial = partial(generate_fn.func, *generate_fn.args, **new_keywords)
+            return new_partial(**chunk_kwargs)
         
-        # Call the model's _generate method
-        output = generate_fn(**chunk_kwargs)
-        
-        return output
-    
-    def _extract_new_audio(
-        self,
-        chunk_output: torch.LongTensor,
-        is_first: bool
-    ) -> torch.LongTensor:
-        """Extract newly generated audio, excluding prefix from previous chunk."""
-        if is_first or self._prefix_audio_ids is None: return chunk_output
-        else:
-            prefix_len = self._prefix_audio_ids.shape[1]
-            return chunk_output[:, prefix_len:]
+        return generate_fn(**chunk_kwargs)
 
 
 def remove_audio_context(model: 'ARModelMixin'):
@@ -250,12 +201,8 @@ def remove_audio_context(model: 'ARModelMixin'):
     
 
 @register_hook_method(FeatureType.AUDIO_CONTEXT_BLENDING.value)
-def enable_audio_context(
-    model: 'ARModelMixin',
-    max_chunk_size: int = AudioContextHook.DEFAULT_MAX_CHUNK_SIZE,
-    prefix_length: int = AudioContextHook.DEFAULT_OVERLAP_LENGTH
-) -> AudioContextHook:
-    hook = AudioContextHook(max_chunk_size=max_chunk_size, prefix_length=prefix_length)
-    # Apply hook to 'generate' method to intercept full generation (not individual forward steps)
-    HookRegistry.apply_hook_to_module(model, hook, method_name='generate')
+def enable_audio_context(model: 'ARModelMixin', max_chunk_size: int = AudioContextHook.DEFAULT_MAX_CHUNK_SIZE) -> AudioContextHook:
+    hook = AudioContextHook(max_chunk_size=max_chunk_size)
+    registry = HookRegistry.get_hook_registry(model)
+    registry.register_hook(hook)
     return hook

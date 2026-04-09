@@ -16,6 +16,8 @@ import argparse
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+from exiv.utils.text_chunking import chunk_text_by_sentences
+
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -23,8 +25,11 @@ from exiv.server.app_core import App, AppOutputType, Input, Output
 from exiv.utils.enum import ExtendedEnum
 
 from exiv.components.models.qwen3_tts.constructor import get_qwen3_tts_instance
-from exiv.components.models.qwen3_tts.inference.qwen3_tts_model import DEFAULT_QWEN3_CONFIG, Qwen3TTSPipeline
 from exiv.components.models.qwen3_tts import (
+    VoiceClonePromptItem,
+    get_voice_ref,
+    tokenizer_decode,
+    DEFAULT_QWEN3_CONFIG,
     Qwen3TTSSpeaker,
     Qwen3TTSLanguage,
     SPEAKER_INFO,
@@ -40,13 +45,15 @@ wav_manager = get_wav_manager()
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Device: {device}")
 
-_pipeline = None
+default_text = "The last Moon-Tender of Aethyria climbed the glass mountain at twilight, her ladder of braided starlight slung across one shoulder. Lyra had inherited the position when her grandmother's hands grew too spotted and trembling to polish the lunar surface—a duty passed down through generations that the modern world had forgotten, then dismissed as fairy tale. Tonight was the Waning, the most dangerous phase. She reached the summit where the moon sat lodged in a crater of its own making, no longer distant and celestial but close enough to touch, pale and pitted like ancient bone. It hummed, as it always did, a frequency that vibrated in her teeth and behind her eyes. The moon was not a rock, she had learned as a child, but a *repository*. Every dream deferred, every secret whispered at midnight, every spell cast in desperation—the moon absorbed them all, storing them in its hollows like rainwater in stone crevices. But repositories can overflow. Lyra unrolled her ladder and began to climb the curved face. The silver dust there coated her fingers immediately, cold and slightly greasy, the residue of ten thousand unspoken confessions. She reached the first fissure—a dark line bisecting the Sea of Tranquility—and dipped her brush into the jar at her hip. The ink within was distilled from her own breath and morning dew, the only solvent gentle enough for this work. She painted along the crack, whispering the old words: *Memory to mist, Burden to breeze, Let the silver sieve Grant its release.* The fissure glowed, then exhaled. A shape emerged: the ghost of a woman's regret, coiling upward like smoke, dissipating into the stars. Lyra worked methodically, moving from crack to crater, emptying the moon of its accumulated sorrows. Each release left her trembling, for she experienced them all—the heartbreaks, the grief, the quiet desperations of sleepers she would never meet. By midnight she reached the deepest hollow, the Mare Crisium, where the darkest magic..."
+
+_model = None
 _text_tokenizer = None
 
 
-def _get_pipeline(model_path=None, enable_voice_continuity=True, chunk_size=None):
+def _get_model(model_path=None, enable_voice_continuity=True, chunk_size=None):
     """
-    Get or initialize the TTS pipeline.
+    Get or initialize the TTS model.
     
     Args:
         model_path: Path to model weights
@@ -56,31 +63,29 @@ def _get_pipeline(model_path=None, enable_voice_continuity=True, chunk_size=None
     if not model_path:
         model_path = "qwen3_tts_12hz_base_1_7b.safetensors"
     
-    global _pipeline, _text_tokenizer
-    if _pipeline is None:
+    global _model, _text_tokenizer
+    if _model is None:
         raw_model, text_tokenizer, _ = get_qwen3_tts_instance(
             model_path=model_path,
             force_dtype=torch.float16 if device == "cuda" else torch.float32
         )
         _text_tokenizer = text_tokenizer
-        _pipeline = Qwen3TTSPipeline(model=raw_model, processor=text_tokenizer)
-        _pipeline.model.to(device)
-        if _pipeline.model.speech_tokenizer is not None:
-            _pipeline.model.speech_tokenizer.model.to(device)
-            _pipeline.model.speech_tokenizer.device = device
+        _model = raw_model
+        _model.to(device)
+        if _model.speech_tokenizer is not None:
+            _model.speech_tokenizer.model.to(device)
+            _model.speech_tokenizer.device = device
         
         # Enable AudioContextHook for voice continuity across chunks
-        # The hook must be applied to the inner talker (AR model), not the outer wrapper
-        if enable_voice_continuity and hasattr(_pipeline.model, 'talker'):
+        if enable_voice_continuity and hasattr(_model, 'talker'):
             max_chunk = chunk_size if chunk_size is not None else 700
             enable_audio_context(
-                _pipeline.model.talker,
+                _model,
                 max_chunk_size=max_chunk,  # Text tokens per chunk
-                prefix_length=50     # Audio tokens to carry over
             )
             print(f"✓ AudioContextHook enabled for voice continuity (chunk_size={max_chunk})")
     
-    return _pipeline, _text_tokenizer
+    return _model, _text_tokenizer
 
 
 def handle_generate(
@@ -143,18 +148,23 @@ def handle_generate(
     
     print(f"Text: {text[:100]}{'...' if len(text) > 100 else ''}")
     
-    # Get pipeline with hook enabled
+    # Get model with hook enabled
     chunk_size = kwargs.get('chunk_size', None)
-    pipeline, text_tokenizer = _get_pipeline(enable_voice_continuity=enable_chunking, chunk_size=chunk_size)
+    model, text_tokenizer = _get_model(enable_voice_continuity=enable_chunking, chunk_size=chunk_size)
     
     # Tokenize input text
-    assistant_text = text_tokenizer.build_assistant_text(text)
-    input_ids = text_tokenizer(text=assistant_text, return_tensors="pt", padding=True)
-    input_id = input_ids["input_ids"].to(device)
-    input_id = input_id if input_id.dim() > 1 else input_id.unsqueeze(0)
+    chunked_text = chunk_text_by_sentences(text, chunk_size)
+    input_id_list = []
+    for t in chunked_text:
+        assistant_text = text_tokenizer.build_assistant_text(t)
+        input_ids = text_tokenizer(text=assistant_text, return_tensors="pt", padding=True)
+        input_id = input_ids["input_ids"].to(device)
+        input_id = input_id if input_id.dim() > 1 else input_id.unsqueeze(0)
+        input_id_list.append(input_id)
     
     # Get voice reference
-    voice_clone_prompt_dict, ref_ids = pipeline.get_voice_ref(None, ref_path, ref_text)
+    voice_clone_prompt, ref_ids = get_voice_ref(model, text_tokenizer, None, ref_path, ref_text)
+    voice_clone_prompt_dict = VoiceClonePromptItem.to_batched_dict(voice_clone_prompt)
     
     # Calculate max tokens based on text length
     word_count = len(text.split())
@@ -165,8 +175,8 @@ def handle_generate(
     
     # Generate with hook handling chunking automatically
     # The hook (applied to self.talker) will split long texts and maintain voice continuity
-    talker_codes_list, _ = pipeline.model.generate(
-        input_ids=[input_id],
+    talker_codes_list, _ = model.generate(
+        input_ids=[input_id_list],
         ref_ids=ref_ids,
         voice_clone_prompt=voice_clone_prompt_dict,
         instruct_ids=[None],
@@ -177,7 +187,7 @@ def handle_generate(
     )
     
     # Decode
-    wavs, sample_rate = pipeline.tokenizer_decode(talker_codes_list, voice_clone_prompt_dict)
+    wavs, sample_rate = tokenizer_decode(model, talker_codes_list, voice_clone_prompt_dict)
     
     # Save output
     audio_tensor = torch.from_numpy(wavs[0]).unsqueeze(0).unsqueeze(0)
@@ -218,7 +228,7 @@ Examples:
         """
     )
     
-    parser.add_argument("--text", required=True, help="Text to synthesize")
+    parser.add_argument("--text", default=default_text, help="Text to synthesize")
     parser.add_argument("--ref_audio_id", help="Voice ID from registry")
     parser.add_argument("--audio_path", help="Direct path to audio file")
     parser.add_argument("--ref_text", help="Reference text (required when using audio_path)")

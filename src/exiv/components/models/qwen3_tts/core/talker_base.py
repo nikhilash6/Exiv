@@ -220,10 +220,10 @@ class Qwen3TTSTalkerDecoderLayer(nn.Module):
         return outputs
 
 # Talker base model: transformer backbone for main speech generation
-class Qwen3TTSTalkerModel(ARModelMixin):
+class Qwen3TTSTalkerModel(nn.Module):
 
     def __init__(self, config, dtype=torch.float32, **kwargs):
-        super().__init__(dtype=dtype, **kwargs)
+        super().__init__()
         self.config = config
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
@@ -363,10 +363,11 @@ class Qwen3TTSTalkerModel(ARModelMixin):
         )
 
 # generates first VQ codebook (code 0), calls subtalker for residual codes (1-15)
-class Qwen3TTSTalker(ARModelMixin):
+class Qwen3TTSTalker(nn.Module):
     def __init__(self, config: Qwen3TTSTalkerConfig, dtype=torch.float32, **kwargs):
-        super().__init__(dtype=dtype, **kwargs)
+        super().__init__()
         self.config = config
+        
         self.model = Qwen3TTSTalkerModel(config, dtype=dtype, **kwargs)
         self.vocab_size = config.vocab_size
         self.text_projection = Qwen3TTSTalkerResizeMLP(
@@ -469,54 +470,56 @@ class Qwen3TTSTalker(ARModelMixin):
 
     def generate(
         self,
-        inputs_embeds: torch.FloatTensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        trailing_text_hidden: Optional[torch.Tensor] = None,
-        tts_pad_embed: Optional[torch.Tensor] = None,
-        max_new_tokens: int = 2048,
-        min_new_tokens: int = 2,
+        input_ids: Optional[torch.LongTensor] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        max_new_tokens: int = 100,
+        min_new_tokens: int = 0,
         do_sample: bool = True,
-        temperature: float = 0.9,
-        top_k: int = 50,
+        temperature: float = 1.0,
+        top_k: int = 0,
         top_p: float = 1.0,
+        repetition_penalty: float = 1.0,
         eos_token_id: Optional[int] = None,
-        repetition_penalty: float = 1.05,
-        subtalker_dosample: bool = True,
-        subtalker_top_k: int = 50,
-        subtalker_top_p: float = 1.0,
-        subtalker_temperature: float = 0.9,
-        # optional
+        pad_token_id: Optional[int] = None,
+        attention_mask: Optional[torch.Tensor] = None,
         logits_processors: list[LogitsProcessor] | None = None,
         stopping_criteria: list[StoppingCriteria] | None = None,
         sampler: Optional[ARSampler] = None,
-        subtalker_logits_processors: list[LogitsProcessor] | None = None,
-        subtalker_sampler: Optional[ARSampler] = None,
         **kwargs,
     ) -> torch.Tensor:
+        # extract tts-specific parameters from kwargs
+        trailing_text_hidden = kwargs.pop('trailing_text_hidden', None)
+        tts_pad_embed = kwargs.pop('tts_pad_embed', None)
+        subtalker_dosample = kwargs.pop('subtalker_dosample', True)
+        subtalker_top_k = kwargs.pop('subtalker_top_k', 50)
+        subtalker_top_p = kwargs.pop('subtalker_top_p', 1.0)
+        subtalker_temperature = kwargs.pop('subtalker_temperature', 0.9)
+        subtalker_logits_processors = kwargs.pop('subtalker_logits_processors', None)
+        subtalker_sampler = kwargs.pop('subtalker_sampler', None)
         """
-        Generate codec tokens autoregressively.
+        generate codec tokens autoregressively.
         
-        This coordinates the talker (generates first codebook) with code_predictor
+        this coordinates the talker (generates first codebook) with code_predictor
         (generates residual codebooks) at each step.
         
-        Args:
-            inputs_embeds: Initial input embeddings [batch, seq_len, hidden_size]
-            attention_mask: Attention mask for initial sequence
-            trailing_text_hidden: Text embeddings to add at each step
-            tts_pad_embed: Padding embedding to use when trailing_text_hidden is exhausted
-            max_new_tokens: Maximum number of codec tokens to generate
-            min_new_tokens: Minimum tokens before allowing EOS
-            do_sample, temperature, top_k, top_p, repetition_penalty: Sampling parameters
-            subtalker_*: Parameters for code_predictor sampling
-            eos_token_id: Token ID that stops generation
-            logits_processors: Custom logits processors list for talker (overrides temp/top_k/top_p/penalty)
-            stopping_criteria: Custom stopping criteria list (overrides max_new_tokens/eos/min_new_tokens)
-            sampler: Custom sampler for talker (overrides do_sample)
-            subtalker_logits_processors: Custom logits processors list for subtalker
-            subtalker_sampler: Custom sampler for subtalker
+        args:
+            inputs_embeds: initial input embeddings [batch, seq_len, hidden_size]
+            attention_mask: attention mask for initial sequence
+            trailing_text_hidden (via kwargs): text embeddings to add at each step
+            tts_pad_embed (via kwargs): padding embedding to use when trailing_text_hidden is exhausted
+            max_new_tokens: maximum number of codec tokens to generate
+            min_new_tokens: minimum tokens before allowing eos
+            do_sample, temperature, top_k, top_p, repetition_penalty: sampling parameters
+            subtalker_* (via kwargs): parameters for code_predictor sampling
+            eos_token_id: token id that stops generation
+            logits_processors: custom logits processors list for talker (overrides temp/top_k/top_p/penalty)
+            stopping_criteria: custom stopping criteria list (overrides max_new_tokens/eos/min_new_tokens)
+            sampler: custom sampler for talker (overrides do_sample)
+            subtalker_logits_processors (via kwargs): custom logits processors list for subtalker
+            subtalker_sampler (via kwargs): custom sampler for subtalker
             
-        Returns:
-            Generated codec token IDs [batch, num_generated_tokens, num_code_groups]
+        returns:
+            generated codec token ids [batch, num_generated_tokens, num_code_groups]
         """
         batch_size = inputs_embeds.shape[0]
         device = inputs_embeds.device
@@ -691,6 +694,10 @@ class Qwen3TTSBase(ARModelMixin):
         self.tokenizer_type = self.config.tokenizer_type
         self.tts_model_size = self.config.tts_model_size
         self.tts_model_type = self.config.tts_model_type
+        
+        # enable audio context chunking hook for this talker
+        from exiv.model_patching.audio_context_hook import enable_audio_context
+        enable_audio_context(self)
     
     def load_speech_tokenizer(self, speech_tokenizer):
         self.speech_tokenizer = speech_tokenizer
@@ -731,7 +738,7 @@ class Qwen3TTSBase(ARModelMixin):
         """Extract speaker embeddings from voice clone prompt dict."""
         voice_clone_spk_embeds = []
         for index in range(len(voice_clone_prompt['ref_spk_embedding'])):
-            ref_spk_embedding = voice_clone_prompt["ref_spk_embedding"][index].to(self.gpu_device).to(self.talker.dtype)            
+            ref_spk_embedding = voice_clone_prompt["ref_spk_embedding"][index].to(self.gpu_device).to(self.dtype)            
             voice_clone_spk_embeds.append(ref_spk_embedding)
         
         return voice_clone_spk_embeds
