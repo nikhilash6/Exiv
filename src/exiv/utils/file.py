@@ -18,6 +18,17 @@ from .file_path import FilePaths
 from ..utils.common import is_ffmpeg_present
 
 
+def read_safetensors_header(model_path: str) -> dict:
+    """Read and return the JSON header of a .safetensors file (without __metadata__)."""
+    import struct, json
+    with open(model_path, "rb") as f:
+        header_size = struct.unpack("<Q", f.read(8))[0]
+        header_bytes = f.read(header_size)
+    header = json.loads(header_bytes.decode("utf-8"))
+    header.pop("__metadata__", None)
+    return header
+
+
 def create_sanitized_path(file_path):
     # make sure directory exists
     if not os.path.exists(file_path):

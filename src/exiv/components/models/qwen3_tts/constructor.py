@@ -1,3 +1,5 @@
+import os
+
 import torch
 
 from transformers import AutoTokenizer
@@ -10,9 +12,96 @@ from ....model_utils.autoregressive_model_mixin import ARModelArchConfig
 from ....components.enum import Model
 from ....config import LOADING_MODE
 from ....model_utils.helper_methods import get_state_dict, move_module
-from ....utils.file import ensure_model_availability
+from ....utils.file import ensure_model_availability, read_safetensors_header
 from ....utils.file_path import FilePaths
 from ....utils.logging import app_logger
+
+
+def _detect_qwen3_tts_variant(model_path: str):
+    """
+    Inspect the checkpoint to determine model variant.
+    Returns: (model_type_enum, tts_model_type, tts_model_size, speaker_enc_dim)
+    """
+    ext = os.path.splitext(model_path)[1].lower()
+    if ext in (".safetensors", ".sft"):
+        header = read_safetensors_header(model_path)
+        shapes = {k: v["shape"] for k, v in header.items()}
+    else:
+        # fallback: load state dict for .ckpt/.pt/.pth
+        sd = get_state_dict(model_path, model_type="checkpoint")
+        shapes = {k: list(v.shape) for k, v in sd.items()}
+        del sd
+
+    talker_hidden_size = None
+    for key in shapes:
+        if key.endswith("talker.model.norm.weight"):
+            talker_hidden_size = shapes[key][0]
+            break
+
+    has_speaker_encoder = any("speaker_encoder." in k for k in shapes)
+    speaker_enc_dim = None
+    if has_speaker_encoder:
+        for key in shapes:
+            if "speaker_encoder.fc.weight" in key:
+                speaker_enc_dim = shapes[key][0]
+                break
+        if speaker_enc_dim is None:
+            for key in shapes:
+                if "speaker_encoder." in key and key.endswith(".weight"):
+                    speaker_enc_dim = shapes[key][0]
+                    break
+
+    if talker_hidden_size == 1024:
+        tts_model_size = "0b6"
+        if has_speaker_encoder:
+            tts_model_type = "base"
+            model_type_enum = Model.QWEN3_TTS_BASE.value
+        else:
+            tts_model_type = "custom_voice"
+            model_type_enum = Model.QWEN3_TTS_CUSTOM_VOICE.value
+    elif talker_hidden_size == 2048:
+        tts_model_size = "1b7"
+        if has_speaker_encoder:
+            tts_model_type = "base"
+            model_type_enum = Model.QWEN3_TTS_BASE.value
+        else:
+            # 1.7B CustomVoice and VoiceDesign are architecturally identical in weights
+            # using filename as a narrow fallback for this specific case
+            path_lower = str(model_path).lower()
+            if "voice_design" in path_lower:
+                tts_model_type = "voice_design"
+                model_type_enum = Model.QWEN3_TTS_VOICE_DESIGN.value
+            elif "custom_voice" in path_lower:
+                tts_model_type = "custom_voice"
+                model_type_enum = Model.QWEN3_TTS_CUSTOM_VOICE.value
+            else:
+                # default to voice_design for backward compatibility
+                tts_model_type = "voice_design"
+                model_type_enum = Model.QWEN3_TTS_VOICE_DESIGN.value
+    else:
+        app_logger.warning(
+            f"Unrecognized talker hidden size {talker_hidden_size}, falling back to filename heuristics."
+        )
+        path_lower = str(model_path).lower()
+        if "custom_voice" in path_lower:
+            tts_model_type = "custom_voice"
+            model_type_enum = Model.QWEN3_TTS_CUSTOM_VOICE.value
+            tts_model_size = "unknown"
+        elif "base" in path_lower:
+            tts_model_type = "base"
+            model_type_enum = Model.QWEN3_TTS_BASE.value
+            tts_model_size = "unknown"
+        elif "voice_design" in path_lower:
+            tts_model_type = "voice_design"
+            model_type_enum = Model.QWEN3_TTS_VOICE_DESIGN.value
+            tts_model_size = "unknown"
+        else:
+            tts_model_type = "voice_design"
+            model_type_enum = Model.QWEN3_TTS_VOICE_DESIGN.value
+            tts_model_size = "unknown"
+
+    return model_type_enum, tts_model_type, tts_model_size, speaker_enc_dim
+
 
 def get_qwen3_tts_instance(
     model_path,
@@ -26,32 +115,20 @@ def get_qwen3_tts_instance(
     download_url = download_url if download_url else path_data.url
     model_path = ensure_model_availability(model_path, download_url)
     
-    # TODO: add proper config loading from checkpoint
     cls = Qwen3TTSBase
     dict_dtype = torch.float16
     config = Qwen3TTSConfig()
     
-    # TODO: just a temp check adding during dev, will remove it later
-    model_path_lower = str(model_path).lower()
-    if "custom_voice" in model_path_lower:
-        config.model_type = Model.QWEN3_TTS_CUSTOM_VOICE.value
-        config.tts_model_type = "custom_voice"
-        model_arch_config = ARModelArchConfig(model_type=Model.QWEN3_TTS_CUSTOM_VOICE.value)
-    elif "base" in model_path_lower:
-        config.model_type = Model.QWEN3_TTS_BASE.value
-        config.tts_model_type = "base"
-        # NOTE: base model uses larger speaker encoder (enc_dim=2048)
-        config.speaker_encoder_config.enc_dim = 2048
-        model_arch_config = ARModelArchConfig(model_type=Model.QWEN3_TTS_BASE.value)
-    elif "voice_design" in model_path_lower:
-        config.model_type = Model.QWEN3_TTS_VOICE_DESIGN.value
-        config.tts_model_type = "voice_design"
-        model_arch_config = ARModelArchConfig(model_type=Model.QWEN3_TTS_VOICE_DESIGN.value)
-    else:
-        # Default to voice_design for backward compatibility
-        config.model_type = Model.QWEN3_TTS_VOICE_DESIGN.value
-        config.tts_model_type = "voice_design"
-        model_arch_config = ARModelArchConfig(model_type=Model.QWEN3_TTS_VOICE_DESIGN.value)
+    model_type_enum, tts_model_type, tts_model_size, speaker_enc_dim = _detect_qwen3_tts_variant(model_path)
+    config.model_type = model_type_enum
+    config.tts_model_type = tts_model_type
+    config.tts_model_size = tts_model_size
+    
+    if tts_model_type == "base" and speaker_enc_dim is not None:
+        config.speaker_encoder_config.enc_dim = speaker_enc_dim
+    
+    model_arch_config = ARModelArchConfig(model_type=model_type_enum)
+    app_logger.info(f"Detected Qwen3-TTS variant: size={tts_model_size}, type={tts_model_type}")
     
     dtype = force_dtype or dict_dtype
     app_logger.info(f"Initializing {cls.__name__}...")
