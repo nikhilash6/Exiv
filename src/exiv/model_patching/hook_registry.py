@@ -32,6 +32,7 @@ class HookType(ExtendedEnum):
     # loading hooks
     EFFICIENT_MODEL_LOADER = "efficient_model_loader"
     EFFICIENT_MODULE_LOADER = "efficient_module_loader"
+    LAZY_AR_LOADER = "lazy_ar_loader"
     
     # caching hooks
     TAYLOR_SEER_MODULE_HOOK = "taylor_seer_module_hook"

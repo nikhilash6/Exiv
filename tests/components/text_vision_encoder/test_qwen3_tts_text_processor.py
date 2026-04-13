@@ -2,7 +2,7 @@ import torch
 import unittest
 from transformers import AutoTokenizer
 
-from src.exiv.components.models.qwen3_tts.core.text_prorcessor import Qwen3TTSTextProcessor
+from exiv.components.models.qwen3_tts.core.text_processor import Qwen3TTSTextProcessor
 
 class TestQwen3TextProcessor(unittest.TestCase):
     def setUp(self):

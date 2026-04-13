@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 import librosa
 import numpy as np
 import torch
+import torch.nn as nn
 from torch.nn.utils.rnn import pad_sequence
 
 from .qwen3_tts.tokenizer_config import (
@@ -39,7 +40,7 @@ AudioInput = Union[
 ]
 
 
-class Qwen3TTSTokenizer:
+class Qwen3TTSTokenizer(nn.Module):
     """
     A wrapper for Qwen3 TTS Tokenizer 12Hz with standalone loading.
 
@@ -52,10 +53,10 @@ class Qwen3TTSTokenizer:
     """
 
     def __init__(self, model_path):
+        super().__init__()
         self.config = Qwen3TTSTokenizerConfig()
         self.feature_extractor = AutoFeatureExtractor.from_pretrained(model_path)
         self.model = Qwen3TTSTokenizerModel(self.config)
-        self.device = None
 
     def _is_probably_base64(self, s: str) -> bool:
         if s.startswith("data:audio"):
@@ -200,7 +201,7 @@ class Qwen3TTSTokenizer:
             sampling_rate=int(self.feature_extractor.sampling_rate),
             return_tensors="pt",
         )
-        inputs = inputs.to(self.device).to(self.model.dtype)
+        inputs = inputs.to(next(self.model.parameters()).device).to(self.model.dtype)
 
         with torch.no_grad():
             # model.encode expects (B, T) and (B, T)
@@ -264,11 +265,11 @@ class Qwen3TTSTokenizer:
             if t.dim() == 2:
                 # single sample: (C, Q) -> (1, C, Q)
                 t = t.unsqueeze(0)
-            audio_codes_padded = t.to(self.device)
+            audio_codes_padded = t.to(next(self.model.parameters()).device)
         else:
             # List[Tensor/np]
             audio_codes_list = [_to_tensor(c, dtype=torch.long) for c in audio_codes_list]
-            audio_codes_padded = pad_sequence(audio_codes_list, batch_first=True, padding_value=-1).to(self.device)
+            audio_codes_padded = pad_sequence(audio_codes_list, batch_first=True, padding_value=-1).to(next(self.model.parameters()).device)
 
         with torch.no_grad():
             # Ensure model and inputs are on the same device

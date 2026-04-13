@@ -20,6 +20,7 @@ from ..utils.device import VRAM_DEVICE, ProcDevice
 from ..utils.logging import app_logger
 from ..quantizers.base import QuantType, Quantizer, get_quantizer
 from ..model_patching.hook_registry import HookLocation
+from ..model_patching.lazy_ar_load_hook import enable_lazy_ar_loading, LazyARLoadHook
 from ..utils.file import ensure_model_availability
 from ..components.models.common import AROutput
 
@@ -87,16 +88,36 @@ class ARModelMixin(nn.Module, metaclass=ARModuleMeta):
         self.model_path = model_path
         self.model_arch_config = None
         
+        enable_lazy_ar_loading(self)
+        
+    @staticmethod
+    def _cast_input(v, device, dtype):
+        """Recursively cast tensors inside lists/dicts to the target device/dtype."""
+        if torch.is_tensor(v):
+            return cast_to(v, device=device, dtype=dtype)
+        elif isinstance(v, list):
+            return [ARModelMixin._cast_input(x, device, dtype) for x in v]
+        elif isinstance(v, dict):
+            return {k: ARModelMixin._cast_input(x, device, dtype) for k, x in v.items()}
+        return v
+
     def __call__(self, *args, **kwargs):
         """
         Wrapper that handles device/dtype casting and hooks.
         
         Calls the actual forward() implementation.
         """
+        LazyARLoadHook.lazy_load(self)
+
         def original_call(*args, **kwargs):
             with torch.no_grad():
-                new_args = tuple(cast_to(a, device=self.gpu_device, dtype=self.dtype) if torch.is_tensor(a) and idx == 0 else a for idx, a in enumerate(args))
-                new_kwargs = {k: (cast_to(v, device=self.gpu_device, dtype=self.dtype) if torch.is_tensor(v) else v) for k, v in kwargs.items()}
+                new_args = tuple(
+                    self._cast_input(a, device=self.gpu_device, dtype=self.dtype) for a in args
+                )
+                new_kwargs = {
+                    k: self._cast_input(v, device=self.gpu_device, dtype=self.dtype)
+                    for k, v in kwargs.items()
+                }
                 
                 return super(ARModelMixin, self).__call__(*new_args, **new_kwargs)
             
@@ -202,6 +223,9 @@ class ARModelMixin(nn.Module, metaclass=ARModuleMeta):
             'sampler': sampler,
             **kwargs
         }
+        
+        # cast inputs recursively
+        call_kwargs = self._cast_input(call_kwargs, device=self.gpu_device, dtype=self.dtype)
         
         registry = getattr(self, "hook_registry", None)
         if registry and registry.head.next_hook != registry.tail:

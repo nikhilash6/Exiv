@@ -64,10 +64,6 @@ def _get_model(model_path=None):
         )
         _text_tokenizer = text_tokenizer
         _model = raw_model
-        _model.to(device)
-        if _model.speech_tokenizer is not None:
-            _model.speech_tokenizer.model.to(device)
-            _model.speech_tokenizer.device = device
     return _model, _text_tokenizer
 
 
@@ -209,7 +205,7 @@ def handle_generate(
     # Tokenize input text
     assistant_text = text_tokenizer.build_assistant_text(text)
     input_ids = text_tokenizer(text=assistant_text, return_tensors="pt", padding=True)
-    input_id = input_ids["input_ids"].to(device)
+    input_id = input_ids["input_ids"]
     input_id = input_id if input_id.dim() > 1 else input_id.unsqueeze(0)
     
     # Get voice reference

@@ -99,7 +99,7 @@ def chunk_input_ids_by_sentences(text, processor, max_token_chunk_size=30000, de
         
         # Tokenize
         input_ids = processor(text=assistant_text, return_tensors="pt", padding=True)
-        chunk_tokens = input_ids["input_ids"].to(device)
+        chunk_tokens = input_ids["input_ids"]
         chunk_tokens = chunk_tokens if chunk_tokens.dim() > 1 else chunk_tokens.unsqueeze(0)
         
         print(f"  Chunk {i+1} input_ids: shape={chunk_tokens.shape}, tokens={chunk_tokens.shape[1]}")
@@ -121,10 +121,6 @@ def test_three_sentence():
         model_path=model_path,
         force_dtype=torch.float16 if device == "cuda" else torch.float32
     )
-    model.to(device)
-    if model.speech_tokenizer is not None:
-        model.speech_tokenizer.model.to(device)
-        model.speech_tokenizer.device = device
     
     # Create chunked input_ids
     print("\n--- Chunking Text into input_ids ---")

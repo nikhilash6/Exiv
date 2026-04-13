@@ -717,6 +717,8 @@ class Qwen3TTSBase(ARModelMixin):
         return self.config.talker_config.codec_eos_token_id
     
     def extract_speaker_embedding(self, audio, sr):
+        from exiv.model_patching.lazy_ar_load_hook import LazyARLoadHook
+        LazyARLoadHook.lazy_load(self)
         assert sr == 24000, "Only support 24kHz audio"
         mels = mel_spectrogram(
             torch.from_numpy(audio).unsqueeze(0), 

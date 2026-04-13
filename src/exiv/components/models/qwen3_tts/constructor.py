@@ -4,7 +4,7 @@ from transformers import AutoTokenizer
 
 from .core.talker_base import Qwen3TTSBase
 from .core.config import Qwen3TTSConfig
-from .core.text_prorcessor import Qwen3TTSTextProcessor
+from .core.text_processor import Qwen3TTSTextProcessor
 from ...audio_encoders.qwen3_tts_tokenizer import Qwen3TTSTokenizer
 from ....model_utils.autoregressive_model_mixin import ARModelArchConfig
 from ....components.enum import Model
