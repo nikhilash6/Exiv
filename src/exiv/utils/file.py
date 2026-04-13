@@ -395,17 +395,27 @@ class MediaProcessor:
             else:
                 save_path = f"output_video_{i}.mp4"
                 save_path = get_numbered_filename(save_dir, save_path)
-                import torchvision
 
                 if debug:
                     video_formatted = MediaProcessor._draw_debug_frame_numbers(video_formatted, start_frame)
 
-                torchvision.io.write_video(
-                    save_path,
-                    video_formatted,
-                    fps=fps,
-                    options={"crf": "25"}  # 'Constant Rate Factor' for quality (lower is better)
-                )
+                # Write video using PyAV (torchvision.io.write_video is not always available)
+                import av
+                from fractions import Fraction
+                video_np = video_formatted.numpy()
+                with av.open(save_path, mode="w") as container:
+                    stream = container.add_stream("libx264", rate=fps)
+                    stream.width = video_np.shape[2]
+                    stream.height = video_np.shape[1]
+                    stream.pix_fmt = "yuv420p"
+                    stream.time_base = Fraction(1, fps)
+                    for idx, frame_np in enumerate(video_np):
+                        frame = av.VideoFrame.from_ndarray(frame_np, format="rgb24")
+                        frame.pts = idx
+                        for packet in stream.encode(frame):
+                            container.mux(packet)
+                    for packet in stream.encode():
+                        container.mux(packet)
             
             try:
                 if metadata:

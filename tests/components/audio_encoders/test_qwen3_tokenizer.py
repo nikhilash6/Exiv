@@ -5,6 +5,7 @@ from exiv.components.audio_encoders.qwen3_tts.tokenizer_config import Qwen3TTSTo
 from exiv.components.audio_encoders.qwen3_tts.tokenizer_base import Qwen3TTSTokenizerModel
 from exiv.utils.file_path import FilePaths
 from exiv.utils.file import ensure_model_availability
+from exiv.utils.device import MemoryManager
 from exiv.config import global_config
 
 
@@ -69,6 +70,12 @@ class Qwen3TokenizerTest(unittest.TestCase):
         self.assertIsNone(self.model.encoder.upsample)
         self.assertIsNone(self.model.encoder.decoder_transformer)
         self.assertIsNone(self.model.encoder.decoder)
+
+    @classmethod
+    def tearDownClass(cls):
+        del cls.model
+        MemoryManager.clear_memory()
+        super().tearDownClass()
 
 
 if __name__ == "__main__":

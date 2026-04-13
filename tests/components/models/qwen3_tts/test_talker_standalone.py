@@ -2,8 +2,8 @@ import sys
 import torch
 import unittest
 
-from src.exiv.components.models.qwen3_tts.core.config import Qwen3TTSTalkerConfig, Qwen3TTSTalkerCodePredictorConfig
-from src.exiv.components.models.qwen3_tts.core.talker_base import Qwen3TTSTalker
+from exiv.components.models.qwen3_tts.core.config import Qwen3TTSTalkerConfig, Qwen3TTSTalkerCodePredictorConfig
+from exiv.components.models.qwen3_tts.core.talker_base import Qwen3TTSTalker
 
 
 ROPE_SCALING = {

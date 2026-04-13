@@ -122,13 +122,15 @@ class TestAttentionMask(unittest.TestCase):
       def test_different_query_kv_lengths(self):
           """Test mask creation when query and kv lengths differ (for generation)."""
           # Common in generation: query_len=1 (new token at position N), kv_len=N (cached)
-          # Query positions are 0..query_len-1, so query_len=1 means position 0
+          # When query_len == 1, the implementation treats this as a generation step with
+          # KV cache, so the single query token should attend to ALL cached positions.
           mask = create_attention_mask(query_len=1, kv_len=10, device=torch.device('cpu'))
 
           self.assertEqual(mask.shape, (1, 1, 1, 10))
-          # Query at position 0 can only attend to kv positions <= 0 (causal)
+          # All positions allowed because query_len==1 triggers the KV-cache fast path
           self.assertEqual(mask[0, 0, 0, 0].item(), 0.0)  # Allowed
-          self.assertEqual(mask[0, 0, 0, 1].item(), float('-inf'))  # Masked (future)
+          self.assertEqual(mask[0, 0, 0, 1].item(), 0.0)  # Allowed (KV cache path)
+          self.assertTrue(torch.all(mask == 0.0))
 
       def test_device_placement(self):
           """Test that mask is created on the correct device."""

@@ -102,7 +102,7 @@ class VoiceWavManager:
         base_id = audio_id.rsplit('.wav', 1)[0] if audio_id.endswith('.wav') else audio_id
         actual_key = normalized if normalized in self._registry else base_id
 
-        filepath = Path(entry.get("filepath", self.wavs_dir / f"{actual_key}.wav"))
+        filepath = Path(entry.get("filepath", self.wavs_dir / f"{base_id}.wav"))
 
         if not filepath.exists():
             url = entry.get("url", "")
