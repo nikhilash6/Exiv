@@ -73,6 +73,13 @@ The fastest way to verify your installation and see Exiv in action is to run the
 python apps/simple_t2v.py --prompt "Cinematic shot of a Golden Retriever sprinting through a sunny park, 8k, motion blur."
 ```
 
+Or, if you want something lightweight and fast:
+
+```bash
+# Run Qwen3 TTS with a built-in voice
+python apps/qwen3_tts/app.py generate --ref_audio_id calm_male --text "Hello world"
+```
+
 Once the generation is complete, the path to the output video will be printed in your terminal.
 
 ## ❓ FAQs

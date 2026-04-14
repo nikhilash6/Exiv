@@ -656,6 +656,10 @@ class MimiEuclideanCodebook(nn.Module):
             self._embed = self.embed_sum / self.cluster_usage.clamp(min=self.epsilon)[:, None]
         return self._embed
 
+    def _apply(self, fn):
+        self._embed = None
+        return super()._apply(fn)
+
     @materialize_meta_buffers(
         initialized=lambda self, device: torch.tensor([True], dtype=torch.float32, device=device),
         cluster_usage=lambda self, device: torch.ones(self.codebook_size, device=device),

@@ -41,11 +41,11 @@
     "language": "English",
     "url": "https://huggingface.co/buckets/lonesamurai/sample_voices/resolve/young_male.wav"
   },
-  "r": {
+  "casual_female": {
     "url": "",
-    "filepath": "/root/exiv-private/apps/qwen3_tts/wavs/r.wav",
+    "filepath": "/root/exiv-private/apps/qwen3_tts/wavs/casual_female.wav",
     "text": "",
-    "tags": "r",
+    "tags": "cf",
     "language": "English"
   }
 }

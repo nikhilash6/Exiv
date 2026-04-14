@@ -233,7 +233,7 @@ def handle_generate(
     )
     
     # Decode
-    wavs, sample_rate = tokenizer_decode(model, talker_codes_list, voice_clone_prompt_dict)
+    wavs, sample_rate = tokenizer_decode(model, talker_codes_list, voice_clone_prompt)
     
     # Save output
     audio_tensor = torch.from_numpy(wavs[0]).unsqueeze(0).unsqueeze(0)
