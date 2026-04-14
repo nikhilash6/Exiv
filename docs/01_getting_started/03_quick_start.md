@@ -9,6 +9,12 @@ You can execute a built-in app directly after installation. Remember this will d
 python apps/simple_t2v.py --prompt "Cinematic shot of a Golden Retriever sprinting through a sunny park, 8k, motion blur."
 ```
 
+Or, if you want something lightweight and fast:
+
+```bash
+python apps/qwen3_tts/app.py generate --ref_audio_id calm_male --text "Hello world"
+```
+
 **Expected Output:**
 ```text
 /path/to/output.mp4

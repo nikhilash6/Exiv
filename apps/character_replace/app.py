@@ -36,7 +36,7 @@ def create_dwpose_video(frames, dwpose_ext, detect_body, detect_hands, detect_fa
         out_tensor = dwpose_ext.process(image=frame, detect_body=detect_body, detect_hand=detect_hands, detect_face=detect_face)
         out_frames.append(out_tensor)
     out_video = torch.stack(out_frames).permute(1, 0, 2, 3).unsqueeze(0)
-    output_paths = MediaProcessor.save_latents_to_media(out_video, media_type="video", subfolder="dwpose")
+    output_paths = MediaProcessor.save_outputs(out_video, media_type="video", subfolder="dwpose")
     return output_paths[0]
 
 def main(**params):
@@ -58,7 +58,7 @@ def main(**params):
         video_tensor, metadata = MediaProcessor.load_video(input_video, output_frames=False)
         first_frame = video_tensor[:, 0, :, :] # (C, H, W)
         preview_tensor = first_frame.unsqueeze(0).unsqueeze(2) # (1, C, 1, H, W)
-        preview_paths = MediaProcessor.save_latents_to_media(preview_tensor, media_type="image", subfolder="temp")
+        preview_paths = MediaProcessor.save_outputs(preview_tensor, media_type="image", subfolder="temp")
         
         session_id = str(uuid.uuid4())
         return {"1": {"first_frame": preview_paths[0], "session_id": session_id}}
@@ -94,7 +94,7 @@ def main(**params):
         
         preview_tensor = seg_res["preview"]
         preview_tensor = preview_tensor.unsqueeze(0).unsqueeze(2)
-        preview_paths = MediaProcessor.save_latents_to_media(preview_tensor, media_type="image", subfolder="temp")
+        preview_paths = MediaProcessor.save_outputs(preview_tensor, media_type="image", subfolder="temp")
         
         return {"1": {"preview": preview_paths[0], "session_id": session_id}}
 
@@ -144,8 +144,8 @@ def main(**params):
                         blocky_mask=True,
                         binary_mask=True,
                     )
-                    bg_video_path = MediaProcessor.save_latents_to_media(matte_res["foregrounds"], subfolder="matanyone_fg")[0]
-                    mask_video_path = MediaProcessor.save_latents_to_media(matte_res["alphas"], subfolder="matanyone_mask")[0]
+                    bg_video_path = MediaProcessor.save_outputs(matte_res["foregrounds"], subfolder="matanyone_fg")[0]
+                    mask_video_path = MediaProcessor.save_outputs(matte_res["alphas"], subfolder="matanyone_mask")[0]
 
         if input_video and (not pose_video_path or not face_video_path):
             if context: context.start_anchor("Pose Detection", steps=1)
@@ -288,7 +288,7 @@ def main(**params):
         MemoryManager.clear_memory()
         
         metadata_dict = {"positive": pos_prompt, "seed": seed, "mode": mode, "model": "Wan2.2 Animate"}
-        out_paths = MediaProcessor.save_latents_to_media(out, metadata=metadata_dict, debug=False)
+        out_paths = MediaProcessor.save_outputs(out, metadata=metadata_dict, debug=False)
         return {"1": {
             "final_video": out_paths[0],
             "fg_video": bg_video_path,

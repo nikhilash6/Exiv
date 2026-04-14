@@ -13,7 +13,6 @@ def split_module_key(module: Any, tensor_name: str) -> Tuple[Any, str]:
             raise ValueError(f"{module} has no attribute {attr}.")
     return module, final
 
-
 def get_module_from_name(module, tensor_name: str) -> Tuple[Any, str]:
     #  (model, attn.proj_out.weight) -> (model.attn.proj_out, "weight") 
     if "." in tensor_name:

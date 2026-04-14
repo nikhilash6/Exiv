@@ -1,0 +1,51 @@
+{
+  "calm_male.wav": {
+    "text": "Hello! I'm an AI assistant created to help you with various tasks. How can I assist you today?",
+    "tags": "Male, 30s, calm and soothing voice, gentle tone, professional, relaxed",
+    "language": "English",
+    "url": "https://huggingface.co/buckets/lonesamurai/sample_voices/resolve/calm_male.wav"
+  },
+  "corporate_female.wav": {
+    "text": "Hello! I'm an AI assistant created to help you with various tasks. How can I assist you today?",
+    "tags": "Female, 40s, corporate executive voice, confident, professional, clear articulation",
+    "language": "English",
+    "url": "https://huggingface.co/buckets/lonesamurai/sample_voices/resolve/corporate_female.wav"
+  },
+  "dramatic_male.wav": {
+    "text": "Hello! I'm an AI assistant created to help you with various tasks. How can I assist you today?",
+    "tags": "Male, deep dramatic voice, movie trailer style, intense and powerful",
+    "language": "English",
+    "url": "https://huggingface.co/buckets/lonesamurai/sample_voices/resolve/dramatic_male.wav"
+  },
+  "enthusiastic_male.wav": {
+    "text": "Hello! I'm an AI assistant created to help you with various tasks. How can I assist you today?",
+    "tags": "Young male, 20s, energetic YouTuber voice, enthusiastic, upbeat, friendly",
+    "language": "English",
+    "url": "https://huggingface.co/buckets/lonesamurai/sample_voices/resolve/enthusiastic_male.wav"
+  },
+  "wise_female.wav": {
+    "text": "Hello! I'm an AI assistant created to help you with various tasks. How can I assist you today?",
+    "tags": "Elderly female, wise ethereal, gentle, warm, storytelling tone",
+    "language": "English",
+    "url": "https://huggingface.co/buckets/lonesamurai/sample_voices/resolve/wise_female.wav"
+  },
+  "young_female.wav": {
+    "text": "Hello! I'm Vivian. I'm a native Chinese speaker trying to speak English. My accent might not be perfect, but I hope you can understand me!",
+    "tags": "Young female, teens, slightly higher pitch, energetic",
+    "language": "English",
+    "url": "https://huggingface.co/buckets/lonesamurai/sample_voices/resolve/young_female.wav"
+  },
+  "young_male.wav": {
+    "text": "Hello! I'm Aiden, a native English speaker from London. This is how I sound in my natural language.",
+    "tags": "Young male, teens, casual gamer voice, relaxed, friendly, slightly informal",
+    "language": "English",
+    "url": "https://huggingface.co/buckets/lonesamurai/sample_voices/resolve/young_male.wav"
+  },
+  "casual_female": {
+    "url": "",
+    "filepath": "/root/exiv-private/apps/qwen3_tts/wavs/casual_female.wav",
+    "text": "",
+    "tags": "cf",
+    "language": "English"
+  }
+}

@@ -157,7 +157,7 @@ def main(**params):
     if context: context.start_anchor("Combining", steps=1)
     final_video_tensor = torch.cat(all_segment_frames, dim=2)
     
-    output_paths = MediaProcessor.save_latents_to_media(final_video_tensor)
+    output_paths = MediaProcessor.save_outputs(final_video_tensor)
     
     wan_dit_model.to("cpu")
     del wan_dit_model, model_wrapper

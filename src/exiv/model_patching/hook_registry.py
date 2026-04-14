@@ -15,12 +15,16 @@ class FeatureType(ExtendedEnum):
     STEP_CACHING = "step_caching"
     EFFICIENT_LOADING = "efficient_loading"
     LORA = "lora"
+    AUDIO_CONTEXT_BLENDING = "audio_context_blending"
     
 class HookLocation(ExtendedEnum):
     FORWARD = "forward"                # module forward
     SAMPLER_STEP = "sampler_step"      # around compute_batched_output
     INNER_SAMPLER_STEP = "inner_sampler_step"   # inside compute_batched_output
     MODEL_RUN = "model_run"            # __call__ / the actual model call
+    PRE_LOGIT_PROCESS = "pre_logit_process"   # before applying temperature/top-k
+    AR_SAMPLER_STEP = "ar_sampler_step"       # after next token is sampled in AR loops
+    AR_GENERATE = "ar_generate"        # ar generate method
 
 class HookType(ExtendedEnum):
     GENERIC = "generic"
@@ -28,6 +32,7 @@ class HookType(ExtendedEnum):
     # loading hooks
     EFFICIENT_MODEL_LOADER = "efficient_model_loader"
     EFFICIENT_MODULE_LOADER = "efficient_module_loader"
+    LAZY_AR_LOADER = "lazy_ar_loader"
     
     # caching hooks
     TAYLOR_SEER_MODULE_HOOK = "taylor_seer_module_hook"
@@ -38,6 +43,9 @@ class HookType(ExtendedEnum):
     # sampler level hooks
     SLIDING_CONTEXT = "sliding_context"
     INPAINT_HOOK = "inpaint_hook"
+    
+    # ar hooks
+    AUDIO_KV_MIXING = "audio_kv_mixing"
     
     # debug hooks
     NAN_CHECK = "nan_check"
@@ -156,21 +164,33 @@ class HookRegistry:
         return module.hook_registry
     
     @staticmethod
-    def apply_hook_to_module(module, hook):
+    def apply_hook_to_module(module, hook, method_name: str = "forward"):
         # saves the original forward method, so it can be reverted later
-        if not hasattr(module, "_original_forward"):
-            module._original_forward = module.forward
+        original_method_name = f"_original_{method_name}"
+        if not hasattr(module, original_method_name):
+            setattr(module, original_method_name, getattr(module, method_name))
             
         registry = HookRegistry.get_hook_registry(module)
         registry.register_hook(hook)
-        module.forward = registry.get_wrapped_fn(module._original_forward, HookLocation.FORWARD.value)
+        
+        original_method = getattr(module, original_method_name)
+        wrapped_method = registry.get_wrapped_fn(original_method, hook.hook_location)
+        setattr(module, method_name, wrapped_method)
         
     @staticmethod
-    def remove_hook_from_module(module, hook_type: str):
+    def remove_hook_from_module(module, hook_type: str, method_name: str = "forward"):
         registry = HookRegistry.get_hook_registry(module)
         registry.remove_hook(hook_type)
-        if hasattr(module, "_original_forward"):
-            module.forward = registry.get_wrapped_fn(module._original_forward, HookLocation.FORWARD.value)
+        
+        original_method_name = f"_original_{method_name}"
+        if hasattr(module, original_method_name):
+            original_method = getattr(module, original_method_name)
+            hook = registry.get_hook(hook_type)
+            if hook:
+                wrapped_method = registry.get_wrapped_fn(original_method, hook.hook_location)
+                setattr(module, method_name, wrapped_method)
+            else:
+                setattr(module, method_name, original_method)
 
     def get_hook(self, hook_type: str) -> Optional[ModelHook]:
         return self.hooks_lookup.get(hook_type, None)

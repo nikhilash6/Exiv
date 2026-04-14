@@ -1,9 +1,60 @@
 import torch
+import torch.nn as nn
 from torch import Tensor
 import torch.nn.functional as F
+from typing import Optional, Tuple
 
 from ..utils.logging import app_logger
 from ..utils.device import XFORMERS_AVAILABLE, SDPA_AVAILABLE
+
+def create_attention_mask(
+      query_len: int,
+      kv_len: int,
+      device: torch.device,
+      sliding_window: int | None = None,
+      dtype: torch.dtype = None,
+  ) -> torch.Tensor:
+    """
+    creates a 4D causal attention mask of shape (1, 1, query_len, kv_len)
+    returns 0 for allowed positions, -inf for masked positions
+    
+    NOTE: When query_len == 1, this is a generation step with KV cache.
+    In this case, the query should attend to ALL positions in the KV cache,
+    not just the first position. The causal mask logic (kv_idx <= q_idx) 
+    would only allow attending to position 0 when query_len=1, which is wrong.
+    """
+    mask_dtype = dtype if dtype is not None else torch.float32
+    
+    # When query_len == 1, we're generating one token with KV cache.
+    # The query should attend to all cached positions (0 to kv_len-1).
+    if query_len == 1:
+        if sliding_window is not None and kv_len > sliding_window:
+            # Sliding window: only attend to last `sliding_window` positions
+            mask = torch.zeros(1, 1, query_len, kv_len, device=device, dtype=mask_dtype)
+            mask[:, :, :, :kv_len - sliding_window] = float('-inf')
+            return mask
+        else:
+            # Full attention to all cached positions
+            return torch.zeros(1, 1, query_len, kv_len, device=device, dtype=mask_dtype)
+    
+    # For prefill (query_len > 1), use standard causal masking
+    q_idx = torch.arange(query_len, device=device).unsqueeze(1)
+    kv_idx = torch.arange(kv_len, device=device).unsqueeze(0)
+
+    # causal: can only attend to previous positions
+    mask = kv_idx <= q_idx
+    if sliding_window is not None:
+        mask = mask & (kv_idx > q_idx - sliding_window)
+
+    return torch.where(mask, torch.tensor(0.0, dtype=mask_dtype, device=device), 
+                       torch.tensor(float('-inf'), dtype=mask_dtype, device=device)).unsqueeze(0).unsqueeze(0)
+
+def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
+    batch, num_key_value_heads, slen, head_dim = hidden_states.shape
+    if n_rep == 1:
+        return hidden_states
+    hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
+    return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
 
 def standard_attention(q, k, v, attn_mask=None):
     # q, k, v: (batch, heads, seq, dim_head)
@@ -118,3 +169,30 @@ def optimized_attention(q: Tensor, k: Tensor, v: Tensor, heads: int, mask: Tenso
 
         out = attn_fn(q, k, v, attn_bias=attn_bias)
         return out.view(b, -1, dim)
+
+# TODO: streamline later
+def eager_attention_forward(
+    module: nn.Module,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    heads: int,
+    attention_mask: Optional[torch.Tensor],
+    **kwargs,
+):
+    key_states = repeat_kv(key, module.num_key_value_groups)
+    value_states = repeat_kv(value, module.num_key_value_groups)
+    
+    # query, key_states, value_states are 4D: (batch, heads, seq_len, head_dim)
+    # optimized_attention expects 3D: (batch, seq_len, dim)
+    # Note: key/value may have different seq_len than query when using KV cache
+    b, h, s_q, d = query.shape
+    _, _, s_k, _ = key_states.shape  # key sequence length may be longer due to cache
+    _, _, s_v, _ = value_states.shape  # value should match key
+    
+    query_3d = query.transpose(1, 2).reshape(b, s_q, h * d)
+    key_3d = key_states.transpose(1, 2).reshape(b, s_k, h * d)
+    value_3d = value_states.transpose(1, 2).reshape(b, s_v, h * d)
+    
+    # TODO: check if -inf are handled properly
+    return optimized_attention(query_3d, key_3d, value_3d, heads, attention_mask)

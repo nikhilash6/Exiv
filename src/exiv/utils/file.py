@@ -18,6 +18,17 @@ from .file_path import FilePaths
 from ..utils.common import is_ffmpeg_present
 
 
+def read_safetensors_header(model_path: str) -> dict:
+    """Read and return the JSON header of a .safetensors file (without __metadata__)."""
+    import struct, json
+    with open(model_path, "rb") as f:
+        header_size = struct.unpack("<Q", f.read(8))[0]
+        header_bytes = f.read(header_size)
+    header = json.loads(header_bytes.decode("utf-8"))
+    header.pop("__metadata__", None)
+    return header
+
+
 def create_sanitized_path(file_path):
     # make sure directory exists
     if not os.path.exists(file_path):
@@ -319,15 +330,51 @@ class MediaProcessor:
         return video_formatted
 
     @staticmethod
-    def save_latents_to_media(out, metadata: Dict | None = None, subfolder: str | None = None, start_frame = 0, end_frame = None, media_type = "video", fps=16, debug: bool = False):
-        # TODO: make this a generic method, allowing saving images/audio/3d as well
+    def save_outputs(out, metadata: Dict | None = None, subfolder: str | None = None, start_frame = 0, end_frame = None, media_type = "video", fps=16, debug: bool = False):
+        # TODO: make this a generic method, refactor for better readablity
         import torch
-        video_tensor = out.sample if hasattr(out, "sample") else out
+        output_tensor = out.sample if hasattr(out, "sample") else out
+        output_paths = []
+
+        save_dir = FilePaths.get_output_directory()
+        if subfolder:
+            save_dir = os.path.join(save_dir, subfolder)
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir)
+
+        if media_type == "audio":
+            # audio_tensor expected shape: (batch, channels, samples) or (batch, samples)
+            for i, audio in enumerate(output_tensor):
+                save_path = f"output_audio_{i}.wav"
+                save_path = get_numbered_filename(save_dir, save_path)
+                import soundfile as sf
+                
+                audio_tensor = audio.cpu() if isinstance(audio, torch.Tensor) else torch.from_numpy(audio)
+                if audio_tensor.dim() == 1:
+                    audio_np = audio_tensor.numpy()
+                elif audio_tensor.dim() == 2:
+                    # (channels, samples) -> (samples, channels) for soundfile
+                    audio_np = audio_tensor.numpy().T
+                else:
+                    audio_np = audio_tensor.numpy().squeeze()
+                
+                sample_rate = metadata.get("sample_rate", 24000) if metadata else 24000
+                sf.write(save_path, audio_np, sample_rate)
+                
+                try:
+                    if metadata:
+                        MediaProcessor.save_metadata(save_path, metadata)
+                except Exception as e:
+                    from ..utils.logging import app_logger
+                    app_logger.warning(f"Unable to write metadata in {save_path}: {e}")
+                
+                rel_path = os.path.relpath(save_path, FilePaths.get_output_directory())
+                output_paths.append(rel_path)
+            return output_paths
 
         # IMPORTANT: VAE outputs should always be in [0, 1]
         # rescale to [0, 255] and cast to uint8
-        video_tensor = (video_tensor.clamp(0, 1) * 255).to(torch.uint8)
-        output_paths = []
+        video_tensor = (output_tensor.clamp(0, 1) * 255).to(torch.uint8)
         # current shape: (Batch, Channels, Time, Height, Width) -> e.g., (1, 3, 121, 512, 768)
         for i, video in enumerate(video_tensor):
             # (C, T, H, W) -> (T, H, W, C), for torchvision
@@ -337,12 +384,6 @@ class MediaProcessor:
             else:
                 video_formatted = video_formatted[start_frame:end_frame]
 
-            save_dir = FilePaths.get_output_directory()
-            if subfolder:
-                save_dir = os.path.join(save_dir, subfolder)
-                if not os.path.exists(save_dir):
-                    os.makedirs(save_dir)
-            
             if media_type == "image":
                 save_path = f"output_image_{i}.png"
                 save_path = get_numbered_filename(save_dir, save_path)
@@ -354,17 +395,27 @@ class MediaProcessor:
             else:
                 save_path = f"output_video_{i}.mp4"
                 save_path = get_numbered_filename(save_dir, save_path)
-                import torchvision
 
                 if debug:
                     video_formatted = MediaProcessor._draw_debug_frame_numbers(video_formatted, start_frame)
 
-                torchvision.io.write_video(
-                    save_path,
-                    video_formatted,
-                    fps=fps,
-                    options={"crf": "25"}  # 'Constant Rate Factor' for quality (lower is better)
-                )
+                # Write video using PyAV (torchvision.io.write_video is not always available)
+                import av
+                from fractions import Fraction
+                video_np = video_formatted.numpy()
+                with av.open(save_path, mode="w") as container:
+                    stream = container.add_stream("libx264", rate=fps)
+                    stream.width = video_np.shape[2]
+                    stream.height = video_np.shape[1]
+                    stream.pix_fmt = "yuv420p"
+                    stream.time_base = Fraction(1, fps)
+                    for idx, frame_np in enumerate(video_np):
+                        frame = av.VideoFrame.from_ndarray(frame_np, format="rgb24")
+                        frame.pts = idx
+                        for packet in stream.encode(frame):
+                            container.mux(packet)
+                    for packet in stream.encode():
+                        container.mux(packet)
             
             try:
                 if metadata:
